@@ -85,6 +85,248 @@ func TestCreateRiskHandler(t *testing.T) {
 	})
 }
 
+
+// --- Bulk Upload Risks CSV Handler Tests ---
+
+func createTestCSV(t *testing.T, content string) (multipart.File, *multipart.FileHeader, error) {
+	t.Helper()
+	var b bytes.Buffer
+	writer := multipart.NewWriter(&b)
+	part, err := writer.CreateFormFile("file", "test_risks.csv")
+	if err != nil {
+		return nil, nil, err
+	}
+	_, err = io.Copy(part, strings.NewReader(content))
+	if err != nil {
+		return nil, nil, err
+	}
+	writer.Close() // Importante para finalizar o corpo multipart
+
+	// Para simular um FormFile, precisamos de um http.Request com este corpo
+	req := httptest.NewRequest("POST", "/somepath", &b)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	err = req.ParseMultipartForm(10 << 20) // 10 MB max
+	if err != nil {
+		return nil, nil, err
+	}
+
+	file, header, err := req.FormFile("file")
+	return file, header, err
+}
+
+
+func TestBulkUploadRisksCSVHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := getRouterWithAuthenticatedContext(testUserID, testOrgID) // Assume testUserID and testOrgID from main_test_handler.go
+	router.POST("/risks/bulk-upload-csv", BulkUploadRisksCSVHandler)
+
+	t.Run("Successful bulk upload", func(t *testing.T) {
+		csvContent := `title,description,category,impact,probability
+Risk Alpha,Description for Alpha,tecnologico,Alto,Baixo
+Risk Beta,Description for Beta,operacional,Médio,Crítico`
+
+		_, fileHeader, err := createTestCSV(t, csvContent)
+		assert.NoError(t, err)
+
+		sqlMock.ExpectBegin()
+		// Esperamos duas inserções. O GORM pode fazer isso em uma única query `INSERT INTO ... VALUES (...), (...)`
+		// ou múltiplas. `Create` com uma slice geralmente tenta uma única query otimizada.
+		// A regex aqui precisa ser genérica o suficiente para cobrir a inserção de múltiplos registros.
+		// Ou podemos esperar `ExpectExec` para cada inserção se o GORM fizer individualmente dentro da tx.
+		// Para `tx.Create(&risksToCreate)`, GORM geralmente faz uma única query com múltiplos VALUES.
+		// A regex exata para múltiplos VALUES pode ser complexa.
+		// Vamos simplificar assumindo que o mock pode verificar o número de execuções ou um padrão mais genérico.
+		// Uma abordagem comum é mockar `sqlmock.AnyArg()` para os valores e verificar o número de linhas afetadas.
+		// Ou, se o driver suportar, o número de `Exec`s.
+		// Com `pq` driver e GORM, `Create(&slice)` faz uma query `INSERT ... VALUES (...), (...), ...`.
+		// O `regexp.QuoteMeta` não vai funcionar bem com isso.
+		// Vamos usar `sqlmock.New οποιοδήποτεArg()` e verificar o número de argumentos ou o resultado.
+		// No entanto, `ExpectQuery` não é usado para `INSERT` sem `RETURNING`. `ExpectExec` é mais apropriado.
+		// Se `BeforeCreate` com `RETURNING id` estivesse em jogo para cada, seria `ExpectQuery`.
+		// Como `risk.ID` é gerado antes do `Create(&risksToCreate)`, a query de Create não retorna ID.
+		sqlMock.ExpectExec(`INSERT INTO "risks"`). // Regex mais genérica
+			// WithArgs não é trivial para múltiplas inserções com uma única query.
+			// Em vez disso, vamos confiar no resultado.
+			WillReturnResult(sqlmock.NewResult(0, 2)) // 2 linhas afetadas
+		sqlMock.ExpectCommit()
+
+		// Criar o corpo da requisição multipart
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		part, err := writer.CreateFormFile("file", fileHeader.Filename)
+		assert.NoError(t, err)
+
+		// Reabrir o arquivo simulado para copiar o conteúdo para o 'part'
+		// Isso é um pouco artificial porque createTestCSV já "consumiu" o reader original.
+		// Em um teste real, você teria o arquivo e o passaria.
+		// Para este setup, vamos recriar o conteúdo do CSV para o 'part'.
+		_, err = io.Copy(part, strings.NewReader(csvContent))
+		assert.NoError(t, err)
+		writer.Close()
+
+
+		req, _ := http.NewRequest(http.MethodPost, "/risks/bulk-upload-csv", bodyBuf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var resp BulkUploadRisksResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, resp.SuccessfullyImported)
+		assert.Empty(t, resp.FailedRows)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("Missing required header", func(t *testing.T) {
+		csvContent := `title,description,category,IMPACT_MALFORMED,probability` // Impact header errado
+		_, fileHeader, err := createTestCSV(t, csvContent)
+		assert.NoError(t, err)
+
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		part, _ := writer.CreateFormFile("file", fileHeader.Filename)
+		io.Copy(part, strings.NewReader(csvContent))
+		writer.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, "/risks/bulk-upload-csv", bodyBuf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Missing required CSV header: impact")
+		// No DB interaction expected
+	})
+
+	t.Run("Empty CSV file", func(t *testing.T) {
+		csvContent := ``
+		_, fileHeader, err := createTestCSV(t, csvContent)
+		assert.NoError(t, err)
+
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		part, _ := writer.CreateFormFile("file", fileHeader.Filename)
+		io.Copy(part, strings.NewReader(csvContent))
+		writer.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, "/risks/bulk-upload-csv", bodyBuf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "CSV file is empty")
+	})
+
+	t.Run("CSV with only headers", func(t *testing.T) {
+		csvContent := `title,description,category,impact,probability`
+		_, fileHeader, err := createTestCSV(t, csvContent)
+		assert.NoError(t, err)
+
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		part, _ := writer.CreateFormFile("file", fileHeader.Filename)
+		io.Copy(part, strings.NewReader(csvContent))
+		writer.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, "/risks/bulk-upload-csv", bodyBuf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code) // OK, mas 0 importados
+		var resp BulkUploadRisksResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, resp.SuccessfullyImported)
+		assert.Empty(t, resp.FailedRows)
+	})
+
+	t.Run("CSV with some valid and some invalid rows", func(t *testing.T) {
+		csvContent := `title,description,category,impact,probability
+Risk Valid,Valid desc,tecnologico,Baixo,Médio
+,Invalid - no title,,Crítico,Alto
+Risk Valid 2,Valid desc 2,operacional,Médio,Baixo
+Risk Invalid Impact,Desc,legal,SUPER ALTO,Médio`
+		// Linha 2: OK
+		// Linha 3: Erro (title vazio)
+		// Linha 4: OK
+		// Linha 5: Erro (impact inválido)
+
+		_, fileHeader, err := createTestCSV(t, csvContent)
+		assert.NoError(t, err)
+
+		sqlMock.ExpectBegin()
+		sqlMock.ExpectExec(`INSERT INTO "risks"`).
+			WillReturnResult(sqlmock.NewResult(0, 2)) // Espera que 2 riscos sejam inseridos
+		sqlMock.ExpectCommit()
+
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		part, _ := writer.CreateFormFile("file", fileHeader.Filename)
+		io.Copy(part, strings.NewReader(csvContent))
+		writer.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, "/risks/bulk-upload-csv", bodyBuf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusMultiStatus, rr.Code, "Response: %s", rr.Body.String())
+		var resp BulkUploadRisksResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, resp.SuccessfullyImported)
+		assert.Len(t, resp.FailedRows, 2)
+		assert.Equal(t, 3, resp.FailedRows[0].LineNumber) // Linha 3 do CSV (após cabeçalho)
+		assert.Contains(t, resp.FailedRows[0].Errors[0], "title is required")
+		assert.Equal(t, 5, resp.FailedRows[1].LineNumber) // Linha 5 do CSV
+		assert.Contains(t, resp.FailedRows[1].Errors[0], "invalid impact value")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+    t.Run("Invalid category uses default", func(t *testing.T) {
+		csvContent := `title,description,category,impact,probability
+Risk Cat,Desc Cat,INVALID_CATEGORY,Alto,Baixo`
+
+		_, fileHeader, err := createTestCSV(t, csvContent)
+		assert.NoError(t, err)
+
+		sqlMock.ExpectBegin()
+        // Espera-se que o risco seja inserido com a categoria default (models.CategoryTechnological)
+		sqlMock.ExpectExec(`INSERT INTO "risks"`).
+            WithArgs(sqlmock.AnyArg(), testOrgID, "Risk Cat", "Desc Cat", string(models.CategoryTechnological), string(models.ImpactHigh), string(models.ProbabilityLow), string(models.StatusOpen), testUserID, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(1, 1)) // Supondo que ID é o primeiro campo, e 1 linha afetada
+		sqlMock.ExpectCommit()
+
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		part, _ := writer.CreateFormFile("file", fileHeader.Filename)
+		io.Copy(part, strings.NewReader(csvContent))
+		writer.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, "/risks/bulk-upload-csv", bodyBuf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+        // A resposta deve ser StatusOK porque a linha foi processada (usando categoria default)
+        // mas o failedRows deve conter o aviso sobre a categoria.
+		assert.Equal(t, http.StatusMultiStatus, rr.Code, "Response: %s", rr.Body.String())
+		var resp BulkUploadRisksResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, resp.SuccessfullyImported)
+        assert.Len(t, resp.FailedRows, 1) // A "falha" aqui é o aviso da categoria
+        assert.Equal(t, 2, resp.FailedRows[0].LineNumber)
+        assert.Contains(t, resp.FailedRows[0].Errors[0], "invalid category: 'invalid_category'")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+}
+
 func TestGetRiskHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithAuthenticatedContext(testUserID, testOrgID)

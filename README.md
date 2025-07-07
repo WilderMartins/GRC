@@ -298,6 +298,52 @@ Endpoints para gerenciar o processo de aprovação para aceite de riscos.
     *   Requer que o usuário pertença à organização do risco.
     *   **Resposta (Sucesso - 200 OK):** Array de objetos `ApprovalWorkflow`, com detalhes do requisitante e aprovador.
 
+#### Upload em Massa de Riscos (`/api/v1/risks/bulk-upload-csv`)
+
+*   **`POST /api/v1/risks/bulk-upload-csv`**: Permite o upload de múltiplos riscos através de um arquivo CSV.
+    *   **Tipo de Conteúdo da Requisição:** `multipart/form-data`.
+    *   **Campo do Formulário:** O arquivo CSV deve ser enviado no campo `file`.
+    *   **Formato CSV Esperado:**
+        *   **Cabeçalhos (obrigatórios em qualquer ordem, case-insensitive):** `title`, `impact`, `probability`.
+        *   **Cabeçalhos (opcionais):** `description`, `category`.
+        *   **Valores:**
+            *   `title`: string (3-255 caracteres).
+            *   `description`: string.
+            *   `category`: "tecnologico", "operacional", "legal" (default: "tecnologico" se inválido/ausente).
+            *   `impact`: "Baixo", "Médio", "Alto", "Crítico".
+            *   `probability`: "Baixo", "Médio", "Alto", "Crítico".
+    *   **Lógica:**
+        *   O `OrganizationID` é inferido do token JWT.
+        *   O `OwnerID` dos riscos criados é o `UserID` do usuário que fez o upload.
+        *   O `Status` inicial é "aberto".
+    *   **Resposta:**
+        *   **`200 OK`:** Se todos os riscos válidos foram importados com sucesso e não houve linhas com erro.
+            ```json
+            {
+                "successfully_imported": 10,
+                "failed_rows": []
+            }
+            ```
+        *   **`207 Multi-Status`:** Se alguns riscos foram importados e outros falharam na validação.
+            ```json
+            {
+                "successfully_imported": 8,
+                "failed_rows": [
+                    { "line_number": 3, "errors": ["title is required"] },
+                    { "line_number": 5, "errors": ["invalid impact value: 'Muito Alto'. Valid are: Baixo, Médio, Alto, Crítico."] }
+                ]
+            }
+            ```
+        *   **`400 Bad Request`:** Para erros como arquivo CSV vazio, cabeçalhos obrigatórios ausentes, ou se todas as linhas de dados forem inválidas.
+            ```json
+            {
+                "successfully_imported": 0,
+                "failed_rows": [...], // Se aplicável
+                "general_error": "Missing required CSV header: impact" // Exemplo
+            }
+            ```
+        *   **`500 Internal Server Error`:** Para erros no servidor durante o processamento.
+
 ### Exemplo de Uso com `curl`
 
 1.  **Login para obter o token:**

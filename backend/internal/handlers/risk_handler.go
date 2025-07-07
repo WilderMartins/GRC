@@ -505,3 +505,244 @@ func GetRiskApprovalHistoryHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, approvalHistory)
 }
+
+
+// --- Bulk Upload Handler ---
+
+// BulkUploadErrorDetail provides details about an error in a specific row during bulk upload.
+type BulkUploadErrorDetail struct {
+	LineNumber int      `json:"line_number"`
+	Errors     []string `json:"errors"`
+}
+
+// BulkUploadRisksResponse defines the response structure for bulk risk upload.
+type BulkUploadRisksResponse struct {
+	SuccessfullyImported int                     `json:"successfully_imported"`
+	FailedRows           []BulkUploadErrorDetail `json:"failed_rows,omitempty"`
+	GeneralError         string                  `json:"general_error,omitempty"`
+}
+
+// normalizeHeader trims space and converts to lower case for case-insensitive matching.
+func normalizeHeader(header string) string {
+	return strings.ToLower(strings.TrimSpace(header))
+}
+
+// isValidEnumValue checks if a value is part of a predefined list of valid enum values (case-insensitive).
+// Returns the canonical value if valid, or empty string if not.
+func isValidEnumValue(value string, validValues map[string]string) string {
+	normalizedValue := strings.ToLower(strings.TrimSpace(value))
+	return validValues[normalizedValue]
+}
+
+// BulkUploadRisksCSVHandler handles the bulk upload of risks via CSV file.
+func BulkUploadRisksCSVHandler(c *gin.Context) {
+	tokenOrgID, orgExists := c.Get("organizationID")
+	if !orgExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := tokenOrgID.(uuid.UUID)
+
+	tokenUserID, userExists := c.Get("userID")
+	if !userExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "User ID not found in token"})
+		return
+	}
+	ownerID := tokenUserID.(uuid.UUID)
+
+	file, err := c.FormFile("file") // "file" is the name of the form field
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CSV file not provided or invalid form field name: " + err.Error()})
+		return
+	}
+
+	// Open the uploaded file
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file: " + err.Error()})
+		return
+	}
+	defer src.Close()
+
+	reader := csv.NewReader(src)
+	headers, err := reader.Read() // Read header row
+	if err == io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CSV file is empty"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read CSV headers: " + err.Error()})
+		return
+	}
+
+	// Normalize headers and map them to indices
+	headerMap := make(map[string]int)
+	for i, h := range headers {
+		headerMap[normalizeHeader(h)] = i
+	}
+
+	// Validate required headers
+	requiredHeaders := []string{"title", "impact", "probability"}
+	for _, reqHeader := range requiredHeaders {
+		if _, ok := headerMap[reqHeader]; !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Missing required CSV header: %s", reqHeader)})
+			return
+		}
+	}
+
+	// Define valid enum values for case-insensitive matching and getting canonical form
+	// Store canonical values (as defined in models)
+	validImpacts := map[string]string{
+		"baixo":   string(models.ImpactLow), "médio": string(models.ImpactMedium), "medio": string(models.ImpactMedium), // Allow "medio"
+		"alto": string(models.ImpactHigh), "crítico": string(models.ImpactCritical), "critico": string(models.ImpactCritical), // Allow "critico"
+	}
+	validProbabilities := map[string]string{
+		"baixo":   string(models.ProbabilityLow), "médio": string(models.ProbabilityMedium), "medio": string(models.ProbabilityMedium),
+		"alto": string(models.ProbabilityHigh), "crítico": string(models.ProbabilityCritical), "critico": string(models.ProbabilityCritical),
+	}
+	validCategories := map[string]string{
+		"tecnologico": string(models.CategoryTechnological), "operacional": string(models.CategoryOperational),
+		"legal": string(models.CategoryLegal),
+	}
+	defaultCategory := models.CategoryTechnological // Default if not provided or invalid
+
+	var risksToCreate []models.Risk
+	var failedRows []BulkUploadErrorDetail
+	lineNumber := 1 // Header is line 1, data starts at line 2
+
+	for {
+		lineNumber++
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			failedRows = append(failedRows, BulkUploadErrorDetail{LineNumber: lineNumber, Errors: []string{"Failed to parse CSV row: " + err.Error()}})
+			continue
+		}
+
+		var rowErrors []string
+		var risk models.Risk
+
+		// Title
+		titleIdx, titleOk := headerMap["title"]
+		if !titleOk { /* Should have been caught by header check, but good practice */ }
+		title := strings.TrimSpace(record[titleIdx])
+		if title == "" {
+			rowErrors = append(rowErrors, "title is required")
+		} else if len(title) < 3 || len(title) > 255 {
+			rowErrors = append(rowErrors, "title must be between 3 and 255 characters")
+		}
+		risk.Title = title
+
+		// Description (optional)
+		if descIdx, ok := headerMap["description"]; ok {
+			risk.Description = strings.TrimSpace(record[descIdx])
+		}
+
+		// Category (optional, with default)
+		risk.Category = defaultCategory
+		if catIdx, ok := headerMap["category"]; ok {
+			catValue := strings.TrimSpace(record[catIdx])
+			if catValue != "" {
+				if canonicalCat := isValidEnumValue(catValue, validCategories); canonicalCat != "" {
+					risk.Category = models.RiskCategory(canonicalCat)
+				} else {
+					rowErrors = append(rowErrors, fmt.Sprintf("invalid category: '%s'. Valid are: tecnologico, operacional, legal. Using default '%s'.", catValue, defaultCategory))
+                    // Still using default, not strictly an error that stops import of row if default is acceptable.
+                    // If strict, this should be a hard error. For now, it's a soft warning and uses default.
+				}
+			}
+		}
+
+		// Impact (required)
+		impactIdx, impactOk := headerMap["impact"]
+		if !impactOk { /* Should have been caught */ }
+		impactValue := strings.TrimSpace(record[impactIdx])
+		if impactValue == "" {
+			rowErrors = append(rowErrors, "impact is required")
+		} else if canonicalImpact := isValidEnumValue(impactValue, validImpacts); canonicalImpact != "" {
+			risk.Impact = models.RiskImpact(canonicalImpact)
+		} else {
+			rowErrors = append(rowErrors, fmt.Sprintf("invalid impact value: '%s'. Valid are: Baixo, Médio, Alto, Crítico.", impactValue))
+		}
+
+		// Probability (required)
+		probIdx, probOk := headerMap["probability"]
+		if !probOk { /* Should have been caught */ }
+		probValue := strings.TrimSpace(record[probIdx])
+		if probValue == "" {
+			rowErrors = append(rowErrors, "probability is required")
+		} else if canonicalProb := isValidEnumValue(probValue, validProbabilities); canonicalProb != "" {
+			risk.Probability = models.RiskProbability(canonicalProb)
+		} else {
+			rowErrors = append(rowErrors, fmt.Sprintf("invalid probability value: '%s'. Valid are: Baixo, Médio, Alto, Crítico.", probValue))
+		}
+
+
+		if len(rowErrors) > 0 {
+			failedRows = append(failedRows, BulkUploadErrorDetail{LineNumber: lineNumber, Errors: rowErrors})
+			continue // Skip this row
+		}
+
+		// Set auto-generated fields
+		risk.OrganizationID = organizationID
+		risk.OwnerID = ownerID
+		risk.Status = models.StatusOpen // Default status
+
+		risksToCreate = append(risksToCreate, risk)
+	}
+
+	if len(risksToCreate) > 0 {
+		db := database.GetDB()
+		// GORM's CreateInBatches might be useful for very large CSVs, but simple Create works for moderate sizes.
+		// Using a transaction for atomicity.
+		tx := db.Begin()
+		if tx.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start database transaction for bulk import"})
+			return
+		}
+		if err := tx.Create(&risksToCreate).Error; err != nil {
+			tx.Rollback()
+			// Add a general error if DB create fails for the batch
+			response := BulkUploadRisksResponse{
+				SuccessfullyImported: 0,
+				FailedRows:           failedRows, // Include parsing/validation errors found so far
+				GeneralError:         "Database error during bulk insert: " + err.Error(),
+			}
+			// It's possible some rows were valid but the batch insert failed.
+			// Add all initially valid rows to failedRows with a generic DB error message.
+			if len(failedRows) == 0 && len(risksToCreate) > 0 { // If all rows were valid but batch failed
+				for i := 0; i < len(risksToCreate); i++ { // Line numbers would need more careful tracking for this case
+					failedRows = append(failedRows, BulkUploadErrorDetail{LineNumber: i + 2, Errors: []string{"Failed to save to database during batch operation."}})
+				}
+			}
+			c.JSON(http.StatusInternalServerError, response)
+			return
+		}
+		if err := tx.Commit().Error; err != nil {
+            // Rollback should have happened automatically on commit error with some DBs, but explicit is safer.
+            // tx.Rollback() // Not strictly needed if commit fails, GORM might handle.
+			response := BulkUploadRisksResponse{
+				SuccessfullyImported: 0,
+				FailedRows:           failedRows,
+				GeneralError:         "Database error committing bulk insert: " + err.Error(),
+			}
+			c.JSON(http.StatusInternalServerError, response)
+			return
+		}
+	}
+
+	response := BulkUploadRisksResponse{
+		SuccessfullyImported: len(risksToCreate),
+		FailedRows:           failedRows,
+	}
+
+	if len(failedRows) > 0 && len(risksToCreate) > 0 {
+		c.JSON(http.StatusMultiStatus, response) // Some succeeded, some failed
+	} else if len(failedRows) > 0 && len(risksToCreate) == 0 {
+		c.JSON(http.StatusBadRequest, response) // All rows failed validation before DB
+	} else {
+		c.JSON(http.StatusOK, response) // All rows (if any) imported successfully
+	}
+}

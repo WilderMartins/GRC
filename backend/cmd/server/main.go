@@ -258,6 +258,9 @@ func startServer() {
 			riskRoutes.GET("/:riskId/approval-history", handlers.GetRiskApprovalHistoryHandler)
 			// Note: approvalId is the ID of the ApprovalWorkflow record itself
 			riskRoutes.POST("/:riskId/approval/:approvalId/decide", handlers.ApproveOrRejectRiskAcceptanceHandler)
+
+			// Bulk Upload Route (não aninhada sob :riskId)
+			riskRoutes.POST("/bulk-upload-csv", handlers.BulkUploadRisksCSVHandler)
 		}
 
 		// Identity Provider Management Routes (nested under organizations)
