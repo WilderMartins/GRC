@@ -34,6 +34,13 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
                   </span>
                 </Link>
               </li>
+               <li>
+                <Link href="/admin/risks">
+                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
+                    Gestão de Riscos
+                  </span>
+                </Link>
+              </li>
               <li>
                 <Link href="/admin/identity-providers">
                   <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
