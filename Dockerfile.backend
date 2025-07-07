@@ -1,0 +1,39 @@
+# Stage 1: Build a Go binary
+FROM golang:1.22-alpine AS builder
+
+# Set the Current Working Directory inside the container
+WORKDIR /app/backend
+
+# We want to populate the module cache based on the go.mod and go.sum files.
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+# Copy the source code
+COPY backend/ ./
+
+# Build the Go app
+# The -o /app/server will output the executable to /app/server inside the container
+# CGO_ENABLED=0 produces a statically linked binary (no external C dependencies)
+# -ldflags="-s -w" strips debugging information, reducing binary size
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o /app/server ./cmd/server
+
+# Stage 2: Create the final, small image
+FROM alpine:latest
+
+# Add ca-certificates in case your app needs to make HTTPS requests
+RUN apk --no-cache add ca-certificates
+
+# Set the Current Working Directory inside the container
+WORKDIR /root/
+
+# Copy the Pre-built binary file from the previous stage
+COPY --from=builder /app/server .
+
+# Expose port 8080 to the outside world (if the server were to listen on it)
+# This is more for documentation; actual port mapping is done in docker-compose or `docker run`
+# EXPOSE 8080
+
+# Command to run the executable
+# For now, this will run the setup script.
+# Later, it will run the actual server.
+CMD ["./server"]

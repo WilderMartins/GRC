@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: . # Context is the root of the project
+      dockerfile: Dockerfile.backend
+    container_name: phoenix_grc_backend
+    # If the setup script needs to be interactive, we need this:
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    depends_on:
+      db:
+        condition: service_healthy # Wait for DB to be ready
+    environment:
+      # These would be used by the actual server application later
+      # For the setup script, DSN is constructed from user input
+      # APP_ENV: "development"
+      # DATABASE_URL: "postgres://user:password@db:5432/phoenixdb?sslmode=disable"
+      GIN_MODE: "debug" # or "release"
+    volumes:
+      # If we were running a server and wanted live reload for Go code (not typical for compiled)
+      # - ./backend:/app/backend
+      - ./backend_artifacts:/app/artifacts # Example if we had artifacts to store
+    # networks:
+    #   - phoenix_network
+    # restart: unless-stopped
+    # The backend service will run the setup script on its first run.
+    # For subsequent runs, we'd change the CMD in Dockerfile or override here
+    # to run the actual API server.
+
+  db:
+    image: postgres:16-alpine
+    container_name: phoenix_grc_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin} # Use .env file or default to 'admin'
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}
+      POSTGRES_DB: ${POSTGRES_DB:-phoenix_grc_dev}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432" # Expose DB port to host, use .env or default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-phoenix_grc_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # networks:
+    #   - phoenix_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+# networks:
+#   phoenix_network:
+#     driver: bridge
