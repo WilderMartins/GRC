@@ -259,6 +259,16 @@ func startServer() {
 				idpRoutes.DELETE("/:idpId", handlers.DeleteIdentityProviderHandler)
 			}
 		}
+
+		// Vulnerability Management Routes
+		vulnerabilityRoutes := apiV1.Group("/vulnerabilities")
+		{
+			vulnerabilityRoutes.POST("", handlers.CreateVulnerabilityHandler)
+			vulnerabilityRoutes.GET("", handlers.ListVulnerabilitiesHandler)
+			vulnerabilityRoutes.GET("/:vulnId", handlers.GetVulnerabilityHandler)
+			vulnerabilityRoutes.PUT("/:vulnId", handlers.UpdateVulnerabilityHandler)
+			vulnerabilityRoutes.DELETE("/:vulnId", handlers.DeleteVulnerabilityHandler)
+		}
 	}
 
 	serverPort := os.Getenv("SERVER_PORT")

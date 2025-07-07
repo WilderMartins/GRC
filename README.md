@@ -204,6 +204,36 @@ Endpoints para administradores de organização gerenciarem configurações de S
 *   **`PUT /api/v1/organizations/{orgId}/identity-providers/{idpId}`**: Atualiza um provedor. (Payload similar ao POST).
 *   **`DELETE /api/v1/organizations/{orgId}/identity-providers/{idpId}`**: Remove um provedor.
 
+#### Gestão de Vulnerabilidades (`/api/v1/vulnerabilities`)
+Endpoints para gerenciar vulnerabilidades dentro da organização do usuário autenticado.
+
+*   **`POST /api/v1/vulnerabilities`**: Cria uma nova vulnerabilidade.
+    *   **Payload:**
+        ```json
+        {
+            "title": "Vulnerabilidade de Exemplo XSS",
+            "description": "Entrada não sanitizada no campo de busca permite XSS.",
+            "cve_id": "CVE-2023-99999", // Opcional
+            "severity": "alto", // "baixo", "medio", "critico"
+            "status": "descoberta", // "em_correcao", "corrigida"
+            "asset_affected": "Página de Busca do Portal Principal"
+        }
+        ```
+    *   **Resposta (Sucesso - 201 Created):** Objeto da vulnerabilidade criada.
+
+*   **`GET /api/v1/vulnerabilities`**: Lista todas as vulnerabilidades da organização.
+    *   **Resposta (Sucesso - 200 OK):** Array de objetos de vulnerabilidade.
+
+*   **`GET /api/v1/vulnerabilities/{vulnId}`**: Obtém uma vulnerabilidade específica.
+    *   **Resposta (Sucesso - 200 OK):** Objeto da vulnerabilidade.
+
+*   **`PUT /api/v1/vulnerabilities/{vulnId}`**: Atualiza uma vulnerabilidade existente.
+    *   **Payload:** Similar ao de criação.
+    *   **Resposta (Sucesso - 200 OK):** Objeto da vulnerabilidade atualizada.
+
+*   **`DELETE /api/v1/vulnerabilities/{vulnId}`**: Deleta uma vulnerabilidade.
+    *   **Resposta (Sucesso - 200 OK):** `{ "message": "Vulnerability deleted successfully" }`
+
 ### Exemplo de Uso com `curl`
 
 1.  **Login para obter o token:**
