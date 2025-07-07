@@ -12,6 +12,7 @@ import (
 	"phoenixgrc/backend/internal/models"
 	"phoenixgrc/backend/internal/oauth2auth" // Import OAuth2 auth package
 	"phoenixgrc/backend/internal/samlauth"   // Import SAML auth package
+	"phoenixgrc/backend/internal/seeders"    // Import seeders package
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,13 @@ func runSetup() {
 		log.Fatalf("Failed to run database migrations during setup: %v", err)
 	}
 	fmt.Println("Database migrations completed successfully during setup.")
+
+	// Seed Audit Frameworks and Controls
+	fmt.Println("\n--- Seeding Audit Frameworks and Controls ---")
+	if err := seeders.SeedAuditFrameworksAndControls(database.GetDB()); err != nil {
+		log.Fatalf("Failed to seed audit frameworks and controls: %v", err)
+	}
+	fmt.Println("Audit frameworks and controls seeded successfully.")
 
 	// 4. Criar a primeira organização
 	fmt.Println("\n--- Organization Setup ---")
@@ -268,6 +276,25 @@ func startServer() {
 			vulnerabilityRoutes.GET("/:vulnId", handlers.GetVulnerabilityHandler)
 			vulnerabilityRoutes.PUT("/:vulnId", handlers.UpdateVulnerabilityHandler)
 			vulnerabilityRoutes.DELETE("/:vulnId", handlers.DeleteVulnerabilityHandler)
+		}
+
+		// Audit and Compliance Routes
+		auditRoutes := apiV1.Group("/audit")
+		{
+			// Frameworks and Controls (publicly readable or requires basic auth)
+			// For now, let's assume they are part of the protected API needing a valid token
+			auditRoutes.GET("/frameworks", handlers.ListFrameworksHandler)
+			auditRoutes.GET("/frameworks/:frameworkId/controls", handlers.GetFrameworkControlsHandler)
+
+			// Assessments (specific to an organization, thus protected and context-aware)
+			auditRoutes.POST("/assessments", handlers.CreateOrUpdateAssessmentHandler) // orgId from token
+			auditRoutes.GET("/assessments/control/:controlId", handlers.GetAssessmentForControlHandler) // orgId from token, controlId is AuditControl UUID
+
+			// Route to get all assessments for a specific organization and framework
+			// This path is slightly different as it includes orgId in the path,
+			// which might be useful for superadmin scenarios later, or if orgId from token is always primary.
+			// For now, handler logic uses orgId from path but checks against token.
+			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/assessments", handlers.ListOrgAssessmentsByFrameworkHandler)
 		}
 	}
 

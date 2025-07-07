@@ -234,6 +234,38 @@ Endpoints para gerenciar vulnerabilidades dentro da organização do usuário au
 *   **`DELETE /api/v1/vulnerabilities/{vulnId}`**: Deleta uma vulnerabilidade.
     *   **Resposta (Sucesso - 200 OK):** `{ "message": "Vulnerability deleted successfully" }`
 
+#### Auditoria e Conformidade (`/api/v1/audit`)
+Endpoints para listar frameworks de auditoria, seus controles, e gerenciar avaliações de conformidade.
+
+*   **`GET /api/v1/audit/frameworks`**: Lista todos os frameworks de auditoria pré-carregados (ex: NIST CSF, ISO 27001).
+    *   **Resposta (Sucesso - 200 OK):** Array de objetos `AuditFramework`.
+
+*   **`GET /api/v1/audit/frameworks/{frameworkId}/controls`**: Lista todos os controles para um framework específico.
+    *   **Resposta (Sucesso - 200 OK):** Array de objetos `AuditControl`.
+
+*   **`POST /api/v1/audit/assessments`**: Cria ou atualiza uma avaliação para um controle específico dentro da organização do usuário autenticado.
+    *   A organização é inferida a partir do token JWT.
+    *   Este endpoint realiza um "upsert": se uma avaliação para o `audit_control_id` e organização já existir, ela é atualizada; caso contrário, uma nova é criada.
+    *   **Payload:**
+        ```json
+        {
+            "audit_control_id": "uuid-do-audit-control", // ID (UUID) do AuditControl
+            "status": "conforme", // "nao_conforme", "parcialmente_conforme"
+            "evidence_url": "http://example.com/path/to/evidence.pdf", // Opcional
+            "score": 100, // Opcional, entre 0-100. Pode ser inferido do status se não fornecido.
+            "assessment_date": "2023-10-26" // Opcional, YYYY-MM-DD. Default para data atual se não fornecido.
+        }
+        ```
+    *   **Resposta (Sucesso - 200 OK):** Objeto da `AuditAssessment` criada ou atualizada.
+
+*   **`GET /api/v1/audit/assessments/control/{controlId}`**: Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado.
+    *   **Resposta (Sucesso - 200 OK):** Objeto `AuditAssessment`.
+    *   **Resposta (404 Not Found):** Se nenhuma avaliação existir para o controle na organização.
+
+*   **`GET /api/v1/audit/organizations/{orgId}/frameworks/{frameworkId}/assessments`**: Lista todas as avaliações de uma organização específica para um determinado framework.
+    *   Requer que o usuário autenticado pertença à `{orgId}` ou seja um superadmin (lógica de superadmin não implementada).
+    *   **Resposta (Sucesso - 200 OK):** Array de objetos `AuditAssessment`, cada um incluindo detalhes do `AuditControl` associado.
+
 ### Exemplo de Uso com `curl`
 
 1.  **Login para obter o token:**
