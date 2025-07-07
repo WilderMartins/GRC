@@ -6,7 +6,7 @@ WORKDIR /app/backend
 
 # We want to populate the module cache based on the go.mod and go.sum files.
 COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
 # Copy the source code
 COPY backend/ ./
@@ -29,11 +29,8 @@ WORKDIR /root/
 # Copy the Pre-built binary file from the previous stage
 COPY --from=builder /app/server .
 
-# Expose port 8080 to the outside world (if the server were to listen on it)
-# This is more for documentation; actual port mapping is done in docker-compose or `docker run`
-# EXPOSE 8080
+# Expose port (default 8080, or set by SERVER_PORT) to the outside world
+EXPOSE 8080
 
-# Command to run the executable
-# For now, this will run the setup script.
-# Later, it will run the actual server.
+# Command to run the executable which is now the Gin HTTP server.
 CMD ["./server"]

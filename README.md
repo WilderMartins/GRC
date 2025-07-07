@@ -4,11 +4,12 @@ Phoenix GRC é uma plataforma SaaS (Software as a Service), whitelabel, projetad
 
 ## Stack Tecnológica
 
-- **Backend:** Go (Golang)
-- **Frontend:** Next.js com TypeScript
+- **Backend:** Go (Golang) com Gin Gonic
+- **Frontend:** Next.js com TypeScript (a ser desenvolvido)
 - **Banco de Dados:** PostgreSQL 16
 - **ORM (Go):** GORM
-- **UI (Frontend):** Tailwind CSS
+- **Autenticação:** JWT (JSON Web Tokens)
+- **UI (Frontend):** Tailwind CSS (a ser desenvolvido)
 - **Containerização:** Docker
 
 ## Ambiente de Desenvolvimento com Docker
@@ -19,8 +20,10 @@ Este projeto utiliza Docker e Docker Compose para facilitar a configuração do 
 
 - Docker: [Instruções de Instalação](https://docs.docker.com/get-docker/)
 - Docker Compose: (Normalmente incluído com Docker Desktop) [Instruções de Instalação](https://docs.docker.com/compose/install/)
+- Git: [Instruções de Instalação](https://git-scm.com/downloads)
+- `curl` ou um cliente API como Postman/Insomnia (para interagir com a API).
 
-### Configuração Inicial
+### Configuração Inicial e Setup
 
 1.  **Clone o Repositório:**
     ```bash
@@ -29,69 +32,169 @@ Este projeto utiliza Docker e Docker Compose para facilitar a configuração do 
     ```
 
 2.  **Configure as Variáveis de Ambiente:**
-    Copie o arquivo de exemplo `.env.example` para `.env` e ajuste as configurações do banco de dados conforme necessário.
+    Copie o arquivo de exemplo `.env.example` para `.env`.
     ```bash
     cp .env.example .env
     ```
-    Edite o arquivo `.env` com suas preferências (usuário, senha, nome do banco de dados, porta do host para o PostgreSQL).
+    Edite o arquivo `.env` e **certifique-se de definir `JWT_SECRET_KEY` com um valor seguro e único**. Ajuste as outras configurações do banco de dados e do servidor conforme necessário.
 
-3.  **Construa e Inicie os Contêineres:**
-    Este comando irá construir a imagem Docker para o backend (se ainda não construída) e iniciar os serviços do backend e do banco de dados.
+3.  **Construa as Imagens Docker:**
+    Este comando irá construir a imagem Docker para o backend.
     ```bash
-    docker-compose up --build
+    docker-compose build
     ```
-    O `--build` força a reconstrução da imagem do backend, útil se você fez alterações no `Dockerfile.backend` ou no código Go antes da primeira instalação.
 
-### Executando o Script de Instalação Interativo
+4.  **Execute o Script de Instalação Interativo (Primeira Vez):**
+    O script de instalação configura o banco de dados, executa migrações e cria o primeiro usuário administrador.
+    Execute o seguinte comando para rodar o setup de forma interativa:
+    ```bash
+    docker-compose run --rm backend setup
+    ```
+    Siga as instruções no terminal:
+    *   **Database Host:** `db` (nome do serviço PostgreSQL no `docker-compose.yml`)
+    *   **Database Port:** `5432` (porta padrão do PostgreSQL)
+    *   **Database User:** O valor de `POSTGRES_USER` do seu `.env` (padrão: `admin`)
+    *   **Database Password:** O valor de `POSTGRES_PASSWORD` do seu `.env` (padrão: `password123`)
+    *   **Database Name:** O valor de `POSTGRES_DB` do seu `.env` (padrão: `phoenix_grc_dev`)
+    *   **Database SSL Mode:** `disable` (para desenvolvimento local)
+    *   Nome para a primeira organização.
+    *   Nome, email e senha para o usuário administrador.
 
-Na primeira vez que você executar `docker-compose up`, o serviço `backend` irá automaticamente iniciar o script de instalação interativo no terminal. Siga as instruções para:
+    O contêiner `backend` finalizará após o script de setup.
 
-1.  **Configurar a Conexão com o Banco de Dados:**
-    *   **Database Host:** `db` (este é o nome do serviço do PostgreSQL no `docker-compose.yml`)
-    *   **Database Port:** `5432` (porta padrão do PostgreSQL dentro da rede Docker)
-    *   **Database User:** O valor de `POSTGRES_USER` que você definiu no seu arquivo `.env` (padrão: `admin`).
-    *   **Database Password:** O valor de `POSTGRES_PASSWORD` que você definiu no seu arquivo `.env` (padrão: `password123`).
-    *   **Database Name:** O valor de `POSTGRES_DB` que você definiu no seu arquivo `.env` (padrão: `phoenix_grc_dev`).
-    *   **Database SSL Mode:** `disable` (para desenvolvimento local na rede Docker).
+### Iniciando o Servidor Backend
 
-2.  **Criar a Primeira Organização:**
-    *   Forneça um nome para a organização inicial.
+Após o setup inicial, você pode iniciar o servidor backend e o banco de dados com:
 
-3.  **Criar o Usuário Administrador:**
-    *   Forneça nome, email e senha para o primeiro usuário com perfil de administrador.
+```bash
+docker-compose up
+```
 
-Após o script de instalação ser concluído com sucesso, a aplicação base estará configurada. O contêiner do `backend` irá finalizar, pois sua tarefa (`CMD ["./server"]` no `Dockerfile.backend`) é executar o script de setup.
+O servidor backend estará acessível em `http://localhost:PORTA` (onde `PORTA` é o valor de `SERVER_PORT` no seu `.env`, padrão: `8080`).
 
-**Próximos Passos (Desenvolvimento Futuro):**
+## Endpoints da API (Backend)
 
-*   Para desenvolvimento contínuo do servidor backend, o `CMD` no `Dockerfile.backend` precisará ser alterado para iniciar o servidor HTTP Go (após sua implementação).
-*   O frontend Next.js precisará ser configurado e iniciado separadamente ou adicionado ao `docker-compose.yml`.
+A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autenticação JWT.
 
-## Estrutura do Projeto (Inicial)
+### Autenticação
+
+*   **`POST /auth/login`**: Login de usuário.
+    *   **Payload:** `{ "email": "user@example.com", "password": "yourpassword" }`
+    *   **Resposta (Sucesso - 200 OK):**
+        ```json
+        {
+            "token": "jwt.token.string",
+            "user_id": "uuid-string",
+            "email": "user@example.com",
+            "name": "User Name",
+            "role": "admin", // ou manager, user
+            "organization_id": "org-uuid-string"
+        }
+        ```
+    *   **Resposta (Erro):** Status `400`, `401` ou `500` com mensagem de erro.
+
+### Health Check
+
+*   **`GET /health`**: Verifica a saúde do servidor e a conexão com o banco de dados.
+    *   **Resposta (Sucesso - 200 OK):** `{ "status": "ok", "database": "connected" }`
+
+### API Protegida (`/api/v1`)
+
+Para acessar os endpoints abaixo, inclua o token JWT no header `Authorization`:
+`Authorization: Bearer <seu_token_jwt>`
+
+#### Exemplo: Teste de Autenticação
+
+*   **`GET /api/v1/me`**: Retorna informações do usuário autenticado.
+    *   **Resposta (Sucesso - 200 OK):**
+        ```json
+        {
+            "message": "This is a protected route",
+            "user_id": "uuid-string",
+            "email": "user@example.com",
+            "role": "admin",
+            "organization_id": "org-uuid-string"
+        }
+        ```
+
+#### Gestão de Riscos (`/api/v1/risks`)
+
+*   **`POST /api/v1/risks`**: Cria um novo risco.
+    *   **Payload:**
+        ```json
+        {
+            "title": "Novo Risco de Teste",
+            "description": "Descrição detalhada do risco.",
+            "category": "tecnologico", // "operacional", "legal"
+            "impact": "medio", // "baixo", "alto", "critico"
+            "probability": "baixa", // "media", "alta", "critica"
+            "status": "aberto", // "em_andamento", "mitigado", "aceito"
+            "owner_id": "uuid-do-usuario-owner" // Opcional, se não informado, o criador é o owner
+        }
+        ```
+    *   **Resposta (Sucesso - 201 Created):** Objeto do risco criado.
+
+*   **`GET /api/v1/risks`**: Lista todos os riscos da organização do usuário autenticado.
+    *   **Resposta (Sucesso - 200 OK):** Array de objetos de risco.
+
+*   **`GET /api/v1/risks/{riskId}`**: Obtém um risco específico pelo ID.
+    *   **Resposta (Sucesso - 200 OK):** Objeto do risco.
+
+*   **`PUT /api/v1/risks/{riskId}`**: Atualiza um risco existente.
+    *   **Payload:** Similar ao de criação.
+    *   **Resposta (Sucesso - 200 OK):** Objeto do risco atualizado.
+
+*   **`DELETE /api/v1/risks/{riskId}`**: Deleta um risco.
+    *   **Resposta (Sucesso - 200 OK):** `{ "message": "Risk deleted successfully" }`
+
+### Exemplo de Uso com `curl`
+
+1.  **Login para obter o token:**
+    ```bash
+    curl -X POST -H "Content-Type: application/json" \
+    -d '{"email":"seu_admin_email@example.com","password":"sua_senha"}' \
+    http://localhost:8080/auth/login
+    ```
+    Copie o valor do campo `token` da resposta.
+
+2.  **Acessar uma rota protegida (ex: listar riscos):**
+    Substitua `SEU_TOKEN_AQUI` pelo token obtido.
+    ```bash
+    curl -X GET -H "Authorization: Bearer SEU_TOKEN_AQUI" http://localhost:8080/api/v1/risks
+    ```
+
+## Estrutura do Projeto
 
 ```
 .
 ├── .env.example            # Exemplo de variáveis de ambiente
 ├── Dockerfile.backend      # Dockerfile para a aplicação Go (backend)
 ├── README.md               # Este arquivo
-├── AGENTS.md               # Instruções para agentes de IA (como você!)
-├── backend/                # Código fonte do backend (Go)
-│   ├── cmd/server/main.go  # Ponto de entrada (atualmente o script de setup)
-│   ├── internal/           # Código interno da aplicação
-│   │   ├── database/       # Lógica de conexão e migração com DB
+├── AGENTS.md               # Instruções para agentes de IA
+├── backend/
+│   ├── cmd/server/main.go  # Ponto de entrada (servidor Gin e comando de setup)
+│   ├── internal/
+│   │   ├── auth/           # Lógica de autenticação JWT (geração, validação, middleware)
+│   │   ├── database/       # Conexão com DB e migrações GORM
+│   │   ├── handlers/       # Handlers HTTP (controladores) para Gin
 │   │   ├── models/         # Structs GORM (schema do DB)
-│   │   └── ...             # Outros pacotes (handlers, services, etc.)
-│   ├── pkg/                # Pacotes reutilizáveis
-│   ├── go.mod              # Módulos Go
+│   │   └── ...
+│   ├── pkg/                # Pacotes Go reutilizáveis (se houver)
+│   ├── go.mod
 │   └── go.sum
-├── frontend/               # Código fonte do frontend (Next.js)
-│   ├── src/                # Código fonte Next.js
-│   ├── package.json
-│   ├── next.config.js
-│   ├── tsconfig.json
+├── frontend/               # Código fonte do frontend (Next.js - a ser desenvolvido)
 │   └── ...
 └── docker-compose.yml      # Orquestração dos contêineres Docker
 ```
+
+## Próximos Passos (Desenvolvimento Futuro)
+
+*   Desenvolvimento do Frontend Next.js.
+*   Implementação dos demais módulos (Vulnerabilidades, Auditoria, etc.).
+*   Testes de integração e E2E.
+*   Melhorias na paginação e filtros da API.
+*   Configuração de logging mais robusto.
+*   ...e muito mais!
 
 ## Contribuindo
 
