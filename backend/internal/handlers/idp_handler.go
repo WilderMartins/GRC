@@ -110,19 +110,45 @@ func ListIdentityProvidersHandler(c *gin.Context) {
 	}
 
 	// For listing, user might just need to be part of the org, not necessarily admin.
-	// Adjust checkOrgAdmin or create a new check if needed. For now, keeping it strict.
-	if !checkOrgAdmin(c, targetOrgID) {
+	// The checkOrgAdmin currently requires Admin or Manager.
+	// Let's use a simpler check for listing: just ensure token's orgID matches path orgID.
+	tokenOrgID, orgOk := c.Get("organizationID")
+	if !orgOk || tokenOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this organization's identity providers"})
 		return
 	}
 
+	page, pageSize := GetPaginationParams(c)
 	db := database.GetDB()
 	var idps []models.IdentityProvider
-	if err := db.Where("organization_id = ?", targetOrgID).Find(&idps).Error; err != nil {
+	var totalItems int64
+
+	query := db.Model(&models.IdentityProvider{}).Where("organization_id = ?", targetOrgID)
+	if err := query.Count(&totalItems).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count identity providers: " + err.Error()})
+		return
+	}
+
+	if err := query.Scopes(PaginateScope(page, pageSize)).Order("created_at desc").Find(&idps).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list identity providers: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, idps)
+	totalPages := totalItems / int64(pageSize)
+	if totalItems%int64(pageSize) != 0 {
+		totalPages++
+	}
+    if totalItems == 0 { totalPages = 0 }
+    if totalPages == 0 && totalItems > 0 { totalPages = 1 }
+
+	response := PaginatedResponse{
+		Items:      idps,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+		Page:       page,
+		PageSize:   pageSize,
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // GetIdentityProviderHandler gets a specific identity provider.

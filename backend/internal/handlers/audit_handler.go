@@ -5,6 +5,8 @@ import (
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	"time"
+	"net/http/httputil" // Para detectar MIME type (embora http.DetectContentType seja mais simples)
+
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -70,6 +72,23 @@ type AssessmentPayload struct {
 	AssessmentDate string                    `json:"assessment_date" binding:"omitempty,datetime=2006-01-02"` // YYYY-MM-DD
 }
 
+const (
+	maxEvidenceFileSize = 10 << 20 // 10 MB
+)
+
+var allowedMimeTypes = map[string]bool{
+	"image/jpeg":                                                       true,
+	"image/png":                                                        true,
+	"application/pdf":                                                  true,
+	"application/msword":                                               true, // .doc
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true, // .docx
+	"application/vnd.ms-excel":                                         true, // .xls
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":   true, // .xlsx
+	"text/plain":                                                       true, // .txt
+	// Adicionar outros tipos conforme necessário
+}
+
+
 // CreateOrUpdateAssessmentHandler creates a new assessment or updates an existing one.
 // An assessment is unique per (OrganizationID, AuditControlID).
 func CreateOrUpdateAssessmentHandler(c *gin.Context) {
@@ -133,6 +152,49 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 	if errFile == nil { // File was provided
 		defer file.Close()
 
+		// Validação de Tamanho do Arquivo
+		if header.Size > maxEvidenceFileSize {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("File size exceeds limit of %d MB", maxEvidenceFileSize/(1024*1024))})
+			return
+		}
+
+		// Validação de Tipo MIME
+		// Ler os primeiros 512 bytes para detectar o tipo MIME
+		buffer := make([]byte, 512)
+		_, err := file.Read(buffer)
+		if err != nil && err != io.EOF {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file for MIME type detection"})
+			return
+		}
+		// Resetar o ponteiro do arquivo para o início, para que o upload leia o arquivo completo
+		_, err = file.Seek(0, io.SeekStart)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset file pointer"})
+			return
+		}
+
+		mimeType := http.DetectContentType(buffer)
+		log.Printf("Detected MIME type for uploaded file '%s': %s", header.Filename, mimeType)
+
+		if !allowedMimeTypes[mimeType] {
+			// Tentar verificar pela extensão se o DetectContentType falhar para alguns tipos Office
+			// (DetectContentType pode retornar "application/zip" para .docx, .xlsx)
+			ext := strings.ToLower(filepath.Ext(header.Filename))
+			if (ext == ".docx" && mimeType == "application/zip" && allowedMimeTypes["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]) ||
+			   (ext == ".xlsx" && mimeType == "application/zip" && allowedMimeTypes["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]) {
+				// Permitir se a extensão for conhecida e o MIME for application/zip (comum para formatos OOXML)
+				log.Printf("Permitting ZIP file with known Office extension: %s", ext)
+			} else {
+				allowedTypesStr := []string{}
+				for k := range allowedMimeTypes {
+					allowedTypesStr = append(allowedTypesStr, k)
+				}
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("File type '%s' (detected: '%s') is not allowed. Allowed types: %s", header.Filename, mimeType, strings.Join(allowedTypesStr, ", "))})
+				return
+			}
+		}
+
+
 		if filestorage.DefaultFileStorageProvider == nil {
 			log.Println("Attempted file upload, but no file storage provider is configured.")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "File storage service is not configured."})
@@ -140,8 +202,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		}
 
 		// Construct a unique object name for GCS
-		// Example: {orgID}/audit_evidences/{auditControlID}/{assessmentID_or_timestamp}_{original_filename}
-		// For a new assessment, we don't have assessmentID yet. Using controlID and a UUID.
 		newFileName := fmt.Sprintf("%s_%s", uuid.New().String(), filepath.Base(header.Filename))
 		objectPath := fmt.Sprintf("%s/audit_evidences/%s/%s", organizationID.String(), auditControlUUID.String(), newFileName)
 
@@ -301,12 +361,35 @@ func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
 
 	// Find all assessments for these controls within the target organization
 	// Preload AuditControl to get details like ControlID (e.g., AC-1) and Description
-	if err := db.Preload("AuditControl").
-		Where("organization_id = ? AND audit_control_id IN (?)", targetOrgID, controlIDs).
-		Find(&assessments).Error; err != nil {
+	page, pageSize := GetPaginationParams(c)
+	var totalItems int64
+
+	query := db.Model(&models.AuditAssessment{}).
+		Where("organization_id = ? AND audit_control_id IN (?)", targetOrgID, controlIDs)
+
+	if err := query.Count(&totalItems).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count assessments for framework: " + err.Error()})
+		return
+	}
+
+	if err := query.Scopes(PaginateScope(page, pageSize)).Preload("AuditControl").Order("assessment_date desc").Find(&assessments).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list assessments for framework: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, assessments)
+	totalPages := totalItems / int64(pageSize)
+	if totalItems%int64(pageSize) != 0 {
+		totalPages++
+	}
+    if totalItems == 0 { totalPages = 0 }
+    if totalPages == 0 && totalItems > 0 { totalPages = 1 }
+
+	response := PaginatedResponse{
+		Items:      assessments,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+		Page:       page,
+		PageSize:   pageSize,
+	}
+	c.JSON(http.StatusOK, response)
 }

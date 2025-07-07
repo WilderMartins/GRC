@@ -125,24 +125,75 @@ func GetRiskHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, risk)
 }
 
-// ListRisksHandler handles fetching all risks for the organization.
-// TODO: Implement pagination and filtering.
+// ListRisksHandler handles fetching all risks for the organization with pagination.
 func ListRisksHandler(c *gin.Context) {
 	orgID, exists := c.Get("organizationID")
 	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Organization ID not found in token"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
 		return
 	}
+	organizationID := orgID.(uuid.UUID)
+
+	page, pageSize := GetPaginationParams(c)
 
 	db := database.GetDB()
 	var risks []models.Risk
-	// Ensure risks belong to the organization from the token
-	if err := db.Preload("Owner").Where("organization_id = ?", orgID).Find(&risks).Error; err != nil {
+	var totalItems int64
+
+	// Contar o total de itens para a organização antes de aplicar a paginação
+	query := db.Model(&models.Risk{}).Where("organization_id = ?", organizationID)
+
+	// Aplicar filtros
+	if status := c.Query("status"); status != "" {
+		// Validar se o status é um valor permitido para models.RiskStatus
+		// Para simplificar, assumimos que o frontend envia valores válidos.
+		// Uma validação mais robusta verificaria contra os valores do ENUM.
+		query = query.Where("status = ?", status)
+	}
+	if impact := c.Query("impact"); impact != "" {
+		query = query.Where("impact = ?", impact)
+	}
+	if probability := c.Query("probability"); probability != "" {
+		query = query.Where("probability = ?", probability)
+	}
+	if category := c.Query("category"); category != "" {
+		query = query.Where("category = ?", category)
+	}
+	// TODO: Adicionar filtro por `title` (usando LIKE) ou `owner_id` se necessário.
+
+
+	if err := query.Count(&totalItems).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count risks: " + err.Error()})
+		return
+	}
+
+	// Aplicar escopo de paginação e buscar os itens
+	if err := query.Scopes(PaginateScope(page, pageSize)).Preload("Owner").Order("created_at desc").Find(&risks).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list risks: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, risks)
+	totalPages := totalItems / int64(pageSize)
+	if totalItems%int64(pageSize) != 0 {
+		totalPages++
+	}
+	if totalItems == 0 { // Evitar totalPages = 1 se não houver itens
+		totalPages = 0
+	}
+	if totalPages == 0 && totalItems > 0 { // Caso onde totalItems < pageSize
+		totalPages = 1
+	}
+
+
+	response := PaginatedResponse{
+		Items:      risks,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+		Page:       page,
+		PageSize:   pageSize,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // UpdateRiskHandler handles updating an existing risk.
@@ -557,7 +608,18 @@ func GetRiskApprovalHistoryHandler(c *gin.Context) {
 
 
 	var approvalHistory []models.ApprovalWorkflow
-	err = db.Where("risk_id = ?", riskID).
+	var totalItems int64
+
+	page, pageSize := GetPaginationParams(c)
+
+	query := db.Model(&models.ApprovalWorkflow{}).Where("risk_id = ?", riskID)
+
+	if err := query.Count(&totalItems).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count approval history: " + err.Error()})
+		return
+	}
+
+	err = query.Scopes(PaginateScope(page, pageSize)).
 		Preload("Requester").Preload("Approver"). // Preload user details
 		Order("created_at desc").
 		Find(&approvalHistory).Error
@@ -567,7 +629,21 @@ func GetRiskApprovalHistoryHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, approvalHistory)
+	totalPages := totalItems / int64(pageSize)
+	if totalItems%int64(pageSize) != 0 {
+		totalPages++
+	}
+    if totalItems == 0 { totalPages = 0 }
+    if totalPages == 0 && totalItems > 0 { totalPages = 1 }
+
+	response := PaginatedResponse{
+		Items:      approvalHistory,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+		Page:       page,
+		PageSize:   pageSize,
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 

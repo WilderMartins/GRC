@@ -92,24 +92,56 @@ func ListWebhooksHandler(c *gin.Context) {
 	}
 
     tokenOrgID, orgOk := c.Get("organizationID")
-	tokenUserRole, roleOk := c.Get("userRole") // Pode não precisar de role admin para listar, só ser da org
-	if !orgOk || !roleOk || tokenOrgID.(uuid.UUID) != targetOrgID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+	// Para listar, apenas verificamos se o usuário pertence à organização.
+	if !orgOk || tokenOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this organization's webhooks"})
 		return
 	}
 
-
+	page, pageSize := GetPaginationParams(c)
 	db := database.GetDB()
 	var webhooks []models.WebhookConfiguration
-	if err := db.Where("organization_id = ?", targetOrgID).Find(&webhooks).Error; err != nil {
+	var totalItems int64
+
+	query := db.Model(&models.WebhookConfiguration{}).Where("organization_id = ?", targetOrgID)
+	if err := query.Count(&totalItems).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count webhook configurations: " + err.Error()})
+		return
+	}
+
+	if err := query.Scopes(PaginateScope(page, pageSize)).Order("created_at desc").Find(&webhooks).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list webhook configurations: " + err.Error()})
 		return
 	}
-    // Se quiser retornar EventTypes como slice no JSON de resposta:
-    // type WebhookResponseDTO struct { ... EventTypes []string ... }
-    // var responseDTOs []WebhookResponseDTO
-    // for _, wh := range webhooks { ... converter e adicionar a responseDTOs ... }
-	c.JSON(http.StatusOK, webhooks)
+
+	totalPages := totalItems / int64(pageSize)
+	if totalItems%int64(pageSize) != 0 {
+		totalPages++
+	}
+    if totalItems == 0 { totalPages = 0 }
+    if totalPages == 0 && totalItems > 0 { totalPages = 1 }
+
+	// Para retornar EventTypes como slice no JSON de resposta:
+	type WebhookResponseItem struct {
+		models.WebhookConfiguration
+		EventTypesList []string `json:"event_types_list"`
+	}
+	var responseItems []WebhookResponseItem
+	for _, wh := range webhooks {
+		responseItems = append(responseItems, WebhookResponseItem{
+			WebhookConfiguration: wh,
+			EventTypesList:       stringToEventTypes(wh.EventTypes),
+		})
+	}
+
+	response := PaginatedResponse{
+		Items:      responseItems,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+		Page:       page,
+		PageSize:   pageSize,
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // GetWebhookHandler gets a specific webhook configuration.
