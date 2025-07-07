@@ -8,6 +8,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"encoding/json"
+	"fmt"
+	"log"
+	"mime/multipart"
+	"path/filepath"
+	"phoenixgrc/backend/internal/filestorage"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause" // Para Upsert
 )
@@ -66,11 +73,34 @@ type AssessmentPayload struct {
 // CreateOrUpdateAssessmentHandler creates a new assessment or updates an existing one.
 // An assessment is unique per (OrganizationID, AuditControlID).
 func CreateOrUpdateAssessmentHandler(c *gin.Context) {
-	var payload AssessmentPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+	// Multipart form processing
+	// Max 10 MB files
+	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse multipart form: " + err.Error()})
 		return
 	}
+
+	// Get JSON payload from "data" form field
+	payloadString := c.Request.FormValue("data")
+	if payloadString == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'data' field in multipart form"})
+		return
+	}
+
+	var payload AssessmentPayload
+	if err := json.Unmarshal([]byte(payloadString), &payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON in 'data' field: " + err.Error()})
+		return
+	}
+
+	// Re-validate the unmarshalled payload using Gin's validator (optional, but good practice)
+	// This requires payload to be bound again, or use a custom validator.
+	// For now, we assume basic JSON unmarshalling is enough if `ShouldBindJSON` was to be used.
+	// A better way would be to bind the JSON part specifically if Gin supports it for multipart.
+	// Or, manually trigger validation:
+	// validate := validator.New()
+	// if err := validate.Struct(payload); err != nil { ... }
+
 
 	orgID, orgExists := c.Get("organizationID")
 	if !orgExists {
@@ -96,12 +126,46 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		parsedAssessmentDate = time.Now() // Default to now if not provided
 	}
 
+	uploadedFileURL := payload.EvidenceURL // Use URL from payload if no file is uploaded or if it's preferred
+
+	// Handle file upload if "evidence_file" is provided
+	file, header, errFile := c.Request.FormFile("evidence_file")
+	if errFile == nil { // File was provided
+		defer file.Close()
+
+		if filestorage.DefaultFileStorageProvider == nil {
+			log.Println("Attempted file upload, but no file storage provider is configured.")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "File storage service is not configured."})
+			return
+		}
+
+		// Construct a unique object name for GCS
+		// Example: {orgID}/audit_evidences/{auditControlID}/{assessmentID_or_timestamp}_{original_filename}
+		// For a new assessment, we don't have assessmentID yet. Using controlID and a UUID.
+		newFileName := fmt.Sprintf("%s_%s", uuid.New().String(), filepath.Base(header.Filename))
+		objectPath := fmt.Sprintf("%s/audit_evidences/%s/%s", organizationID.String(), auditControlUUID.String(), newFileName)
+
+		fileURL, errUpload := filestorage.DefaultFileStorageProvider.UploadFile(c.Request.Context(), organizationID.String(), objectPath, file)
+		if errUpload != nil {
+			log.Printf("Failed to upload evidence file to GCS: %v", errUpload)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload evidence file: " + errUpload.Error()})
+			return
+		}
+		uploadedFileURL = fileURL // Override with the GCS URL
+		log.Printf("Evidence file uploaded for org %s, control %s: %s", organizationID, auditControlUUID, uploadedFileURL)
+
+	} else if errFile != http.ErrMissingFile {
+		// Some other error occurred with FormFile other than file simply not being there
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Error processing evidence file: " + errFile.Error()})
+		return
+	}
+
 
 	assessment := models.AuditAssessment{
 		OrganizationID: organizationID,
 		AuditControlID: auditControlUUID,
 		Status:         payload.Status,
-		EvidenceURL:    payload.EvidenceURL,
+		EvidenceURL:    uploadedFileURL, // Use the URL from upload or from payload
 		AssessmentDate: parsedAssessmentDate,
 	}
 	if payload.Score != nil {

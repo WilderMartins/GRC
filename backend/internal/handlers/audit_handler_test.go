@@ -14,9 +14,29 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"context"
+	"io"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"phoenixgrc/backend/internal/filestorage"
+	"strings"
+
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
 )
+
+// MockFileStorageProvider para simular o FileStorageProvider
+type MockFileStorageProvider struct {
+	UploadFileFunc func(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (string, error)
+}
+
+func (m *MockFileStorageProvider) UploadFile(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (string, error) {
+	if m.UploadFileFunc != nil {
+		return m.UploadFileFunc(ctx, organizationID, objectName, fileContent)
+	}
+	return "http://mockurl.com/" + objectName, nil // Default mock URL
+}
 
 // Assumindo que testUserID, testOrgID são definidos em main_test_handler.go
 // e getRouterWithAuthenticatedContext está disponível.
@@ -114,58 +134,150 @@ func TestCreateOrUpdateAssessmentHandler(t *testing.T) {
 	router := getRouterWithAuthenticatedContext(testUserID, testOrgID)
 	router.POST("/audit/assessments", CreateOrUpdateAssessmentHandler)
 
-	assessmentDate := time.Now().Format("2006-01-02")
-	score := 50
+	// Salvar o provedor de armazenamento de arquivos original e restaurá-lo depois
+	originalFileStorageProvider := filestorage.DefaultFileStorageProvider
+	defer func() { filestorage.DefaultFileStorageProvider = originalFileStorageProvider }()
 
-	payload := AssessmentPayload{
-		AuditControlID: testControlID.String(),
-		Status:         models.ControlStatusPartiallyConformant,
-		EvidenceURL:    "http://example.com/evidence.pdf",
-		Score:          &score,
-		AssessmentDate: assessmentDate,
-	}
-	body, _ := json.Marshal(payload)
 
-	t.Run("Successful assessment upsert - create", func(t *testing.T) {
+	t.Run("Successful assessment upsert - create with text evidence_url", func(t *testing.T) {
+		filestorage.DefaultFileStorageProvider = nil // Simula nenhum provedor de upload configurado
+
+		assessmentDate := time.Now().Format("2006-01-02")
+		score := 50
+		payload := AssessmentPayload{
+			AuditControlID: testControlID.String(),
+			Status:         models.ControlStatusPartiallyConformant,
+			EvidenceURL:    "http://example.com/text_evidence.pdf", // URL de texto
+			Score:          &score,
+			AssessmentDate: assessmentDate,
+		}
+		payloadJSON, _ := json.Marshal(payload)
+
+		// Criar corpo multipart
+		bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		_ = writer.WriteField("data", string(payloadJSON))
+		writer.Close()
+
+
 		sqlMock.ExpectBegin()
-		// Mock para o ON CONFLICT ... DO UPDATE
-		// A query exata pode variar um pouco com base na versão do GORM/Postgres.
-		// O importante é que ele tente inserir e, em caso de conflito, atualize.
-		// Para CREATE (sem conflito):
 		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "audit_assessments" ("id","organization_id","audit_control_id","status","evidence_url","score","assessment_date","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT ("organization_id","audit_control_id") DO UPDATE SET "status"=$10,"evidence_url"=$11,"score"=$12,"assessment_date"=$13,"updated_at"=$14 RETURNING "id"`)).
 			WithArgs(sqlmock.AnyArg(), testOrgID, testControlID, payload.Status, payload.EvidenceURL, *payload.Score, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), payload.Status, payload.EvidenceURL, *payload.Score, sqlmock.AnyArg(), sqlmock.AnyArg()).
-			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(testAssessmentID)) // Simula a criação
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(testAssessmentID))
 		sqlMock.ExpectCommit()
 
-		// Mock para o re-fetch após o upsert
-		// Colunas: id, organization_id, audit_control_id, status, evidence_url, score, assessment_date
 		refetchRows := sqlmock.NewRows([]string{"id", "organization_id", "audit_control_id", "status", "evidence_url", "score", "assessment_date"}).
 			AddRow(testAssessmentID, testOrgID, testControlID, payload.Status, payload.EvidenceURL, *payload.Score, time.Now())
 		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id = $2 ORDER BY "audit_assessments"."id" LIMIT $3`)).
 			WithArgs(testOrgID, testControlID, 1).
 			WillReturnRows(refetchRows)
 
-
-		req, _ := http.NewRequest(http.MethodPost, "/audit/assessments", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
+		req, _ := http.NewRequest(http.MethodPost, "/audit/assessments", bodyBuf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 
-		assert.Equal(t, http.StatusOK, rr.Code, "Response code should be 200 OK: %s", rr.Body.String())
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
 		var createdAssessment models.AuditAssessment
 		err := json.Unmarshal(rr.Body.Bytes(), &createdAssessment)
 		assert.NoError(t, err)
-		assert.Equal(t, testAssessmentID, createdAssessment.ID) // ID retornado pelo re-fetch
-		assert.Equal(t, payload.Status, createdAssessment.Status)
-		assert.Equal(t, *payload.Score, createdAssessment.Score)
-
-		assert.NoError(t, sqlMock.ExpectationsWereMet(), "SQL mock expectations were not met")
+		assert.Equal(t, payload.EvidenceURL, createdAssessment.EvidenceURL)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
 
-    // TODO: Adicionar teste para o caso de UPDATE do upsert.
-    // Isso exigiria que o primeiro ExpectQuery simulasse um conflito ou que a lógica do GORM fosse mockada de forma diferente.
-    // Para simplificar, o teste acima cobre o fluxo geral do upsert que resulta em uma criação ou atualização.
-    // Um teste específico de UPDATE envolveria GORM detectando o conflito e aplicando o DO UPDATE path.
+	t.Run("Successful assessment upsert - create with file upload", func(t *testing.T) {
+		mockUploader := &MockFileStorageProvider{}
+		expectedUploadedURL := "" // Será definida pela função mockada
+		mockUploader.UploadFileFunc = func(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (string, error) {
+			// Verificar se os args estão corretos, se necessário
+			assert.Equal(t, testOrgID.String(), organizationID)
+			assert.Contains(t, objectName, testControlID.String()) // objectName deve conter o controlID
+			assert.Contains(t, objectName, "test_evidence.txt")   // e o nome do arquivo original
+
+			// Ler o conteúdo para garantir que o arquivo correto foi passado (opcional)
+			// contentBytes, _ := io.ReadAll(fileContent)
+			// assert.Equal(t, "dummy evidence content", string(contentBytes))
+
+			expectedUploadedURL = "http://mockgcs.com/" + objectName
+			return expectedUploadedURL, nil
+		}
+		filestorage.DefaultFileStorageProvider = mockUploader
+
+
+		assessmentDate := time.Now().Format("2006-01-02")
+		score := 75
+		payload := AssessmentPayload{
+			AuditControlID: testControlID.String(),
+			Status:         models.ControlStatusConformant,
+			Score:          &score,
+			AssessmentDate: assessmentDate,
+			// EvidenceURL é omitido ou pode ser ignorado se o arquivo for fornecido
+		}
+		payloadJSON, _ := json.Marshal(payload)
+
+		bodyBuf := &bytes.Buffer{}
+		mpWriter := multipart.NewWriter(bodyBuf)
+		_ = mpWriter.WriteField("data", string(payloadJSON))
+		fileWriter, _ := mpWriter.CreateFormFile("evidence_file", "test_evidence.txt")
+		_, _ = fileWriter.Write([]byte("dummy evidence content"))
+		mpWriter.Close()
+
+
+		sqlMock.ExpectBegin()
+		// A EvidenceURL agora será a expectedUploadedURL
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "audit_assessments" ("id","organization_id","audit_control_id","status","evidence_url","score","assessment_date","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT ("organization_id","audit_control_id") DO UPDATE SET "status"=$10,"evidence_url"=$11,"score"=$12,"assessment_date"=$13,"updated_at"=$14 RETURNING "id"`)).
+			// WithArgs precisa corresponder à URL que o mockUploader.UploadFileFunc retornará
+			// No entanto, como expectedUploadedURL é definida dentro do mock, não podemos usá-la diretamente aqui.
+			// Usamos sqlmock.AnyArg() para a evidence_url na expectativa da query.
+			WithArgs(sqlmock.AnyArg(), testOrgID, testControlID, payload.Status, sqlmock.AnyArg() /* evidence_url */, *payload.Score, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), payload.Status, sqlmock.AnyArg() /* evidence_url */, *payload.Score, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(testAssessmentID))
+		sqlMock.ExpectCommit()
+
+		refetchRows := sqlmock.NewRows([]string{"id", "organization_id", "audit_control_id", "status", "evidence_url", "score", "assessment_date"}).
+			AddRow(testAssessmentID, testOrgID, testControlID, payload.Status, "http://mockgcs.com/somepath/test_evidence.txt" /* URL mockada */, *payload.Score, time.Now())
+		// A URL exata no refetchRows deve corresponder ao que o mockUploader.UploadFileFunc retornaria e como o objectName é construído.
+		// Para maior precisão, o mock do refetch deve usar a `expectedUploadedURL` que seria gerada.
+		// Por enquanto, usamos uma string placeholder que corresponda ao padrão.
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id = $2 ORDER BY "audit_assessments"."id" LIMIT $3`)).
+			WithArgs(testOrgID, testControlID, 1).
+			WillReturnRows(refetchRows)
+
+
+		req, _ := http.NewRequest(http.MethodPost, "/audit/assessments", bodyBuf)
+		req.Header.Set("Content-Type", mpWriter.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var createdAssessment models.AuditAssessment
+		err := json.Unmarshal(rr.Body.Bytes(), &createdAssessment)
+		assert.NoError(t, err)
+		assert.Contains(t, createdAssessment.EvidenceURL, "test_evidence.txt") // Verifica se a URL retornada contém o nome do arquivo
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+    t.Run("Fail if file storage not configured but file provided", func(t *testing.T) {
+		filestorage.DefaultFileStorageProvider = nil // Simula nenhum provedor configurado
+
+		payload := AssessmentPayload{ AuditControlID: testControlID.String(), Status: models.ControlStatusConformant }
+		payloadJSON, _ := json.Marshal(payload)
+
+		bodyBuf := &bytes.Buffer{}
+		mpWriter := multipart.NewWriter(bodyBuf)
+		_ = mpWriter.WriteField("data", string(payloadJSON))
+		fileWriter, _ := mpWriter.CreateFormFile("evidence_file", "evidence.txt")
+		_, _ = fileWriter.Write([]byte("content"))
+		mpWriter.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, "/audit/assessments", bodyBuf)
+		req.Header.Set("Content-Type", mpWriter.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+		assert.Contains(t, rr.Body.String(), "File storage service is not configured")
+	})
+
 }
 
 

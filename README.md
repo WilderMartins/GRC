@@ -244,19 +244,22 @@ Endpoints para listar frameworks de auditoria, seus controles, e gerenciar avali
     *   **Resposta (Sucesso - 200 OK):** Array de objetos `AuditControl`.
 
 *   **`POST /api/v1/audit/assessments`**: Cria ou atualiza uma avaliação para um controle específico dentro da organização do usuário autenticado.
+    *   **Tipo de Conteúdo da Requisição:** `multipart/form-data`.
     *   A organização é inferida a partir do token JWT.
     *   Este endpoint realiza um "upsert": se uma avaliação para o `audit_control_id` e organização já existir, ela é atualizada; caso contrário, uma nova é criada.
-    *   **Payload:**
-        ```json
-        {
-            "audit_control_id": "uuid-do-audit-control", // ID (UUID) do AuditControl
-            "status": "conforme", // "nao_conforme", "parcialmente_conforme"
-            "evidence_url": "http://example.com/path/to/evidence.pdf", // Opcional
-            "score": 100, // Opcional, entre 0-100. Pode ser inferido do status se não fornecido.
-            "assessment_date": "2023-10-26" // Opcional, YYYY-MM-DD. Default para data atual se não fornecido.
-        }
-        ```
-    *   **Resposta (Sucesso - 200 OK):** Objeto da `AuditAssessment` criada ou atualizada.
+    *   **Campos do Formulário:**
+        *   `data` (obrigatório): Um JSON string contendo os dados da avaliação:
+            ```json
+            {
+                "audit_control_id": "uuid-do-audit-control", // ID (UUID) do AuditControl
+                "status": "conforme", // "nao_conforme", "parcialmente_conforme"
+                "evidence_url": "http://example.com/link-externo.pdf", // Opcional, usado se nenhum arquivo for enviado
+                "score": 100, // Opcional, entre 0-100. Pode ser inferido do status se não fornecido.
+                "assessment_date": "2023-10-26" // Opcional, YYYY-MM-DD. Default para data atual se não fornecido.
+            }
+            ```
+        *   `evidence_file` (opcional): O arquivo de evidência. Se fornecido, a URL deste arquivo (após upload para GCS) substituirá qualquer `evidence_url` fornecida no JSON `data`.
+    *   **Resposta (Sucesso - 200 OK):** Objeto da `AuditAssessment` criada ou atualizada, com `EvidenceURL` apontando para o arquivo no GCS se um upload foi feito.
 
 *   **`GET /api/v1/audit/assessments/control/{controlId}`**: Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado.
     *   **Resposta (Sucesso - 200 OK):** Objeto `AuditAssessment`.

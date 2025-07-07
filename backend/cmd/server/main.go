@@ -13,6 +13,7 @@ import (
 	"phoenixgrc/backend/internal/oauth2auth" // Import OAuth2 auth package
 	"phoenixgrc/backend/internal/samlauth"   // Import SAML auth package
 	"phoenixgrc/backend/internal/seeders"    // Import seeders package
+	"phoenixgrc/backend/internal/filestorage" // Import filestorage package
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -141,6 +142,14 @@ func startServer() {
 		log.Fatalf("Failed to initialize OAuth2 Global Config: %v", err)
 	}
 	log.Println("OAuth2 Global Config Initialized.")
+
+	// Initialize File Storage Provider
+	if err := filestorage.InitFileStorage(); err != nil {
+		// Log o erro, mas não necessariamente fatal, a app pode rodar sem uploads.
+		// A função InitFileStorage já loga internamente.
+		log.Printf("Warning: File storage initialization failed: %v. Uploads may not work.", err)
+	}
+
 
 	dbHost := os.Getenv("POSTGRES_HOST")
 	dbPort := os.Getenv("POSTGRES_PORT")
