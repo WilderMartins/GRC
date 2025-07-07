@@ -10,6 +10,8 @@ import (
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/handlers"
 	"phoenixgrc/backend/internal/models"
+	"phoenixgrc/backend/internal/oauth2auth" // Import OAuth2 auth package
+	"phoenixgrc/backend/internal/samlauth"   // Import SAML auth package
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -120,6 +122,18 @@ func startServer() {
 	}
 	log.Println("JWT Initialized.")
 
+	// Initialize SAML SP Global Config
+	if err := samlauth.InitializeSAMLSPGlobalConfig(); err != nil {
+		log.Fatalf("Failed to initialize SAML SP Global Config: %v", err)
+	}
+	log.Println("SAML SP Global Config Initialized.")
+
+	// Initialize OAuth2 Global Config
+	if err := oauth2auth.InitializeOAuth2GlobalConfig(); err != nil {
+		log.Fatalf("Failed to initialize OAuth2 Global Config: %v", err)
+	}
+	log.Println("OAuth2 Global Config Initialized.")
+
 	dbHost := os.Getenv("POSTGRES_HOST")
 	dbPort := os.Getenv("POSTGRES_PORT")
 	dbUser := os.Getenv("POSTGRES_USER")
@@ -171,6 +185,35 @@ func startServer() {
 	authRoutes := router.Group("/auth")
 	{
 		authRoutes.POST("/login", handlers.LoginHandler)
+
+		// SAML Authentication Routes
+		// These routes are specific to an IdP configuration
+		samlIdPGroup := authRoutes.Group("/saml/:idpId")
+		{
+			samlIdPGroup.GET("/metadata", samlauth.MetadataHandler) // SP Metadata endpoint
+			samlIdPGroup.POST("/acs", samlauth.ACSHandler)          // Assertion Consumer Service
+			// Gin doesn't route GET and POST to the same handler func by default for the same path
+			// So if ACS can be GET (not typical but possible), add another route or check method.
+			// Most IdPs will POST to ACS.
+			samlIdPGroup.GET("/login", samlauth.SAMLLoginHandler) // Initiates login to IdP
+			// TODO: Add SLO (Single Logout) routes if needed
+			// samlIdPGroup.POST("/slo", samlauth.SLOHandler)
+			// samlIdPGroup.GET("/slo", samlauth.SLOHandler)
+		}
+
+		// OAuth2 Authentication Routes (Example for Google)
+		// These routes are also specific to an IdP configuration instance
+		oauth2GoogleGroup := authRoutes.Group("/oauth2/google/:idpId")
+		{
+			oauth2GoogleGroup.GET("/login", oauth2auth.GoogleLoginHandler)
+			oauth2GoogleGroup.GET("/callback", oauth2auth.GoogleCallbackHandler)
+		}
+		// TODO: Add routes for other OAuth2 providers (e.g., GitHub) in a similar fashion
+		// oauth2GithubGroup := authRoutes.Group("/oauth2/github/:idpId")
+		// {
+		// 	oauth2GithubGroup.GET("/login", oauth2auth.GithubLoginHandler)
+		// 	oauth2GithubGroup.GET("/callback", oauth2auth.GithubCallbackHandler)
+		// }
 	}
 
 	// Protected API v1 routes
@@ -201,6 +244,20 @@ func startServer() {
 			riskRoutes.GET("/:riskId", handlers.GetRiskHandler)
 			riskRoutes.PUT("/:riskId", handlers.UpdateRiskHandler)
 			riskRoutes.DELETE("/:riskId", handlers.DeleteRiskHandler)
+		}
+
+		// Identity Provider Management Routes (nested under organizations)
+		// Example path: /api/v1/organizations/{orgId}/identity-providers
+		orgRoutes := apiV1.Group("/organizations/:orgId")
+		{
+			idpRoutes := orgRoutes.Group("/identity-providers")
+			{
+				idpRoutes.POST("", handlers.CreateIdentityProviderHandler)
+				idpRoutes.GET("", handlers.ListIdentityProvidersHandler)
+				idpRoutes.GET("/:idpId", handlers.GetIdentityProviderHandler)
+				idpRoutes.PUT("/:idpId", handlers.UpdateIdentityProviderHandler)
+				idpRoutes.DELETE("/:idpId", handlers.DeleteIdentityProviderHandler)
+			}
 		}
 	}
 

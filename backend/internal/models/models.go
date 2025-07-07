@@ -73,6 +73,7 @@ type Organization struct {
 	Risks          []Risk          `gorm:"foreignKey:OrganizationID"`
 	Vulnerabilities []Vulnerability `gorm:"foreignKey:OrganizationID"`
 	AuditAssessments []AuditAssessment `gorm:"foreignKey:OrganizationID"`
+	IdentityProviders []IdentityProvider `gorm:"foreignKey:OrganizationID"`
 }
 
 func (org *Organization) BeforeCreate(tx *gorm.DB) (err error) {
@@ -249,6 +250,39 @@ func InitDB(dsn string) (*gorm.DB, error) {
 }
 */
 
+// IdentityProviderType defines the type of identity provider
+type IdentityProviderType string
+
+const (
+	IDPTypeSAML         IdentityProviderType = "saml"
+	IDPTypeOAuth2Google IdentityProviderType = "oauth2_google"
+	IDPTypeOAuth2Github IdentityProviderType = "oauth2_github"
+	// Add other types as needed
+)
+
+// IdentityProvider stores configuration for SSO/Social Login providers
+type IdentityProvider struct {
+	ID                   uuid.UUID            `gorm:"type:uuid;primary_key;"`
+	OrganizationID       uuid.UUID            `gorm:"type:uuid;not null;index"` // Foreign key to organizations
+	ProviderType         IdentityProviderType `gorm:"type:varchar(50);not null"`
+	Name                 string               `gorm:"size:100;not null"` // User-friendly name, e.g., "Login com Google Corporativo"
+	IsActive             bool                 `gorm:"default:true;not null"`
+	ConfigJSON           string               `gorm:"type:jsonb"` // Stores SAML URLs, OAuth2 client_id/secret, etc.
+	AttributeMappingJSON string               `gorm:"type:jsonb"` // Optional: maps IdP attributes to User fields
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	Organization         Organization `gorm:"foreignKey:OrganizationID"`
+}
+
+// BeforeCreate hook to ensure ID is set for IdentityProvider
+func (idp *IdentityProvider) BeforeCreate(tx *gorm.DB) (err error) {
+	if idp.ID == uuid.Nil {
+		idp.ID = uuid.New()
+	}
+	return
+}
+
+
 // AutoMigrateDB automatically migrates the schema
 func AutoMigrateDB(db *gorm.DB) error {
 	err := db.AutoMigrate(
@@ -261,6 +295,7 @@ func AutoMigrateDB(db *gorm.DB) error {
 		&AuditFramework{},
 		&AuditControl{},
 		&AuditAssessment{},
+		&IdentityProvider{}, // Added new model
 	)
 	return err
 }

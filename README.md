@@ -36,7 +36,17 @@ Este projeto utiliza Docker e Docker Compose para facilitar a configuração do 
     ```bash
     cp .env.example .env
     ```
-    Edite o arquivo `.env` e **certifique-se de definir `JWT_SECRET_KEY` com um valor seguro e único**. Ajuste as outras configurações do banco de dados e do servidor conforme necessário.
+    Edite o arquivo `.env` e **certifique-se de definir `JWT_SECRET_KEY`, `SAML_SP_KEY_PEM`, e `SAML_SP_CERT_PEM` com valores seguros e únicos**. Ajuste `APP_ROOT_URL` para o endereço base da sua aplicação (ex: `http://localhost:8080` para desenvolvimento local). Configure também as URLs de callback do frontend (`FRONTEND_SAML_CALLBACK_URL`, `FRONTEND_OAUTH2_CALLBACK_URL`) e as demais configurações do banco de dados e servidor conforme necessário.
+
+    **Geração de Chaves SAML SP:**
+    Para `SAML_SP_KEY_PEM` e `SAML_SP_CERT_PEM`, você precisará de um par de chave privada e certificado X.509 para o seu Service Provider (Phoenix GRC). Você pode gerá-los usando OpenSSL:
+    ```bash
+    # 1. Gerar chave privada RSA de 2048 bits
+    openssl genpkey -algorithm RSA -out saml_sp_private.key -pkeyopt rsa_keygen_bits:2048
+    # 2. Gerar um certificado público auto-assinado a partir da chave privada (válido por 10 anos)
+    openssl req -new -x509 -key saml_sp_private.key -out saml_sp_public.crt -days 3650 -subj "/CN=PhoenixGRC_SP_Local"
+    ```
+    Copie o conteúdo de `saml_sp_private.key` para a variável `SAML_SP_KEY_PEM` e o conteúdo de `saml_sp_public.crt` para `SAML_SP_CERT_PEM` no seu arquivo `.env`. Certifique-se de formatar corretamente as strings PEM multi-linha no arquivo `.env` (geralmente substituindo novas linhas por `\n` ou usando aspas apropriadas se o seu parser `.env` suportar).
 
 3.  **Construa as Imagens Docker:**
     Este comando irá construir a imagem Docker para o backend.
@@ -93,6 +103,18 @@ A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autentic
         ```
     *   **Resposta (Erro):** Status `400`, `401` ou `500` com mensagem de erro.
 
+*   **SAML 2.0 Login (Iniciação pelo SP):**
+    *   **`GET /auth/saml/{idpId}/login`**: Redireciona o usuário para o IdP SAML configurado para iniciar o login. `{idpId}` é o ID do `IdentityProvider` configurado no sistema.
+*   **SAML 2.0 SP Metadata:**
+    *   **`GET /auth/saml/{idpId}/metadata`**: Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado.
+*   **SAML 2.0 Assertion Consumer Service (ACS):**
+    *   **`POST /auth/saml/{idpId}/acs`**: Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido. O backend processa a asserção, provisiona/loga o usuário e emite um token JWT do Phoenix GRC, redirecionando para `FRONTEND_SAML_CALLBACK_URL`.
+
+*   **OAuth2 Login (Exemplo Google - Iniciação pelo SP):**
+    *   **`GET /auth/oauth2/google/{idpId}/login`**: Redireciona o usuário para a página de autorização do Google. `{idpId}` é o ID do `IdentityProvider` configurado para Google.
+*   **OAuth2 Callback (Exemplo Google):**
+    *   **`GET /auth/oauth2/google/{idpId}/callback`**: Endpoint para onde o Google redireciona após a autorização do usuário. O backend troca o código por um token, obtém informações do usuário, provisiona/loga o usuário, emite um token JWT do Phoenix GRC e redireciona para `FRONTEND_OAUTH2_CALLBACK_URL`.
+
 ### Health Check
 
 *   **`GET /health`**: Verifica a saúde do servidor e a conexão com o banco de dados.
@@ -147,6 +169,41 @@ Para acessar os endpoints abaixo, inclua o token JWT no header `Authorization`:
 *   **`DELETE /api/v1/risks/{riskId}`**: Deleta um risco.
     *   **Resposta (Sucesso - 200 OK):** `{ "message": "Risk deleted successfully" }`
 
+#### Gestão de Provedores de Identidade (`/api/v1/organizations/{orgId}/identity-providers`)
+Endpoints para administradores de organização gerenciarem configurações de SSO SAML e Social Login (OAuth2). Requer autenticação como admin da `{orgId}`.
+
+*   **`POST /api/v1/organizations/{orgId}/identity-providers`**: Adiciona um novo provedor de identidade.
+    *   **Payload:**
+        ```json
+        {
+            "provider_type": "saml", // ou "oauth2_google", "oauth2_github"
+            "name": "Meu IdP SAML Corporativo",
+            "is_active": true,
+            "config_json": { // Estrutura varia conforme provider_type
+                // Para SAML:
+                "idp_entity_id": "http://idp.example.com/entity",
+                "idp_sso_url": "http://idp.example.com/sso",
+                "idp_x509_cert": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----",
+                "sign_request": true, // opcional
+                "want_assertions_signed": true // opcional
+                // Para OAuth2 (ex: Google):
+                // "client_id": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+                // "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
+                // "scopes": ["email", "profile"] // opcional
+            },
+            "attribute_mapping_json": { // Opcional
+                "email": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+                "name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+            }
+        }
+        ```
+    *   **Resposta (Sucesso - 201 Created):** Objeto do provedor de identidade criado.
+
+*   **`GET /api/v1/organizations/{orgId}/identity-providers`**: Lista todos os provedores de identidade da organização.
+*   **`GET /api/v1/organizations/{orgId}/identity-providers/{idpId}`**: Obtém um provedor específico.
+*   **`PUT /api/v1/organizations/{orgId}/identity-providers/{idpId}`**: Atualiza um provedor. (Payload similar ao POST).
+*   **`DELETE /api/v1/organizations/{orgId}/identity-providers/{idpId}`**: Remove um provedor.
+
 ### Exemplo de Uso com `curl`
 
 1.  **Login para obter o token:**
@@ -176,8 +233,10 @@ Para acessar os endpoints abaixo, inclua o token JWT no header `Authorization`:
 │   ├── internal/
 │   │   ├── auth/           # Lógica de autenticação JWT (geração, validação, middleware)
 │   │   ├── database/       # Conexão com DB e migrações GORM
-│   │   ├── handlers/       # Handlers HTTP (controladores) para Gin
-│   │   ├── models/         # Structs GORM (schema do DB)
+│   │   ├── handlers/       # Handlers HTTP (controladores) para Gin (auth, risks, identity providers)
+│   │   ├── models/         # Structs GORM (schema do DB, incluindo IdentityProvider)
+│   │   ├── samlauth/       # Lógica específica para autenticação SAML 2.0
+│   │   ├── oauth2auth/     # Lógica específica para autenticação OAuth2 (ex: Google)
 │   │   └── ...
 │   ├── pkg/                # Pacotes Go reutilizáveis (se houver)
 │   ├── go.mod
