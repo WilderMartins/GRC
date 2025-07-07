@@ -1,6 +1,9 @@
 import AdminLayout from '@/components/layouts/AdminLayout'; // Ajuste o path se necessário
+import WithAuth from '@/components/auth/WithAuth'; // Importar o HOC
+import { useAuth } from '@/contexts/AuthContext'; // Para acessar dados do usuário, se necessário
 
-export default function AdminDashboardPage() {
+const AdminDashboardContent = () => {
+  const { user } = useAuth(); // Exemplo de como acessar o usuário se precisar exibir algo específico
   return (
     <AdminLayout title="Dashboard - Admin Phoenix GRC">
       <div className="container mx-auto px-4 py-8">
@@ -39,4 +42,6 @@ export default function AdminDashboardPage() {
       </div>
     </AdminLayout>
   );
-}
+};
+
+export default WithAuth(AdminDashboardContent); // Proteger a página do dashboard admin

@@ -1,5 +1,8 @@
 import Head from 'next/head';
-import Link from 'next/link'; // Para links futuros, como "Esqueci minha senha"
+import Link from 'next/link';
+import { useAuth } from '../../contexts/AuthContext'; // Ajuste o path se necessário
+import apiClient from '../../lib/axios'; // Ajuste o path se necessário
+import { useState } from 'react';
 
 // Tipos para provedores de identidade (simulados por enquanto)
 interface IdentityProvider {
@@ -30,12 +33,48 @@ const identityProviders: IdentityProvider[] = [
 
 
 export default function LoginPage() {
+  const auth = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  const [isLoadingState, setIsLoadingState] = useState(false); // Renomeado para evitar conflito com auth.isLoading
+
   const handleTraditionalLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // TODO: Implementar lógica de login com email/senha
-    // Pegar email e senha do form
-    // Chamar o endpoint /auth/login do backend
-    alert('Login tradicional a ser implementado!');
+    setError(null);
+    setIsLoadingState(true);
+    const formData = new FormData(event.currentTarget);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+
+    if (!email || !password) {
+      setError('Email e senha são obrigatórios.');
+      setIsLoadingState(false);
+      return;
+    }
+
+    try {
+      const response = await apiClient.post('/auth/login', { email, password });
+      // Estrutura esperada da resposta do backend:
+      // { token, user_id, email, name, role, organization_id }
+      if (response.data && response.data.token && response.data.user_id) {
+        const userData = {
+          id: response.data.user_id,
+          name: response.data.name,
+          email: response.data.email,
+          role: response.data.role,
+          organization_id: response.data.organization_id,
+        };
+        auth.login(userData, response.data.token);
+        // O redirecionamento é feito dentro de auth.login()
+      } else {
+        setError('Falha no login: Resposta inesperada do servidor.');
+      }
+    } catch (err: any) {
+      console.error('Erro no login:', err);
+      const errorMessage = err.response?.data?.error || err.message || 'Erro desconhecido ao tentar fazer login.';
+      setError(`Falha no login: ${errorMessage}`);
+    } finally {
+      setIsLoadingState(false);
+    }
   };
 
   const handleSSOLogin = (provider: IdentityProvider) => {
@@ -65,6 +104,22 @@ export default function LoginPage() {
             <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Phoenix GRC</h1>
             <p className="text-gray-600 dark:text-gray-300">Bem-vindo de volta!</p>
           </div>
+
+          {error && (
+            <div className="mb-4 rounded-md bg-red-50 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  {/* Heroicon name: mini/x-circle */}
+                  <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-red-800">{error}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Formulário de Login Tradicional */}
           <form onSubmit={handleTraditionalLogin} className="space-y-6">
@@ -131,9 +186,17 @@ export default function LoginPage() {
             <div>
               <button
                 type="submit"
-                className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+                disabled={isLoadingState}
+                className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-gray-800"
               >
-                Entrar
+                {isLoadingState ? (
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  'Entrar'
+                )}
               </button>
             </div>
           </form>
