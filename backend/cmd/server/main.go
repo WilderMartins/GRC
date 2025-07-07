@@ -252,6 +252,12 @@ func startServer() {
 			riskRoutes.GET("/:riskId", handlers.GetRiskHandler)
 			riskRoutes.PUT("/:riskId", handlers.UpdateRiskHandler)
 			riskRoutes.DELETE("/:riskId", handlers.DeleteRiskHandler)
+
+			// Approval Workflow Routes nested under a specific risk
+			riskRoutes.POST("/:riskId/submit-acceptance", handlers.SubmitRiskForAcceptanceHandler)
+			riskRoutes.GET("/:riskId/approval-history", handlers.GetRiskApprovalHistoryHandler)
+			// Note: approvalId is the ID of the ApprovalWorkflow record itself
+			riskRoutes.POST("/:riskId/approval/:approvalId/decide", handlers.ApproveOrRejectRiskAcceptanceHandler)
 		}
 
 		// Identity Provider Management Routes (nested under organizations)

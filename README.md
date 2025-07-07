@@ -266,6 +266,38 @@ Endpoints para listar frameworks de auditoria, seus controles, e gerenciar avali
     *   Requer que o usuário autenticado pertença à `{orgId}` ou seja um superadmin (lógica de superadmin não implementada).
     *   **Resposta (Sucesso - 200 OK):** Array de objetos `AuditAssessment`, cada um incluindo detalhes do `AuditControl` associado.
 
+#### Workflow de Aceite de Risco (`/api/v1/risks/{riskId}/...`)
+Endpoints para gerenciar o processo de aprovação para aceite de riscos.
+
+*   **`POST /api/v1/risks/{riskId}/submit-acceptance`**: Submete um risco (identificado por `{riskId}`) para aprovação de aceite.
+    *   Requer que o usuário autenticado tenha a role `manager` ou `admin`.
+    *   O risco deve ter um `OwnerID` (proprietário) definido, que será o aprovador.
+    *   Cria um registro `ApprovalWorkflow` com status `pendente`.
+    *   **Resposta (Sucesso - 201 Created):** Objeto do `ApprovalWorkflow` criado.
+    *   **Resposta (Erro - 403 Forbidden):** Se o usuário não for manager/admin.
+    *   **Resposta (Erro - 400 Bad Request):** Se o risco não tiver proprietário.
+    *   **Resposta (Erro - 404 Not Found):** Se o risco não for encontrado.
+    *   **Resposta (Erro - 409 Conflict):** Se já existir um workflow de aprovação pendente para este risco.
+
+*   **`POST /api/v1/risks/{riskId}/approval/{approvalId}/decide`**: Registra uma decisão (aprovar/rejeitar) para um workflow de aceite de risco.
+    *   Requer que o usuário autenticado seja o `ApproverID` (proprietário do risco) do `ApprovalWorkflow` especificado por `{approvalId}`.
+    *   O `{riskId}` na URL é para contexto e verificação.
+    *   **Payload:**
+        ```json
+        {
+            "decision": "aprovado", // ou "rejeitado"
+            "comments": "Comentários sobre a decisão." // Opcional
+        }
+        ```
+    *   **Resposta (Sucesso - 200 OK):** Objeto do `ApprovalWorkflow` atualizado.
+    *   **Resposta (Erro - 403 Forbidden):** Se o usuário não for o aprovador designado.
+    *   **Resposta (Erro - 404 Not Found):** Se o workflow de aprovação não for encontrado.
+    *   **Resposta (Erro - 409 Conflict):** Se o workflow já tiver sido decidido.
+
+*   **`GET /api/v1/risks/{riskId}/approval-history`**: Lista o histórico de todos os workflows de aprovação para um risco específico.
+    *   Requer que o usuário pertença à organização do risco.
+    *   **Resposta (Sucesso - 200 OK):** Array de objetos `ApprovalWorkflow`, com detalhes do requisitante e aprovador.
+
 ### Exemplo de Uso com `curl`
 
 1.  **Login para obter o token:**

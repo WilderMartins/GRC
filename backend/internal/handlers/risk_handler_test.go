@@ -172,3 +172,239 @@ func TestGetRiskHandler(t *testing.T) {
 // 6. Assert response code and body.
 // 7. Assert sqlMock.ExpectationsWereMet().
 // Consider edge cases like invalid input, unauthorized attempts (if adding role checks), etc.
+
+
+// --- Approval Workflow Handler Tests ---
+
+var testRiskForApprovalID = uuid.New()
+var testRiskOwnerID = uuid.New() // Deve ser diferente de testUserID se quisermos testar permissões
+var testManagerUserID = uuid.New() // Um usuário com role Manager
+var testApprovalWorkflowID = uuid.New()
+
+
+func TestSubmitRiskForAcceptanceHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// Roteador com contexto de usuário Manager (testManagerUserID, testOrgID)
+	router := getRouterWithOrgAdminContext(testManagerUserID, testOrgID, models.RoleManager)
+	router.POST("/risks/:riskId/submit-acceptance", SubmitRiskForAcceptanceHandler)
+
+	// Setup: Criar um usuário que será o "owner" do risco
+	// No mundo real, este usuário já existiria. Para o teste, podemos mockar sua existência.
+	// A notificação simulada no handler tentará buscar este usuário.
+	ownerUserRows := sqlmock.NewRows([]string{"id", "email"}).AddRow(testRiskOwnerID, "owner@example.com")
+	managerUserRows := sqlmock.NewRows([]string{"id", "email"}).AddRow(testManagerUserID, "manager@example.com")
+
+
+	t.Run("Successful submission for acceptance", func(t *testing.T) {
+		mockRisk := models.Risk{
+			ID:             testRiskForApprovalID,
+			OrganizationID: testOrgID,
+			Title:          "Risk to be Approved",
+			OwnerID:        testRiskOwnerID, // Owner que receberá a aprovação
+			Status:         models.StatusOpen,
+		}
+
+		// Mock para buscar o risco
+		riskRows := sqlmock.NewRows([]string{"id", "organization_id", "title", "owner_id", "status"}).
+			AddRow(mockRisk.ID, mockRisk.OrganizationID, mockRisk.Title, mockRisk.OwnerID, mockRisk.Status)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testRiskForApprovalID, testOrgID).
+			WillReturnRows(riskRows)
+
+		// Mock para verificar workflow pendente existente (espera-se não encontrar)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "approval_workflows" WHERE risk_id = $1 AND status = $2`)).
+			WithArgs(testRiskForApprovalID, models.ApprovalPending).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		// Mock para criar o ApprovalWorkflow
+		sqlMock.ExpectBegin()
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "approval_workflows" ("id","risk_id","requester_id","approver_id","status","comments","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING "id"`)).
+			WithArgs(sqlmock.AnyArg(), testRiskForApprovalID, testManagerUserID, testRiskOwnerID, models.ApprovalPending, "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(testApprovalWorkflowID))
+		sqlMock.ExpectCommit()
+
+		// Mocks para buscar emails para a notificação placeholder
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(testManagerUserID).WillReturnRows(managerUserRows)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(testRiskOwnerID).WillReturnRows(ownerUserRows)
+
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/submit-acceptance", testRiskForApprovalID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusCreated, rr.Code, "Response: %s", rr.Body.String())
+		var awf models.ApprovalWorkflow
+		err := json.Unmarshal(rr.Body.Bytes(), &awf)
+		assert.NoError(t, err)
+		assert.Equal(t, testRiskForApprovalID, awf.RiskID)
+		assert.Equal(t, testManagerUserID, awf.RequesterID)
+		assert.Equal(t, testRiskOwnerID, awf.ApproverID)
+		assert.Equal(t, models.ApprovalPending, awf.Status)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("Fail if risk has no owner", func(t *testing.T) {
+		mockRiskNoOwner := models.Risk{ID: testRiskForApprovalID, OrganizationID: testOrgID, Title: "No Owner Risk", OwnerID: uuid.Nil}
+		riskRows := sqlmock.NewRows([]string{"id", "organization_id", "title", "owner_id"}).
+			AddRow(mockRiskNoOwner.ID, mockRiskNoOwner.OrganizationID, mockRiskNoOwner.Title, mockRiskNoOwner.OwnerID)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testRiskForApprovalID, testOrgID).
+			WillReturnRows(riskRows)
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/submit-acceptance", testRiskForApprovalID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Risk must have an owner")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("Fail if already pending workflow exists", func(t *testing.T) {
+		mockRisk := models.Risk{ID: testRiskForApprovalID, OrganizationID: testOrgID, Title: "Pending Risk", OwnerID: testRiskOwnerID}
+		riskRows := sqlmock.NewRows([]string{"id", "organization_id", "title", "owner_id"}).
+			AddRow(mockRisk.ID, mockRisk.OrganizationID, mockRisk.Title, mockRisk.OwnerID)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testRiskForApprovalID, testOrgID).
+			WillReturnRows(riskRows)
+
+		// Mock para workflow pendente existente
+		existingAWFRows := sqlmock.NewRows([]string{"id"}).AddRow(uuid.New())
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "approval_workflows" WHERE risk_id = $1 AND status = $2`)).
+			WithArgs(testRiskForApprovalID, models.ApprovalPending).
+			WillReturnRows(existingAWFRows)
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/submit-acceptance", testRiskForApprovalID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusConflict, rr.Code)
+		assert.Contains(t, rr.Body.String(), "already pending")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("Fail if user is not manager or admin", func(t *testing.T) {
+		// Usuário com role 'user' tentando submeter
+		userRouter := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleUser)
+		userRouter.POST("/risks/:riskId/submit-acceptance", SubmitRiskForAcceptanceHandler)
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/submit-acceptance", testRiskForApprovalID.String()), nil)
+		rr := httptest.NewRecorder()
+		userRouter.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Only admins or managers can submit")
+		// No DB interaction expected
+	})
+}
+
+
+func TestApproveOrRejectRiskAcceptanceHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// Roteador com contexto do APROVADOR (testRiskOwnerID)
+	router := getRouterWithOrgAdminContext(testRiskOwnerID, testOrgID, models.RoleUser) // Role do aprovador pode ser User
+	router.POST("/risks/:riskId/approval/:approvalId/decide", ApproveOrRejectRiskAcceptanceHandler)
+
+	t.Run("Successful approval", func(t *testing.T) {
+		payload := DecisionPayload{Decision: models.ApprovalApproved, Comments: "Looks good to me."}
+		body, _ := json.Marshal(payload)
+
+		mockAWF := models.ApprovalWorkflow{
+			ID:          testApprovalWorkflowID,
+			RiskID:      testRiskForApprovalID,
+			ApproverID:  testRiskOwnerID, // O usuário logado é o aprovador
+			Status:      models.ApprovalPending,
+			Risk:        models.Risk{OrganizationID: testOrgID}, // Para a verificação de organização no Join
+		}
+		awfRows := sqlmock.NewRows([]string{"id", "risk_id", "approver_id", "status", "Risk__organization_id"}).
+			AddRow(mockAWF.ID, mockAWF.RiskID, mockAWF.ApproverID, mockAWF.Status, mockAWF.Risk.OrganizationID)
+
+		// Mock para buscar o ApprovalWorkflow
+		// A query exata com Joins pode ser complexa para mockar com regexp.QuoteMeta se a ordem das colunas não for garantida.
+		// Simplificando a query esperada para o essencial.
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT "approval_workflows"."id","approval_workflows"."risk_id","approval_workflows"."requester_id","approval_workflows"."approver_id","approval_workflows"."status","approval_workflows"."comments","approval_workflows"."created_at","approval_workflows"."updated_at","Risk"."id" AS "Risk__id","Risk"."organization_id" AS "Risk__organization_id","Risk"."title" AS "Risk__title","Risk"."description" AS "Risk__description","Risk"."category" AS "Risk__category","Risk"."impact" AS "Risk__impact","Risk"."probability" AS "Risk__probability","Risk"."status" AS "Risk__status","Risk"."owner_id" AS "Risk__owner_id","Risk"."created_at" AS "Risk__created_at","Risk"."updated_at" AS "Risk__updated_at" FROM "approval_workflows" LEFT JOIN "risks" "Risk" ON "approval_workflows"."risk_id" = "Risk"."id" WHERE "approval_workflows"."id" = $1 AND "approval_workflows"."risk_id" = $2 AND "Risk"."organization_id" = $3`)).
+			WithArgs(testApprovalWorkflowID, testRiskForApprovalID, testOrgID).
+			WillReturnRows(awfRows)
+
+		sqlMock.ExpectBegin()
+		// Mock para salvar ApprovalWorkflow atualizado
+		sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "approval_workflows" SET "risk_id"=$1,"requester_id"=$2,"approver_id"=$3,"status"=$4,"comments"=$5,"updated_at"=$6 WHERE "id" = $7`)).
+			WithArgs(mockAWF.RiskID, sqlmock.AnyArg(), mockAWF.ApproverID, payload.Decision, payload.Comments, sqlmock.AnyArg(), mockAWF.ID).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		// Mock para buscar Risco para atualizar status
+		riskToUpdateRows := sqlmock.NewRows([]string{"id", "status"}).AddRow(testRiskForApprovalID, models.StatusOpen)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1`)).
+			WithArgs(testRiskForApprovalID).
+			WillReturnRows(riskToUpdateRows)
+		// Mock para salvar Risco atualizado
+		sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "risks" SET "status"=$1,"updated_at"=$2 WHERE "id" = $3`)).
+			WithArgs(models.StatusAccepted, sqlmock.AnyArg(), testRiskForApprovalID).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		sqlMock.ExpectCommit()
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/approval/%s/decide", testRiskForApprovalID.String(), testApprovalWorkflowID.String()), bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var updatedAWF models.ApprovalWorkflow
+		err := json.Unmarshal(rr.Body.Bytes(), &updatedAWF)
+		assert.NoError(t, err)
+		assert.Equal(t, models.ApprovalApproved, updatedAWF.Status)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	// TODO: Testar caso de Rejeição
+	// TODO: Testar caso de usuário não autorizado (não é o approver_id)
+	// TODO: Testar caso de workflow não pendente
+}
+
+func TestGetRiskApprovalHistoryHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := getRouterWithAuthenticatedContext(testUserID, testOrgID) // Qualquer usuário da org pode ver
+	router.GET("/risks/:riskId/approval-history", GetRiskApprovalHistoryHandler)
+
+	t.Run("Successful get approval history", func(t *testing.T) {
+		// Mock para verificar a existência do risco e se pertence à organização
+		riskRow := sqlmock.NewRows([]string{"id"}).AddRow(testRiskForApprovalID)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testRiskForApprovalID, testOrgID).
+			WillReturnRows(riskRow)
+
+		mockHistory := []models.ApprovalWorkflow{
+			{ID: uuid.New(), RiskID: testRiskForApprovalID, RequesterID: testManagerUserID, ApproverID: testRiskOwnerID, Status: models.ApprovalApproved, CreatedAt: time.Now().Add(-time.Hour)},
+			{ID: testApprovalWorkflowID, RiskID: testRiskForApprovalID, RequesterID: testManagerUserID, ApproverID: testRiskOwnerID, Status: models.ApprovalPending, CreatedAt: time.Now()},
+		}
+		historyRows := sqlmock.NewRows([]string{"id", "risk_id", "requester_id", "approver_id", "status", "created_at"}).
+			AddRow(mockHistory[0].ID, mockHistory[0].RiskID, mockHistory[0].RequesterID, mockHistory[0].ApproverID, mockHistory[0].Status, mockHistory[0].CreatedAt).
+			AddRow(mockHistory[1].ID, mockHistory[1].RiskID, mockHistory[1].RequesterID, mockHistory[1].ApproverID, mockHistory[1].Status, mockHistory[1].CreatedAt)
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "approval_workflows" WHERE risk_id = $1 ORDER BY created_at desc`)).
+			WithArgs(testRiskForApprovalID).
+			WillReturnRows(historyRows)
+
+		// Mocks para Preload("Requester") e Preload("Approver")
+		// Assumindo que os IDs testManagerUserID e testRiskOwnerID são usados
+		userRows := sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(testManagerUserID, "Manager User", "manager@example.com").
+			AddRow(testRiskOwnerID, "Owner User", "owner@example.com")
+
+		// O GORM pode fazer uma query com IN para os IDs únicos de Requester e Approver
+		// Ou queries separadas. Vamos mockar para IN, que é mais comum para preloads.
+		// A ordem dos IDs no IN pode variar.
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE "users"."id" IN ($1,$2)`)).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()). // Usar AnyArg se a ordem não for garantida ou testar combinações
+			WillReturnRows(userRows)
+
+
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/risks/%s/approval-history", testRiskForApprovalID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var history []models.ApprovalWorkflow
+		err := json.Unmarshal(rr.Body.Bytes(), &history)
+		assert.NoError(t, err)
+		assert.Len(t, history, 2)
+		// Adicionar mais asserções se necessário, ex: verificar dados do requester/approver
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+}

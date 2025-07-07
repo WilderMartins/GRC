@@ -261,3 +261,247 @@ func DeleteRiskHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Risk deleted successfully"})
 }
+
+// --- Approval Workflow Handlers ---
+
+// SubmitRiskForAcceptanceHandler handles a manager/admin submitting a risk for acceptance.
+func SubmitRiskForAcceptanceHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	tokenOrgID, orgExists := c.Get("organizationID")
+	if !orgExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	tokenUserID, userExists := c.Get("userID")
+	if !userExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "User ID not found in token"})
+		return
+	}
+	tokenUserRole, roleExists := c.Get("userRole")
+	if !roleExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "User role not found in token"})
+		return
+	}
+
+	// Authorization: Only Admin or Manager can submit for acceptance
+	if tokenUserRole.(models.UserRole) != models.RoleAdmin && tokenUserRole.(models.UserRole) != models.RoleManager {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only admins or managers can submit risks for acceptance"})
+		return
+	}
+
+	db := database.GetDB()
+	var risk models.Risk
+	// Ensure risk exists and belongs to the organization
+	if err := db.Where("id = ? AND organization_id = ?", riskID, tokenOrgID).First(&risk).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()})
+		return
+	}
+
+	// Check if risk owner is set
+	if risk.OwnerID == uuid.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Risk must have an owner assigned before submitting for acceptance"})
+		return
+	}
+
+    // Check if risk status allows submission (e.g., must be 'aberto' or similar)
+    // For now, we allow submission regardless of current risk status, but this could be a future enhancement.
+
+	// Check for existing pending workflow for this risk
+	var existingWorkflow models.ApprovalWorkflow
+	err = db.Where("risk_id = ? AND status = ?", riskID, models.ApprovalPending).First(&existingWorkflow).Error
+	if err == nil { // Record found, means there's an existing pending workflow
+		c.JSON(http.StatusConflict, gin.H{"error": "An approval workflow for this risk is already pending"})
+		return
+	}
+	if err != nil && err != gorm.ErrRecordNotFound { // Other DB error
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check for existing workflows: " + err.Error()})
+		return
+	}
+
+	approvalWorkflow := models.ApprovalWorkflow{
+		RiskID:      riskID,
+		RequesterID: tokenUserID.(uuid.UUID),
+		ApproverID:  risk.OwnerID, // Risk owner is the approver
+		Status:      models.ApprovalPending,
+	}
+
+	if err := db.Create(&approvalWorkflow).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create approval workflow: " + err.Error()})
+		return
+	}
+
+    // Placeholder for notification
+	var requesterUser models.User
+	var approverUser models.User
+	db.First(&requesterUser, "id = ?", approvalWorkflow.RequesterID)
+	db.First(&approverUser, "id = ?", approvalWorkflow.ApproverID)
+	log.Printf("NOTIFICAÇÃO (Simulada): Risco '%s' (ID: %s) submetido para aprovação por '%s' para o aprovador '%s'. Workflow ID: %s",
+		risk.Title, risk.ID.String(), requesterUser.Email, approverUser.Email, approvalWorkflow.ID.String())
+
+
+	c.JSON(http.StatusCreated, approvalWorkflow)
+}
+
+// DecisionPayload for approving or rejecting risk acceptance
+type DecisionPayload struct {
+	Decision models.ApprovalStatus `json:"decision" binding:"required,oneof=aprovado rejeitado"`
+	Comments string                `json:"comments"`
+}
+
+// ApproveOrRejectRiskAcceptanceHandler handles the decision (approve/reject) by the risk owner.
+func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId") // Not strictly needed if approvalId is globally unique, but good for context
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	approvalIDStr := c.Param("approvalId")
+	approvalID, err := uuid.Parse(approvalIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid approval workflow ID format"})
+		return
+	}
+
+	var payload DecisionPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+		return
+	}
+
+	tokenUserID, userExists := c.Get("userID")
+	if !userExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "User ID not found in token"})
+		return
+	}
+	tokenOrgID, orgExists := c.Get("organizationID")
+    if !orgExists {
+        c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+        return
+    }
+
+
+	db := database.GetDB()
+	var approvalWorkflow models.ApprovalWorkflow
+	// Fetch the workflow, ensuring it belongs to the risk and is pending
+	err = db.Joins("Risk").Where(`"approval_workflows"."id" = ? AND "approval_workflows"."risk_id" = ? AND "Risk"."organization_id" = ?`,
+        approvalID, riskID, tokenOrgID).First(&approvalWorkflow).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Approval workflow not found, or does not belong to the specified risk/organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch approval workflow: " + err.Error()})
+		return
+	}
+
+    // Authorization: Only the designated approver can decide
+	if approvalWorkflow.ApproverID != tokenUserID.(uuid.UUID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to decide on this approval workflow"})
+		return
+	}
+
+	if approvalWorkflow.Status != models.ApprovalPending {
+		c.JSON(http.StatusConflict, gin.H{"error": "This approval workflow has already been decided: " + approvalWorkflow.Status})
+		return
+	}
+
+	// Start a transaction
+	tx := db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start database transaction"})
+		return
+	}
+
+	// Update workflow
+	approvalWorkflow.Status = payload.Decision
+	approvalWorkflow.Comments = payload.Comments
+	// UpdatedAt will be set automatically by GORM
+	if err := tx.Save(&approvalWorkflow).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update approval workflow: " + err.Error()})
+		return
+	}
+
+	// If approved, update the risk status to "aceito"
+	if payload.Decision == models.ApprovalApproved {
+		var riskToUpdate models.Risk
+		if err := tx.Where("id = ?", approvalWorkflow.RiskID).First(&riskToUpdate).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk for status update: " + err.Error()})
+			return
+		}
+		riskToUpdate.Status = models.StatusAccepted
+		if err := tx.Save(&riskToUpdate).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update risk status: " + err.Error()})
+			return
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
+    // Placeholder for notification
+    log.Printf("NOTIFICAÇÃO (Simulada): Workflow de aprovação ID %s para Risco ID %s foi %s pelo aprovador ID %s.",
+        approvalWorkflow.ID.String(), approvalWorkflow.RiskID.String(), approvalWorkflow.Status, approvalWorkflow.ApproverID.String())
+
+
+	c.JSON(http.StatusOK, approvalWorkflow)
+}
+
+
+// GetRiskApprovalHistoryHandler lists all approval workflows for a specific risk.
+func GetRiskApprovalHistoryHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	tokenOrgID, orgExists := c.Get("organizationID")
+	if !orgExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+    // Any user in the org can view history? Or only involved parties/admins? For now, any user in org.
+
+	db := database.GetDB()
+	var risk models.Risk // To verify risk belongs to org
+	if err := db.Where("id = ? AND organization_id = ?", riskID, tokenOrgID).First(&risk).Error; err != nil {
+        if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify risk: " + err.Error()})
+		return
+    }
+
+
+	var approvalHistory []models.ApprovalWorkflow
+	err = db.Where("risk_id = ?", riskID).
+		Preload("Requester").Preload("Approver"). // Preload user details
+		Order("created_at desc").
+		Find(&approvalHistory).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch approval history: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, approvalHistory)
+}
