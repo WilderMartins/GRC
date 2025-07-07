@@ -16,8 +16,8 @@ type RiskPayload struct {
 	Title       string                `json:"title" binding:"required,min=3,max=255"`
 	Description string                `json:"description"`
 	Category    models.RiskCategory   `json:"category" binding:"omitempty,oneof=tecnologico operacional legal"` // Add more as defined
-	Impact      models.RiskImpact     `json:"impact" binding:"omitempty,oneof=baixo medio alto critico"`
-	Probability models.RiskProbability `json:"probability" binding:"omitempty,oneof=baixa media alta critica"`
+	Impact      models.RiskImpact     `json:"impact" binding:"omitempty,oneof=Baixo Médio Alto Crítico"`
+	Probability models.RiskProbability `json:"probability" binding:"omitempty,oneof=Baixo Médio Alto Crítico"`
 	Status      models.RiskStatus     `json:"status" binding:"omitempty,oneof=aberto em_andamento mitigado aceito"`
 	OwnerID     string                `json:"owner_id"` // UUID as string, can be optional if creator is default owner
 }

@@ -29,8 +29,8 @@ func TestCreateRiskHandler(t *testing.T) {
 			Title:       "Test Risk Title",
 			Description: "Test Risk Description",
 			Category:    models.CategoryTechnological,
-			Impact:      models.ImpactMedium,
-			Probability: models.ProbabilityHigh,
+			Impact:      models.ImpactMedium,    // Uses "Médio"
+			Probability: models.ProbabilityHigh,    // Uses "Alto"
 			Status:      models.StatusOpen,
 			OwnerID:     testUserID.String(),
 		}

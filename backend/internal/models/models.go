@@ -19,27 +19,27 @@ type AuditControlStatus string
 type RiskCategory string
 
 const (
-	ImpactLow       RiskImpact = "baixo"
-	ImpactMedium    RiskImpact = "medio"
-	ImpactHigh      RiskImpact = "alto"
-	ImpactCritical  RiskImpact = "critico"
+	ImpactLow       RiskImpact = "Baixo"
+	ImpactMedium    RiskImpact = "Médio"
+	ImpactHigh      RiskImpact = "Alto"
+	ImpactCritical  RiskImpact = "Crítico"
 
-	ProbabilityLow      RiskProbability = "baixa"
-	ProbabilityMedium   RiskProbability = "media"
-	ProbabilityHigh     RiskProbability = "alta"
-	ProbabilityCritical RiskProbability = "critica"
+	ProbabilityLow      RiskProbability = "Baixo" // Ajustado para masculino e capitalizado
+	ProbabilityMedium   RiskProbability = "Médio" // Ajustado para masculino e capitalizado
+	ProbabilityHigh     RiskProbability = "Alto"  // Ajustado para masculino e capitalizado
+	ProbabilityCritical RiskProbability = "Crítico"// Ajustado para masculino e capitalizado
 
-	StatusOpen        RiskStatus = "aberto"
+	StatusOpen        RiskStatus = "aberto" // Mantido como está, não faz parte da solicitação de Baixo/Médio/Alto/Crítico
 	StatusInProgress  RiskStatus = "em_andamento"
 	StatusMitigated   RiskStatus = "mitigado"
 	StatusAccepted    RiskStatus = "aceito"
 
-	SeverityLow      VulnerabilitySeverity = "baixo"
-	SeverityMedium   VulnerabilitySeverity = "medio"
-	SeverityHigh     VulnerabilitySeverity = "alto"
-	SeverityCritical VulnerabilitySeverity = "critico"
+	SeverityLow      VulnerabilitySeverity = "Baixo"
+	SeverityMedium   VulnerabilitySeverity = "Médio"
+	SeverityHigh     VulnerabilitySeverity = "Alto"
+	SeverityCritical VulnerabilitySeverity = "Crítico"
 
-	VStatusDiscovered VulnerabilityStatus = "descoberta"
+	VStatusDiscovered VulnerabilityStatus = "descoberta" // Mantido como está
 	VStatusInRemediation VulnerabilityStatus = "em_correcao"
 	VStatusRemediated VulnerabilityStatus = "corrigida"
 

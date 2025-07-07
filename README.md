@@ -148,8 +148,8 @@ Para acessar os endpoints abaixo, inclua o token JWT no header `Authorization`:
             "title": "Novo Risco de Teste",
             "description": "Descrição detalhada do risco.",
             "category": "tecnologico", // "operacional", "legal"
-            "impact": "medio", // "baixo", "alto", "critico"
-            "probability": "baixa", // "media", "alta", "critica"
+            "impact": "Médio", // "Baixo", "Alto", "Crítico"
+            "probability": "Baixo", // "Médio", "Alto", "Crítico"
             "status": "aberto", // "em_andamento", "mitigado", "aceito"
             "owner_id": "uuid-do-usuario-owner" // Opcional, se não informado, o criador é o owner
         }
@@ -214,7 +214,7 @@ Endpoints para gerenciar vulnerabilidades dentro da organização do usuário au
             "title": "Vulnerabilidade de Exemplo XSS",
             "description": "Entrada não sanitizada no campo de busca permite XSS.",
             "cve_id": "CVE-2023-99999", // Opcional
-            "severity": "alto", // "baixo", "medio", "critico"
+            "severity": "Alto", // "Baixo", "Médio", "Crítico"
             "status": "descoberta", // "em_correcao", "corrigida"
             "asset_affected": "Página de Busca do Portal Principal"
         }
