@@ -18,10 +18,19 @@ jest.mock('next/router', () => ({
 jest.mock('@/lib/axios');
 const mockedApiClient = apiClient as jest.Mocked<typeof apiClient>;
 
-// Mock do WithAuth para não interferir nos testes do conteúdo da página
-jest.mock('@/components/auth/WithAuth', () => (WrappedComponent: React.ComponentType) => {
+// Mock do WithAuth
+jest.mock('@/components/auth/WithAuth', () => (WrappedComponent: React.ComponentType) => (props: any) => <WrappedComponent {...props} />);
+// Mock do ApprovalDecisionModal
+jest.mock('@/components/risks/ApprovalDecisionModal', () => {
   // eslint-disable-next-line react/display-name
-  return (props: any) => <WrappedComponent {...props} />;
+  return (props: any) => (
+    <div data-testid="mock-approval-decision-modal">
+      <span>Risk ID: {props.riskId}</span>
+      <span>Approval ID: {props.approvalId}</span>
+      <button onClick={props.onClose}>Close Modal</button>
+      <button onClick={() => props.onSubmitSuccess()}>Submit Mock Decision</button>
+    </div>
+  );
 });
 
 
@@ -151,4 +160,50 @@ describe('RisksPageContent', () => {
   });
 
   // TODO: Testar funcionalidade de paginação (clicar nos botões "Anterior"/"Próxima")
+
+  it('opens decision modal when "Decidir" button is clicked for a pending risk owned by user', async () => {
+    const riskWithPendingApprovalOwnedByUser = {
+      ...mockRisks[0],
+      id: 'risk-pending-owned',
+      owner_id: mockUser.id, // Usuário logado é o owner
+      hasPendingApproval: true,
+    };
+    const mockApprovalHistory = [{ id: 'wf123', risk_id: 'risk-pending-owned', status: 'pendente' }];
+
+    mockedApiClient.get
+      .mockResolvedValueOnce({ data: { ...mockPaginatedResponse, items: [riskWithPendingApprovalOwnedByUser] } }) // fetchRisks
+      .mockResolvedValueOnce({ data: mockApprovalHistory }); // fetchApprovalHistory para handleOpenDecisionModal
+
+    renderRisksPage();
+
+    const decideButton = await screen.findByRole('button', { name: /Decidir/i });
+    fireEvent.click(decideButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-approval-decision-modal')).toBeInTheDocument();
+    });
+    expect(screen.getByText(`Risk ID: ${riskWithPendingApprovalOwnedByUser.id}`)).toBeInTheDocument();
+    expect(screen.getByText(`Approval ID: wf123`)).toBeInTheDocument();
+  });
+
+  it('submits risk for acceptance and refetches list', async () => {
+    const riskToSubmit = { ...mockRisks[0], id: 'risk-to-submit', status: 'aberto', hasPendingApproval: false };
+    mockedApiClient.get
+        .mockResolvedValueOnce({ data: { ...mockPaginatedResponse, items: [riskToSubmit] } }) // Fetch inicial
+        .mockResolvedValueOnce({ data: { ...mockPaginatedResponse, items: [{...riskToSubmit, hasPendingApproval: true }] } }); // Fetch após submissão (simulando atualização)
+    mockedApiClient.post.mockResolvedValue({ data: { id: 'new-workflow-id' } }); // Mock para submit-acceptance
+
+    renderRisksPage();
+
+    const submitButton = await screen.findByRole('button', {name: /Submeter p\/ Aceite/i});
+    fireEvent.click(submitButton);
+
+    expect(window.confirm).toHaveBeenCalledWith(`Tem certeza que deseja submeter o risco "${riskToSubmit.title}" para aceite?`);
+    await waitFor(() => {
+        expect(mockedApiClient.post).toHaveBeenCalledWith(`/risks/${riskToSubmit.id}/submit-acceptance`);
+    });
+    expect(window.alert).toHaveBeenCalledWith(`Risco "${riskToSubmit.title}" submetido para aceite com sucesso.`);
+    expect(mockedApiClient.get).toHaveBeenCalledTimes(2); // Chamada inicial + após submissão
+  });
+
 });

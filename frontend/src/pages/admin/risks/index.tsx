@@ -1,10 +1,12 @@
 import AdminLayout from '@/components/layouts/AdminLayout';
 import WithAuth from '@/components/auth/WithAuth';
 import Head from 'next/head';
-import Link from 'next/link'; // Para o botão "Adicionar Novo Risco" se levar a outra página
+import Link from 'next/link';
+import ApprovalDecisionModal from '@/components/risks/ApprovalDecisionModal'; // Importar o modal
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react'; // Adicionado useCallback
 import apiClient from '@/lib/axios'; // Ajuste o path se necessário
+import { useAuth } from '@/contexts/AuthContext'; // Para verificar role do usuário
 
 // Tipos do backend (idealmente compartilhados ou gerados)
 type RiskStatus = "aberto" | "em_andamento" | "mitigado" | "aceito";
@@ -29,7 +31,17 @@ interface Risk {
   owner?: RiskOwner; // GORM Preload pode popular isso
   created_at: string;
   updated_at: string;
+  hasPendingApproval?: boolean; // Novo campo para UI
 }
+
+// Adicionar tipo para ApprovalWorkflow (simplificado)
+interface ApprovalWorkflow {
+  id: string;
+  risk_id: string;
+  status: string; // "pendente", "aprovado", "rejeitado"
+  // Outros campos se necessário para a lógica de exibição
+}
+
 
 interface PaginatedRisksResponse {
   items: Risk[];
@@ -48,19 +60,44 @@ const RisksPageContent = () => {
   const [pageSize, setPageSize] = useState(10); // Pode ser configurável
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
+  const { user } = useAuth(); // Para verificar a role do usuário
 
-  const fetchRisks = async (page: number, size: number) => {
+  const [showDecisionModal, setShowDecisionModal] = useState(false);
+  const [selectedRiskForDecision, setSelectedRiskForDecision] = useState<Risk | null>(null);
+  const [pendingApprovalWorkflowId, setPendingApprovalWorkflowId] = useState<string | null>(null);
+
+
+  const fetchRisks = useCallback(async (page: number, size: number) => { // Envolver com useCallback
     setIsLoading(true);
     setError(null);
     try {
       const response = await apiClient.get<PaginatedRisksResponse>('/risks', {
         params: { page, page_size: size },
       });
-      setRisks(response.data.items || []);
+
+      const risksData = response.data.items || [];
+      const processedRisks = await Promise.all(
+        risksData.map(async (risk) => {
+          if (user && risk.owner_id === user.id) {
+            try {
+              const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/risks/${risk.id}/approval-history`);
+              const pendingApproval = historyResponse.data.find(wf => wf.status === 'pendente');
+              return { ...risk, hasPendingApproval: !!pendingApproval };
+            } catch (historyErr) {
+              console.error(`Erro ao buscar histórico de aprovação para risco ${risk.id}:`, historyErr);
+              return { ...risk, hasPendingApproval: false }; // Assume não pendente em caso de erro
+            }
+          }
+          return { ...risk, hasPendingApproval: false };
+        })
+      );
+
+      setRisks(processedRisks);
       setTotalItems(response.data.total_items);
       setTotalPages(response.data.total_pages);
       setCurrentPage(response.data.page);
       setPageSize(response.data.page_size);
+
     } catch (err: any) {
       console.error("Erro ao buscar riscos:", err);
       setError(err.response?.data?.error || err.message || "Falha ao buscar riscos.");
@@ -70,9 +107,67 @@ const RisksPageContent = () => {
     }
   };
 
+  const handleOpenDecisionModal = async (risk: Risk) => {
+    // Precisamos do ID do ApprovalWorkflow pendente.
+    // A flag `hasPendingApproval` apenas indica que existe um.
+    // Vamos buscar o histórico e pegar o ID do pendente.
+    // Isso poderia ser otimizado se a API de riscos já trouxesse o ID do workflow pendente.
+    setIsLoading(true); // Usar um loader específico para esta ação seria melhor
+    try {
+      const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/risks/${risk.id}/approval-history`);
+      const pendingWF = historyResponse.data.find(wf => wf.status === 'pendente');
+      if (pendingWF) {
+        setSelectedRiskForDecision(risk);
+        setPendingApprovalWorkflowId(pendingWF.id);
+        setShowDecisionModal(true);
+      } else {
+        alert("Não foi encontrado um workflow de aprovação pendente para este risco. A lista pode estar desatualizada.");
+        fetchRisks(currentPage, pageSize); // Re-sincronizar
+      }
+    } catch (err) {
+      console.error("Erro ao buscar workflow pendente:", err);
+      alert("Erro ao verificar status de aprovação do risco.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCloseDecisionModal = () => {
+    setShowDecisionModal(false);
+    setSelectedRiskForDecision(null);
+    setPendingApprovalWorkflowId(null);
+  };
+
+  const handleDecisionSubmitSuccess = () => {
+    fetchRisks(currentPage, pageSize); // Re-fetch para atualizar status do risco e remover badge/botão
+    // O modal já se fecha no seu próprio onSubmitSuccess
+  };
+
+  const handleSubmitForAcceptance = async (riskId: string, riskTitle: string) => {
+    // Idealmente, um estado de loading específico para esta ação
+    // const [isSubmitting, setIsSubmitting] = useState(false);
+    // setIsSubmitting(true);
+    if (window.confirm(`Tem certeza que deseja submeter o risco "${riskTitle}" para aceite?`)) {
+        try {
+            await apiClient.post(`/risks/${riskId}/submit-acceptance`);
+            alert(`Risco "${riskTitle}" submetido para aceite com sucesso.`);
+            // Atualizar a UI: pode ser recarregando os dados ou atualizando o status do risco localmente.
+            // Recarregar é mais simples por enquanto.
+            fetchRisks(currentPage, pageSize);
+        } catch (err: any) {
+            console.error("Erro ao submeter risco para aceite:", err);
+            setError(err.response?.data?.error || err.message || "Falha ao submeter risco para aceite.");
+            // Limpar o erro após um tempo ou quando o usuário interagir novamente
+            setTimeout(() => setError(null), 5000);
+        } finally {
+            // setIsSubmitting(false);
+        }
+    }
+  };
+
   useEffect(() => {
     fetchRisks(currentPage, pageSize);
-  }, [currentPage, pageSize]);
+  }, [currentPage, pageSize, fetchRisks]); // Adicionar fetchRisks às dependências do useEffect
 
 
   const handlePreviousPage = () => {
@@ -123,7 +218,6 @@ const RisksPageContent = () => {
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             Gestão de Riscos
           </h1>
-          {/* O botão pode abrir um Modal ou navegar para uma nova página /admin/risks/new */}
           <Link href="/admin/risks/new" legacyBehavior>
             <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
               Adicionar Novo Risco
@@ -131,17 +225,13 @@ const RisksPageContent = () => {
           </Link>
         </div>
 
-        {/* TODO: Adicionar filtros e busca aqui */}
-
-        {/* Tabela de Riscos (Placeholder) */}
-        {/* TODO: Adicionar filtros e busca aqui */}
-
         {isLoading && <p className="text-center text-gray-500 dark:text-gray-400 py-4">Carregando riscos...</p>}
         {error && <p className="text-center text-red-500 py-4">Erro ao carregar riscos: {error}</p>}
 
         {!isLoading && !error && (
           <>
             <div className="mt-8 flow-root">
+              {/* ... (código da tabela e paginação existente) ... */}
               <div className="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
                 <div className="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
                   <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
@@ -154,89 +244,123 @@ const RisksPageContent = () => {
                           <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Probabilidade</th>
                           <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Status</th>
                           <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Proprietário</th>
-                      <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                        <span className="sr-only">Ações</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-600 bg-white dark:bg-gray-800">
-                    {risks.map((risk) => (
-                      <tr key={risk.id}>
-                        <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 dark:text-white sm:pl-6">{risk.title}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.category}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.impact}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.probability}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
-                           <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                risk.status === 'aberto' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-700 dark:text-yellow-100' :
-                                risk.status === 'em_andamento' ? 'bg-blue-100 text-blue-800 dark:bg-blue-700 dark:text-blue-100' :
-                                risk.status === 'mitigado' ? 'bg-green-100 text-green-800 dark:bg-green-700 dark:text-green-100' :
-                                risk.status === 'aceito' ? 'bg-purple-100 text-purple-800 dark:bg-purple-700 dark:text-purple-100' :
-                                'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-200'
-                            }`}>
-                                {risk.status}
-                            </span>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.owner?.name || risk.owner_id}</td>
-                        <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6 space-x-2">
-                          <Link href={`/admin/risks/edit/${risk.id}`} legacyBehavior><a className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200">Editar</a></Link>
-                          <button
-                            onClick={() => handleDeleteRisk(risk.id, risk.title)}
-                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-200"
-                            disabled={isLoading} // Desabilitar enquanto outra operação (como fetch) está em andamento
-                          >
-                            Deletar
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {risks.length === 0 && (
-                        <tr>
-                            <td colSpan={7} className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
-                                Nenhum risco encontrado.
-                            </td>
+                          <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
+                            <span className="sr-only">Ações</span>
+                          </th>
                         </tr>
-                    )}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-600 bg-white dark:bg-gray-800">
+                        {risks.map((risk) => (
+                          <tr key={risk.id}>
+                            <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 dark:text-white sm:pl-6">
+                              {risk.title}
+                              {risk.hasPendingApproval && (
+                                <span className="ml-2 px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-500 text-white animate-pulse" title="Aprovação Pendente">
+                                  Pendente
+                                </span>
+                              )}
+                              {risk.hasPendingApproval && user?.id === risk.owner_id && (
+                                <button
+                                  onClick={() => handleOpenDecisionModal(risk)}
+                                  className="ml-2 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full hover:bg-blue-600"
+                                  title="Tomar Decisão sobre Aceite"
+                                >
+                                  Decidir
+                                </button>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.category}</td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.impact}</td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.probability}</td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">
+                              <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                    risk.status === 'aberto' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-700 dark:text-yellow-100' :
+                                    risk.status === 'em_andamento' ? 'bg-blue-100 text-blue-800 dark:bg-blue-700 dark:text-blue-100' :
+                                    risk.status === 'mitigado' ? 'bg-green-100 text-green-800 dark:bg-green-700 dark:text-green-100' :
+                                    risk.status === 'aceito' ? 'bg-purple-100 text-purple-800 dark:bg-purple-700 dark:text-purple-100' :
+                                    'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-200'
+                                }`}>
+                                    {risk.status}
+                                </span>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.owner?.name || risk.owner_id}</td>
+                            <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6 space-x-2">
+                              <Link href={`/admin/risks/edit/${risk.id}`} legacyBehavior><a className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200">Editar</a></Link>
+                              <button
+                                onClick={() => handleDeleteRisk(risk.id, risk.title)}
+                                className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-200"
+                                disabled={isLoading}
+                              >
+                                Deletar
+                              </button>
+                              {(user?.role === 'admin' || user?.role === 'manager') && risk.status !== 'aceito' && risk.status !== 'mitigado' && !risk.hasPendingApproval && (
+                                <button
+                                  onClick={() => handleSubmitForAcceptance(risk.id, risk.title)}
+                                  className="ml-2 text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-200"
+                                  disabled={isLoading}
+                                >
+                                  Submeter p/ Aceite
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                        {risks.length === 0 && (
+                            <tr>
+                                <td colSpan={7} className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
+                                    Nenhum risco encontrado.
+                                </td>
+                            </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {totalPages > 0 && (
+                    <nav
+                      className="flex items-center justify-between border-t border-gray-200 bg-white dark:bg-gray-800 px-4 py-3 sm:px-6"
+                      aria-label="Paginação"
+                    >
+                      <div className="hidden sm:block">
+                        <p className="text-sm text-gray-700 dark:text-gray-300">
+                          Mostrando <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span>
+                          {' '}a <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span>
+                          {' '}de <span className="font-medium">{totalItems}</span> resultados
+                        </p>
+                      </div>
+                      <div className="flex flex-1 justify-between sm:justify-end">
+                        <button
+                          onClick={handlePreviousPage}
+                          disabled={currentPage <= 1 || isLoading}
+                          className="relative inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                        >
+                          Anterior
+                        </button>
+                        <button
+                          onClick={handleNextPage}
+                          disabled={currentPage >= totalPages || isLoading}
+                          className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                        >
+                          Próxima
+                        </button>
+                      </div>
+                    </nav>
+                  )}
+                </div>
               </div>
-               {/* Controles de Paginação */}
-              {totalPages > 0 && (
-                <nav
-                  className="flex items-center justify-between border-t border-gray-200 bg-white dark:bg-gray-800 px-4 py-3 sm:px-6"
-                  aria-label="Paginação"
-                >
-                  <div className="hidden sm:block">
-                    <p className="text-sm text-gray-700 dark:text-gray-300">
-                      Mostrando <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span>
-                      {' '}a <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span>
-                      {' '}de <span className="font-medium">{totalItems}</span> resultados
-                    </p>
-                  </div>
-                  <div className="flex flex-1 justify-between sm:justify-end">
-                    <button
-                      onClick={handlePreviousPage}
-                      disabled={currentPage <= 1 || isLoading}
-                      className="relative inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                    >
-                      Anterior
-                    </button>
-                    <button
-                      onClick={handleNextPage}
-                      disabled={currentPage >= totalPages || isLoading}
-                      className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                    >
-                      Próxima
-                    </button>
-                  </div>
-                </nav>
-              )}
             </div>
-          </div>
-        </div>
-        </>
+          </>
         )}
       </div>
+      {showDecisionModal && selectedRiskForDecision && pendingApprovalWorkflowId && (
+        <ApprovalDecisionModal
+            riskId={selectedRiskForDecision.id}
+            riskTitle={selectedRiskForDecision.title}
+            approvalId={pendingApprovalWorkflowId}
+            currentApproverId={selectedRiskForDecision.owner_id} // O backend valida se o user logado é este
+            onClose={handleCloseDecisionModal}
+            onSubmitSuccess={handleDecisionSubmitSuccess}
+        />
+      )}
     </AdminLayout>
   );
 };
