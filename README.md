@@ -36,7 +36,7 @@ Este projeto utiliza Docker e Docker Compose para facilitar a configuração do 
     ```bash
     cp .env.example .env
     ```
-    Edite o arquivo `.env` e **certifique-se de definir `JWT_SECRET_KEY`, `SAML_SP_KEY_PEM`, e `SAML_SP_CERT_PEM` com valores seguros e únicos**. Ajuste `APP_ROOT_URL` para o endereço base da sua aplicação (ex: `http://localhost:8080` para desenvolvimento local). Configure também as URLs de callback do frontend (`FRONTEND_SAML_CALLBACK_URL`, `FRONTEND_OAUTH2_CALLBACK_URL`) e as demais configurações do banco de dados e servidor conforme necessário.
+    Edite o arquivo `.env` e **certifique-se de definir `JWT_SECRET_KEY`, `SAML_SP_KEY_PEM`, e `SAML_SP_CERT_PEM` com valores seguros e únicos**. Ajuste `APP_ROOT_URL` para o endereço base da sua aplicação (ex: `http://localhost:8080` para desenvolvimento local). Configure também as URLs de callback do frontend (`FRONTEND_SAML_CALLBACK_URL`, `FRONTEND_OAUTH2_CALLBACK_URL`), as configurações do GCS (`GCS_PROJECT_ID`, `GCS_BUCKET_NAME`, `GOOGLE_APPLICATION_CREDENTIALS` se necessário), as configurações do AWS SES (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EMAIL_SENDER_ADDRESS`) e as demais configurações do banco de dados e servidor conforme necessário.
 
     **Geração de Chaves SAML SP:**
     Para `SAML_SP_KEY_PEM` e `SAML_SP_CERT_PEM`, você precisará de um par de chave privada e certificado X.509 para o seu Service Provider (Phoenix GRC). Você pode gerá-los usando OpenSSL:
@@ -376,10 +376,13 @@ Endpoints para gerenciar o processo de aprovação para aceite de riscos.
 │   ├── internal/
 │   │   ├── auth/           # Lógica de autenticação JWT (geração, validação, middleware)
 │   │   ├── database/       # Conexão com DB e migrações GORM
-│   │   ├── handlers/       # Handlers HTTP (controladores) para Gin (auth, risks, identity providers)
-│   │   ├── models/         # Structs GORM (schema do DB, incluindo IdentityProvider)
+│   │   ├── handlers/       # Handlers HTTP (controladores) para Gin (auth, risks, identity providers, webhooks, audit, vulnerabilities)
+│   │   ├── models/         # Structs GORM (schema do DB, incluindo IdentityProvider, WebhookConfiguration, Audit*)
+│   │   ├── notifications/  # Lógica para Webhooks e Email (SES)
 │   │   ├── samlauth/       # Lógica específica para autenticação SAML 2.0
 │   │   ├── oauth2auth/     # Lógica específica para autenticação OAuth2 (ex: Google)
+│   │   ├── filestorage/    # Lógica para armazenamento de arquivos (ex: GCS)
+│   │   ├── seeders/        # Seeders de dados (ex: AuditFrameworks)
 │   │   └── ...
 │   ├── pkg/                # Pacotes Go reutilizáveis (se houver)
 │   ├── go.mod

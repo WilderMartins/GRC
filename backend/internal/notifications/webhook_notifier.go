@@ -158,24 +158,37 @@ func NotifyRiskEvent(orgID uuid.UUID, risk models.Risk, eventType models.Webhook
 	}
 }
 
-// SendEmailNotification simula o envio de um email.
-// No futuro, isso seria integrado com um serviço de email transacional.
-func SendEmailNotification(toEmail string, subject string, body string) error {
+// SendEmailNotification envia um email usando o DefaultEmailNotifier se configurado,
+// caso contrário, simula o envio com log.
+// Agora aceita htmlBody e textBody.
+func SendEmailNotification(toEmail string, subject string, htmlBody string, textBody string) error {
 	if toEmail == "" {
 		return fmt.Errorf("destinatário do email (toEmail) não pode ser vazio")
 	}
-	// Simulação
-	log.Printf("--- SIMULAÇÃO DE ENVIO DE EMAIL ---")
+
+	if DefaultEmailNotifier != nil {
+		// Envia email real usando o notificador configurado
+		return DefaultEmailNotifier.SendEmail(toEmail, subject, htmlBody, textBody)
+	}
+
+	// Fallback para simulação se DefaultEmailNotifier não estiver configurado
+	log.Printf("--- SIMULAÇÃO DE ENVIO DE EMAIL (Fallback) ---")
 	log.Printf("Para: %s", toEmail)
 	log.Printf("Assunto: %s", subject)
-	log.Printf("Corpo:\n%s", body)
-	log.Printf("--- FIM DA SIMULAÇÃO DE ENVIO DE EMAIL ---")
+	if textBody != "" {
+		log.Printf("Corpo (Texto):\n%s", textBody)
+	}
+	if htmlBody != "" {
+		log.Printf("Corpo (HTML):\n%s", htmlBody)
+	}
+	log.Printf("--- FIM DA SIMULAÇÃO DE ENVIO DE EMAIL (Fallback) ---")
 	return nil // Simula sucesso
 }
 
-// NotifyUserByEmail envia uma notificação por email para um usuário específico.
+// NotifyUserByEmail constrói e envia uma notificação por email para um usuário específico.
 // Busca o email do usuário pelo ID.
-func NotifyUserByEmail(userID uuid.UUID, subject string, body string) {
+// O corpo do email é passado como textBody, uma versão HTML simples pode ser gerada ou passada.
+func NotifyUserByEmail(userID uuid.UUID, subject string, textBody string) { // Alterado para aceitar textBody
 	if userID == uuid.Nil {
 		log.Println("Tentativa de notificar usuário por email com ID nulo.")
 		return
@@ -191,9 +204,155 @@ func NotifyUserByEmail(userID uuid.UUID, subject string, body string) {
 		return
 	}
 
-	go func(email, subj, bdy string) {
-		if err := SendEmailNotification(email, subj, bdy); err != nil {
-			log.Printf("Falha ao enviar notificação por email simulada para %s: %v\n", email, err)
+	// Por enquanto, vamos enviar apenas a versão em texto.
+	// Uma versão HTML simples poderia ser: fmt.Sprintf("<p>%s</p>", strings.ReplaceAll(textBody, "\n", "<br>"))
+	htmlBody := "" // Deixar vazio por enquanto, ou criar uma versão HTML simples do textBody
+
+	go func(email, subj, txtBdy, htmlBdy string) {
+		if err := SendEmailNotification(email, subj, htmlBdy, txtBdy); err != nil {
+			log.Printf("Falha ao enviar notificação por email para %s: %v\n", email, err)
 		}
-	}(user.Email, subject, body)
+	}(user.Email, subject, textBody, htmlBody)
+}
+
+// --- Interface e Implementação para Email Real ---
+
+// EmailNotifier define uma interface para serviços de envio de email.
+type EmailNotifier interface {
+	SendEmail(toEmail, subject, htmlBody, textBody string) error
+}
+
+// SESEmailNotifier implementa EmailNotifier usando AWS SES V2.
+type SESEmailNotifier struct {
+	client      *sesv2.Client
+	senderEmail string
+}
+
+var cfg aws.Config // Variável de configuração AWS carregada globalmente para o pacote
+var sesInitializationError error
+
+// InitializeAWSSession carrega a configuração da AWS.
+// Deve ser chamado uma vez durante a inicialização da aplicação.
+func InitializeAWSSession() error {
+	region := os.Getenv("AWS_REGION")
+	if region == "" {
+		sesInitializationError = fmt.Errorf("AWS_REGION não está configurada")
+		log.Printf("AVISO: %v. O envio de emails reais estará desabilitado.", sesInitializationError)
+		return nil // Não retornar erro fatal, permite que a app continue sem email
+	}
+
+	// Carrega a configuração padrão da AWS.
+	// Isso tentará usar as credenciais do ambiente (variáveis de ambiente, shared config, IAM role).
+	var err error
+	cfg, err = config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
+	if err != nil {
+		sesInitializationError = fmt.Errorf("falha ao carregar configuração AWS: %w", err)
+		log.Printf("AVISO: %v. O envio de emails reais estará desabilitado.", sesInitializationError)
+		return nil
+	}
+	log.Println("Sessão AWS inicializada com sucesso para a região:", region)
+	return nil
+}
+
+
+// NewSESEmailNotifier cria uma nova instância de SESEmailNotifier.
+func NewSESEmailNotifier() (*SESEmailNotifier, error) {
+	if sesInitializationError != nil {
+		return nil, fmt.Errorf("não é possível criar SESEmailNotifier pois a sessão AWS não foi inicializada: %w", sesInitializationError)
+	}
+	if cfg.Region == "" { // Se InitializeAWSSession não foi chamado ou falhou silenciosamente
+		return nil, fmt.Errorf("configuração AWS não carregada (região vazia). Chame InitializeAWSSession primeiro")
+	}
+
+
+	sender := os.Getenv("EMAIL_SENDER_ADDRESS")
+	if sender == "" {
+		return nil, fmt.Errorf("EMAIL_SENDER_ADDRESS não está configurado")
+	}
+
+	sesClient := sesv2.NewFromConfig(cfg)
+
+	return &SESEmailNotifier{
+		client:      sesClient,
+		senderEmail: sender,
+	}, nil
+}
+
+// SendEmail envia um email usando AWS SES V2.
+func (s *SESEmailNotifier) SendEmail(toEmail, subject, htmlBody, textBody string) error {
+	if s.client == nil {
+		return fmt.Errorf("cliente SES não inicializado")
+	}
+
+	input := &sesv2.SendEmailInput{
+		FromEmailAddress: &s.senderEmail,
+		Destination: &types.Destination{
+			ToAddresses: []string{toEmail},
+		},
+		Content: &types.EmailContent{
+			Simple: &types.Message{
+				Subject: &types.Content{
+					Data:    &subject,
+					Charset: aws.String("UTF-8"),
+				},
+				Body: &types.Body{},
+			},
+			// TODO: Adicionar suporte para templates de email do SES se necessário no futuro.
+			// Raw: &types.RawMessage{ Data: []byte(mimeEmail) }, // Para emails MIME complexos
+		},
+	}
+
+	if textBody != "" {
+		input.Content.Simple.Body.Text = &types.Content{
+			Data:    &textBody,
+			Charset: aws.String("UTF-8"),
+		}
+	}
+	if htmlBody != "" {
+		input.Content.Simple.Body.Html = &types.Content{
+			Data:    &htmlBody,
+			Charset: aws.String("UTF-8"),
+		}
+	}
+
+	// Se ambos textBody e htmlBody estiverem vazios, isso será um erro.
+    if textBody == "" && htmlBody == "" {
+        return fmt.Errorf("o corpo do email (texto ou HTML) não pode estar vazio")
+    }
+
+
+	_, err := s.client.SendEmail(context.TODO(), input)
+	if err != nil {
+		return fmt.Errorf("falha ao enviar email via SES: %w", err)
+	}
+
+	log.Printf("Email enviado com sucesso para %s via AWS SES (Assunto: %s)", toEmail, subject)
+	return nil
+}
+
+// DefaultEmailNotifier é a instância padrão do notificador de email.
+var DefaultEmailNotifier EmailNotifier
+
+// InitEmailService inicializa o provedor de email padrão.
+func InitEmailService() {
+	// Primeiro, inicializa a sessão AWS (carrega config, credenciais)
+	// Isso deve ser chamado apenas uma vez.
+	if err := InitializeAWSSession(); err != nil {
+		// O erro já foi logado por InitializeAWSSession se for crítico para a sessão em si
+		// Se InitializeAWSSession retorna nil mesmo com erro interno, DefaultEmailNotifier ficará nil
+	}
+
+	// Se a sessão AWS foi carregada (ou pelo menos não houve erro fatal nela), tenta criar o notifier SES
+	if sesInitializationError == nil && cfg.Region != "" {
+		notifier, err := NewSESEmailNotifier()
+		if err != nil {
+			log.Printf("AVISO: Falha ao inicializar o AWS SES Email Notifier: %v. O envio de emails reais estará desabilitado.", err)
+			// DefaultEmailNotifier permanecerá nil, e as notificações usarão o fallback de log.
+		} else {
+			DefaultEmailNotifier = notifier
+			log.Println("AWS SES Email Notifier inicializado e configurado como padrão.")
+		}
+	} else {
+		log.Println("AVISO: Sessão AWS não inicializada ou região não configurada. AWS SES Email Notifier não será ativado. O envio de emails reais estará desabilitado.")
+	}
 }

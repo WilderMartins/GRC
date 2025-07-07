@@ -150,6 +150,8 @@ func startServer() {
 		log.Printf("Warning: File storage initialization failed: %v. Uploads may not work.", err)
 	}
 
+	// Initialize Email Service
+	notifications.InitEmailService() // Chamada para inicializar o DefaultEmailNotifier
 
 	dbHost := os.Getenv("POSTGRES_HOST")
 	dbPort := os.Getenv("POSTGRES_PORT")

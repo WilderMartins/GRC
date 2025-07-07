@@ -16,6 +16,7 @@ import (
 	"mime/multipart"
 	"path/filepath"
 	"phoenixgrc/backend/internal/filestorage"
+	"io" // Necessário para file.Seek e http.DetectContentType
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause" // Para Upsert
