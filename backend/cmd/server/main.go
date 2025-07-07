@@ -275,6 +275,16 @@ func startServer() {
 				idpRoutes.PUT("/:idpId", handlers.UpdateIdentityProviderHandler)
 				idpRoutes.DELETE("/:idpId", handlers.DeleteIdentityProviderHandler)
 			}
+
+			// Webhook Configuration Routes nested under organizations
+			webhookRoutes := orgRoutes.Group("/webhooks")
+			{
+				webhookRoutes.POST("", handlers.CreateWebhookHandler)
+				webhookRoutes.GET("", handlers.ListWebhooksHandler)
+				webhookRoutes.GET("/:webhookId", handlers.GetWebhookHandler)
+				webhookRoutes.PUT("/:webhookId", handlers.UpdateWebhookHandler)
+				webhookRoutes.DELETE("/:webhookId", handlers.DeleteWebhookHandler)
+			}
 		}
 
 		// Vulnerability Management Routes

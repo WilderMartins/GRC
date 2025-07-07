@@ -5,6 +5,12 @@ import (
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 
+	"phoenixgrc/backend/internal/notifications" // Import notifications package
+	"strings"                                   // Para CSV
+	"encoding/csv"                              // Para CSV
+	"io"                                        // Para CSV
+	"log"                                     // Para logs de notificação
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -74,6 +80,16 @@ func CreateRiskHandler(c *gin.Context) {
 	if err := db.Create(&risk).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create risk: " + err.Error()})
 		return
+	}
+
+	// Disparar notificação de criação de risco
+	go notifications.NotifyRiskEvent(organizationID, risk, models.EventTypeRiskCreated)
+	// Simular email para o proprietário do risco
+	if risk.OwnerID != uuid.Nil {
+		emailSubject := fmt.Sprintf("Novo Risco Criado: %s", risk.Title)
+		emailBody := fmt.Sprintf("Um novo risco foi criado e atribuído a você ou à sua equipe:\n\nTítulo: %s\nDescrição: %s\nImpacto: %s\nProbabilidade: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
+			risk.Title, risk.Description, risk.Impact, risk.Probability)
+		notifications.NotifyUserByEmail(risk.OwnerID, emailSubject, emailBody)
 	}
 
 	c.JSON(http.StatusCreated, risk)
@@ -155,6 +171,7 @@ func UpdateRiskHandler(c *gin.Context) {
 
 	db := database.GetDB()
 	var risk models.Risk
+	var originalStatus models.RiskStatus
 	// Ensure risk belongs to the organization from the token before updating
 	if err := db.Where("id = ? AND organization_id = ?", riskID, orgID).First(&risk).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -174,6 +191,8 @@ func UpdateRiskHandler(c *gin.Context) {
 		}
 	}
 
+
+	originalStatus = risk.Status // Store original status before update
 
 	// Update fields
 	risk.Title = payload.Title
@@ -208,7 +227,19 @@ func UpdateRiskHandler(c *gin.Context) {
 
 	// Fetch the updated risk with preloads to return
 	var updatedRisk models.Risk
-	db.Preload("Owner").Where("id = ?", risk.ID).First(&updatedRisk)
+	db.Preload("Owner").Where("id = ?", risk.ID).First(&updatedRisk) // Use risk.ID as updatedRisk is not populated yet
+
+	// Check if status changed to trigger notification
+	if updatedRisk.Status != originalStatus {
+		go notifications.NotifyRiskEvent(updatedRisk.OrganizationID, updatedRisk, models.EventTypeRiskStatusChanged)
+		// Simular email para o proprietário do risco sobre a mudança de status
+		if updatedRisk.OwnerID != uuid.Nil {
+			emailSubject := fmt.Sprintf("Status do Risco '%s' Alterado para '%s'", updatedRisk.Title, updatedRisk.Status)
+			emailBody := fmt.Sprintf("O status do risco '%s' foi alterado de '%s' para '%s'.\n\nAcesse o Phoenix GRC para mais detalhes.",
+				updatedRisk.Title, originalStatus, updatedRisk.Status)
+			notifications.NotifyUserByEmail(updatedRisk.OwnerID, emailSubject, emailBody)
+		}
+	}
 
 	c.JSON(http.StatusOK, updatedRisk)
 }
@@ -459,6 +490,39 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
     log.Printf("NOTIFICAÇÃO (Simulada): Workflow de aprovação ID %s para Risco ID %s foi %s pelo aprovador ID %s.",
         approvalWorkflow.ID.String(), approvalWorkflow.RiskID.String(), approvalWorkflow.Status, approvalWorkflow.ApproverID.String())
 
+	// Se o risco foi aceito, seu status mudou para "aceito", então disparamos a notificação de mudança de status.
+	if approvalWorkflow.Status == models.ApprovalApproved {
+		var approvedRisk models.Risk
+		// Precisamos buscar o risco novamente para ter todos os campos para a notificação
+		if err := db.First(&approvedRisk, approvalWorkflow.RiskID).Error; err == nil {
+			go notifications.NotifyRiskEvent(approvedRisk.OrganizationID, approvedRisk, models.EventTypeRiskStatusChanged)
+			// Simular email para o proprietário do risco (que é o aprovador aqui) e para o requisitante
+			if approvedRisk.OwnerID != uuid.Nil { // Notificar o Owner (Aprovador)
+				emailSubjectOwner := fmt.Sprintf("Risco '%s' Aceito (Status: %s)", approvedRisk.Title, approvedRisk.Status)
+				emailBodyOwner := fmt.Sprintf("O risco '%s' que você aprovou foi atualizado para o status '%s'.\n\nComentários da aprovação: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
+					approvedRisk.Title, approvedRisk.Status, approvalWorkflow.Comments)
+				notifications.NotifyUserByEmail(approvedRisk.OwnerID, emailSubjectOwner, emailBodyOwner)
+			}
+			if approvalWorkflow.RequesterID != uuid.Nil && approvalWorkflow.RequesterID != approvedRisk.OwnerID { // Notificar o Requisitante, se diferente do aprovador
+				emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
+				emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada por %s (proprietário do risco).\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
+					approvedRisk.Title, approverUser.Name, /* Precisa buscar o nome do aprovador */ approvedRisk.Status, approvalWorkflow.Comments)
+				notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+			}
+		} else {
+			log.Printf("Erro ao buscar risco para notificação de status alterado após aprovação: %v", err)
+		}
+	} else if approvalWorkflow.Status == models.ApprovalRejected {
+        // Notificar o Requisitante sobre a rejeição
+        if approvalWorkflow.RequesterID != uuid.Nil {
+            var rejectedRisk models.Risk
+            db.First(&rejectedRisk, approvalWorkflow.RiskID) // Pegar título do risco
+            emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Rejeitada", rejectedRisk.Title)
+            emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi rejeitada.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes e para discutir os próximos passos.",
+                rejectedRisk.Title, approvalWorkflow.Comments)
+            notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+        }
+    }
 
 	c.JSON(http.StatusOK, approvalWorkflow)
 }

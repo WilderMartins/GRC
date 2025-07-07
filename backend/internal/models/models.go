@@ -74,6 +74,7 @@ type Organization struct {
 	Vulnerabilities []Vulnerability `gorm:"foreignKey:OrganizationID"`
 	AuditAssessments []AuditAssessment `gorm:"foreignKey:OrganizationID"`
 	IdentityProviders []IdentityProvider `gorm:"foreignKey:OrganizationID"`
+	WebhookConfigurations []WebhookConfiguration `gorm:"foreignKey:OrganizationID"`
 }
 
 func (org *Organization) BeforeCreate(tx *gorm.DB) (err error) {
@@ -282,6 +283,42 @@ func (idp *IdentityProvider) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
+// WebhookEventType define os tipos de eventos que podem disparar webhooks.
+type WebhookEventType string
+
+const (
+	EventTypeRiskCreated        WebhookEventType = "risk_created"
+	EventTypeRiskStatusChanged  WebhookEventType = "risk_status_changed"
+	// Adicionar outros tipos de evento conforme necessário
+)
+
+// WebhookConfiguration armazena a configuração para um webhook específico.
+type WebhookConfiguration struct {
+	ID             uuid.UUID `gorm:"type:uuid;primary_key;"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;not null;index"`
+	Name           string    `gorm:"size:100;not null"`
+	URL            string    `gorm:"size:2048;not null"` // URL do webhook
+	// EventTypes armazena uma lista de eventos que disparam este webhook.
+	// Usando TEXT para simplicidade, poderia ser JSONB ou uma tabela de junção para mais estrutura.
+	// Se usar array nativo do Postgres: `gorm:"type:text[]"` - requer driver compatível e setup.
+	// Para JSONB: `gorm:"type:jsonb"` - armazenar como um array JSON de strings.
+	EventTypes     string    `gorm:"type:text"` // Ex: "risk_created,risk_status_changed" (separado por vírgula) ou JSON array string
+	IsActive       bool      `gorm:"default:true;not null"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Organization   Organization `gorm:"foreignKey:OrganizationID"`
+}
+
+// BeforeCreate hook para WebhookConfiguration
+func (wc *WebhookConfiguration) BeforeCreate(tx *gorm.DB) (err error) {
+	if wc.ID == uuid.Nil {
+		wc.ID = uuid.New()
+	}
+	// Validação básica de URL pode ser adicionada aqui se necessário,
+	// mas geralmente é melhor no handler.
+	return
+}
+
 
 // AutoMigrateDB automatically migrates the schema
 func AutoMigrateDB(db *gorm.DB) error {
@@ -295,7 +332,8 @@ func AutoMigrateDB(db *gorm.DB) error {
 		&AuditFramework{},
 		&AuditControl{},
 		&AuditAssessment{},
-		&IdentityProvider{}, // Added new model
+		&IdentityProvider{},
+		&WebhookConfiguration{}, // Adicionado novo modelo
 	)
 	return err
 }

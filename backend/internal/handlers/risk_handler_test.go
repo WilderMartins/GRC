@@ -50,6 +50,20 @@ func TestCreateRiskHandler(t *testing.T) {
 			WithArgs(sqlmock.AnyArg(), testOrgID, payload.Title, payload.Description, payload.Category, payload.Impact, payload.Probability, payload.Status, testUserID, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String())) // Mock returning the new ID
 		sqlMock.ExpectCommit()
+
+		// Mock para buscar o Owner para notificação por email
+		// (assumindo que payload.OwnerID é o testUserID neste caso ou um ID mockável)
+		// Se OwnerID no payload for vazio, o owner será o testUserID (usuário que fez a request)
+		var ownerIDForNotification uuid.UUID
+		if payload.OwnerID != "" {
+			ownerIDForNotification, _ = uuid.Parse(payload.OwnerID)
+		} else {
+			ownerIDForNotification = testUserID
+		}
+		ownerRows := sqlmock.NewRows([]string{"id", "email"}).AddRow(ownerIDForNotification, "owner-for-created-risk@example.com")
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT $2`)).
+			WithArgs(ownerIDForNotification, 1).
+			WillReturnRows(ownerRows)
 		// --- End Mocking ---
 
 		req, _ := http.NewRequest(http.MethodPost, "/risks", bytes.NewBuffer(body))
@@ -466,8 +480,10 @@ func TestSubmitRiskForAcceptanceHandler(t *testing.T) {
 		sqlMock.ExpectCommit()
 
 		// Mocks para buscar emails para a notificação placeholder
-		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(testManagerUserID).WillReturnRows(managerUserRows)
-		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(testRiskOwnerID).WillReturnRows(ownerUserRows)
+		// Para SubmitRiskForAcceptanceHandler, o owner do risco é o approverId, e o manager é o requesterId
+		// A notificação simulada busca ambos.
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT $2`)).WithArgs(testManagerUserID, 1).WillReturnRows(managerUserRows)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT $2`)).WithArgs(testRiskOwnerID, 1).WillReturnRows(ownerUserRows)
 
 
 		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/submit-acceptance", testRiskForApprovalID.String()), nil)
@@ -594,7 +610,57 @@ func TestApproveOrRejectRiskAcceptanceHandler(t *testing.T) {
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
 
-	// TODO: Testar caso de Rejeição
+	t.Run("Successful rejection", func(t *testing.T) {
+		payload := DecisionPayload{Decision: models.ApprovalRejected, Comments: "Not acceptable at this time."}
+		body, _ := json.Marshal(payload)
+
+		mockAWF := models.ApprovalWorkflow{
+			ID:          testApprovalWorkflowID,
+			RiskID:      testRiskForApprovalID,
+			ApproverID:  testRiskOwnerID,
+			RequesterID: testManagerUserID, // Assumindo que o manager submeteu
+			Status:      models.ApprovalPending,
+			Risk:        models.Risk{OrganizationID: testOrgID, Title: "Risk Title for Rejection"},
+		}
+		awfRows := sqlmock.NewRows([]string{"id", "risk_id", "approver_id", "requester_id", "status", "Risk__organization_id"}).
+			AddRow(mockAWF.ID, mockAWF.RiskID, mockAWF.ApproverID, mockAWF.RequesterID, mockAWF.Status, mockAWF.Risk.OrganizationID)
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT "approval_workflows"."id","approval_workflows"."risk_id","approval_workflows"."requester_id","approval_workflows"."approver_id","approval_workflows"."status","approval_workflows"."comments","approval_workflows"."created_at","approval_workflows"."updated_at","Risk"."id" AS "Risk__id","Risk"."organization_id" AS "Risk__organization_id","Risk"."title" AS "Risk__title","Risk"."description" AS "Risk__description","Risk"."category" AS "Risk__category","Risk"."impact" AS "Risk__impact","Risk"."probability" AS "Risk__probability","Risk"."status" AS "Risk__status","Risk"."owner_id" AS "Risk__owner_id","Risk"."created_at" AS "Risk__created_at","Risk"."updated_at" AS "Risk__updated_at" FROM "approval_workflows" LEFT JOIN "risks" "Risk" ON "approval_workflows"."risk_id" = "Risk"."id" WHERE "approval_workflows"."id" = $1 AND "approval_workflows"."risk_id" = $2 AND "Risk"."organization_id" = $3`)).
+			WithArgs(testApprovalWorkflowID, testRiskForApprovalID, testOrgID).
+			WillReturnRows(awfRows)
+
+		sqlMock.ExpectBegin()
+		sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "approval_workflows" SET "risk_id"=$1,"requester_id"=$2,"approver_id"=$3,"status"=$4,"comments"=$5,"updated_at"=$6 WHERE "id" = $7`)).
+			WithArgs(mockAWF.RiskID, mockAWF.RequesterID, mockAWF.ApproverID, payload.Decision, payload.Comments, sqlmock.AnyArg(), mockAWF.ID).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		// Não há atualização no Risco em caso de rejeição
+		sqlMock.ExpectCommit()
+
+		// Mock para buscar o Risco para o título na notificação de email
+		rejectedRiskRows := sqlmock.NewRows([]string{"id", "title"}).AddRow(mockAWF.RiskID, mockAWF.Risk.Title)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 ORDER BY "risks"."id" LIMIT $2`)).
+			WithArgs(mockAWF.RiskID, 1).
+			WillReturnRows(rejectedRiskRows)
+
+		// Mock para buscar o Requisitante para notificação por email
+		requesterRows := sqlmock.NewRows([]string{"id", "email"}).AddRow(mockAWF.RequesterID, "manager@example.com")
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT $2`)).
+			WithArgs(mockAWF.RequesterID, 1).
+			WillReturnRows(requesterRows)
+
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/approval/%s/decide", testRiskForApprovalID.String(), testApprovalWorkflowID.String()), bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var updatedAWF models.ApprovalWorkflow
+		err := json.Unmarshal(rr.Body.Bytes(), &updatedAWF)
+		assert.NoError(t, err)
+		assert.Equal(t, models.ApprovalRejected, updatedAWF.Status)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
 	// TODO: Testar caso de usuário não autorizado (não é o approver_id)
 	// TODO: Testar caso de workflow não pendente
 }
