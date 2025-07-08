@@ -267,7 +267,27 @@ Endpoints para listar frameworks de auditoria, seus controles, e gerenciar avali
 
 *   **`GET /api/v1/audit/organizations/{orgId}/frameworks/{frameworkId}/assessments`**: Lista todas as avaliações de uma organização específica para um determinado framework.
     *   Requer que o usuário autenticado pertença à `{orgId}` ou seja um superadmin (lógica de superadmin não implementada).
-    *   **Resposta (Sucesso - 200 OK):** Array de objetos `AuditAssessment`, cada um incluindo detalhes do `AuditControl` associado.
+    *   **Resposta (Sucesso - 200 OK):** Array de objetos `AuditAssessment`, cada um incluindo detalhes do `AuditControl` associado. (Paginado)
+
+#### Gerenciamento de Usuários da Organização (`/api/v1/organizations/{orgId}/users`)
+Endpoints para administradores de organização gerenciarem usuários. Requer role `admin` ou `manager` da organização.
+
+*   **`GET /api/v1/organizations/{orgId}/users`**: Lista todos os usuários da organização.
+    *   **Query Params:** `page`, `page_size` para paginação.
+    *   **Resposta (Sucesso - 200 OK):** Resposta paginada (`PaginatedResponse`) com `items` contendo `UserResponse` (sem `PasswordHash`).
+
+*   **`GET /api/v1/organizations/{orgId}/users/{userId}`**: Obtém detalhes de um usuário específico da organização.
+    *   **Resposta (Sucesso - 200 OK):** Objeto `UserResponse`.
+
+*   **`PUT /api/v1/organizations/{orgId}/users/{userId}/role`**: Atualiza a role de um usuário.
+    *   **Payload:** `{ "role": "admin" | "manager" | "user" }`
+    *   **Resposta (Sucesso - 200 OK):** Objeto `UserResponse` atualizado.
+    *   **Nota:** Contém lógica para prevenir auto-rebaixamento do último admin/manager.
+
+*   **`PUT /api/v1/organizations/{orgId}/users/{userId}/status`**: Ativa ou desativa um usuário.
+    *   **Payload:** `{ "is_active": true | false }`
+    *   **Resposta (Sucesso - 200 OK):** Objeto `UserResponse` atualizado.
+    *   **Nota:** Contém lógica para prevenir auto-desativação do último admin/manager ativo.
 
 #### Workflow de Aceite de Risco (`/api/v1/risks/{riskId}/...`)
 Endpoints para gerenciar o processo de aprovação para aceite de riscos.

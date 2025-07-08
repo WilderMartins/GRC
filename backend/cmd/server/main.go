@@ -296,6 +296,16 @@ func startServer() {
 				webhookRoutes.PUT("/:webhookId", handlers.UpdateWebhookHandler)
 				webhookRoutes.DELETE("/:webhookId", handlers.DeleteWebhookHandler)
 			}
+
+			// Organization User Management Routes
+			userManagementRoutes := orgRoutes.Group("/users")
+			{
+				userManagementRoutes.GET("", handlers.ListOrganizationUsersHandler)
+				userManagementRoutes.GET("/:userId", handlers.GetOrganizationUserHandler)
+				userManagementRoutes.PUT("/:userId/role", handlers.UpdateOrganizationUserRoleHandler)
+				userManagementRoutes.PUT("/:userId/status", handlers.UpdateOrganizationUserStatusHandler)
+				// TODO: Adicionar rota para Convidar Usuário no futuro
+			}
 		}
 
 		// Vulnerability Management Routes

@@ -93,6 +93,7 @@ type User struct {
 	SSOProvider    string    `gorm:"size:50"`
 	SocialLoginID  string    `gorm:"size:100"`
 	Role           UserRole  `gorm:"type:varchar(20);not null;default:'user'"`
+	IsActive       bool      `gorm:"default:true;not null;index"` // Novo campo para status do usuário
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	AuthoredRisks  []Risk `gorm:"foreignKey:OwnerID"` // Risks where this user is the owner
