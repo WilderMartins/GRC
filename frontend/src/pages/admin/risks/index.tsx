@@ -2,7 +2,8 @@ import AdminLayout from '@/components/layouts/AdminLayout';
 import WithAuth from '@/components/auth/WithAuth';
 import Head from 'next/head';
 import Link from 'next/link';
-import ApprovalDecisionModal from '@/components/risks/ApprovalDecisionModal'; // Importar o modal
+import ApprovalDecisionModal from '@/components/risks/ApprovalDecisionModal';
+import RiskBulkUploadModal from '@/components/risks/RiskBulkUploadModal'; // Importar o modal de upload
 
 import { useEffect, useState, useCallback } from 'react'; // Adicionado useCallback
 import apiClient from '@/lib/axios'; // Ajuste o path se necessário
@@ -65,6 +66,8 @@ const RisksPageContent = () => {
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [selectedRiskForDecision, setSelectedRiskForDecision] = useState<Risk | null>(null);
   const [pendingApprovalWorkflowId, setPendingApprovalWorkflowId] = useState<string | null>(null);
+
+  const [showUploadModal, setShowUploadModal] = useState(false); // Estado para o modal de upload
 
 
   const fetchRisks = useCallback(async (page: number, size: number) => { // Envolver com useCallback
@@ -218,11 +221,19 @@ const RisksPageContent = () => {
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             Gestão de Riscos
           </h1>
-          <Link href="/admin/risks/new" legacyBehavior>
-            <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
-              Adicionar Novo Risco
-            </a>
-          </Link>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="inline-flex items-center justify-center rounded-md border border-transparent bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+            >
+              Importar Riscos CSV
+            </button>
+            <Link href="/admin/risks/new" legacyBehavior>
+              <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+                Adicionar Novo Risco
+              </a>
+            </Link>
+          </div>
         </div>
 
         {isLoading && <p className="text-center text-gray-500 dark:text-gray-400 py-4">Carregando riscos...</p>}
@@ -361,6 +372,15 @@ const RisksPageContent = () => {
             onSubmitSuccess={handleDecisionSubmitSuccess}
         />
       )}
+
+      <RiskBulkUploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onUploadSuccess={() => {
+          fetchRisks(1, pageSize); // Voltar para a primeira página após upload ou manter a atual? Por ora, primeira.
+          setShowUploadModal(false); // Fechar modal após o upload ser processado no componente filho
+        }}
+      />
     </AdminLayout>
   );
 };
