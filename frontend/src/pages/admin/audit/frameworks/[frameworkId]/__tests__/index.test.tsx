@@ -79,6 +79,12 @@ describe('FrameworkDetailPageContent', () => {
     const control2Row = screen.getByText('CTRL-02').closest('tr');
     expect(control2Row).toHaveTextContent('Não Avaliado');
 
+    // Check evidence link for CTRL-01
+    const evidenceLink = screen.getByRole('link', { name: /Ver Evidência/i });
+    expect(evidenceLink).toBeInTheDocument();
+    expect(evidenceLink).toHaveAttribute('href', 'http://evi.dence/1');
+
+
     expect(mockedApiClient.get).toHaveBeenCalledWith('/audit/frameworks');
     expect(mockedApiClient.get).toHaveBeenCalledWith(`/audit/frameworks/${mockFrameworkId}/controls`);
     expect(mockedApiClient.get).toHaveBeenCalledWith(`/audit/organizations/${mockUser.organization_id}/frameworks/${mockFrameworkId}/assessments`);
