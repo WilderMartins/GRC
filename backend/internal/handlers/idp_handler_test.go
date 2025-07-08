@@ -166,3 +166,129 @@ func TestListIdentityProvidersHandler(t *testing.T) {
 // Remember to test authorization cases (e.g., user not admin, org mismatch) for each.
 // For Update, test partial updates and full updates.
 // For Delete, test successful deletion and "not found" cases.
+
+var testIdpID = uuid.New() // For Get, Update, Delete tests
+
+func TestGetIdentityProviderHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
+	router.GET("/orgs/:orgId/identity-providers/:idpId", GetIdentityProviderHandler)
+
+	t.Run("Successful get IdP", func(t *testing.T) {
+		mockIdP := models.IdentityProvider{
+			ID:             testIdpID,
+			OrganizationID: testOrgID,
+			Name:           "Test IdP Details",
+			ProviderType:   models.IDPTypeSAML,
+			IsActive:       true,
+			ConfigJSON:     `{"entity_id":"test"}`,
+		}
+		rows := sqlmock.NewRows([]string{"id", "organization_id", "name", "provider_type", "is_active", "config_json"}).
+			AddRow(mockIdP.ID, mockIdP.OrganizationID, mockIdP.Name, mockIdP.ProviderType, mockIdP.IsActive, mockIdP.ConfigJSON)
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2 ORDER BY "identity_providers"."id" LIMIT $3`)).
+			WithArgs(testIdpID, testOrgID, 1).
+			WillReturnRows(rows)
+
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var idP models.IdentityProvider
+		err := json.Unmarshal(rr.Body.Bytes(), &idP)
+		assert.NoError(t, err)
+		assert.Equal(t, mockIdP.Name, idP.Name)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("IdP not found", func(t *testing.T) {
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testIdpID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+}
+
+func TestUpdateIdentityProviderHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
+	router.PUT("/orgs/:orgId/identity-providers/:idpId", UpdateIdentityProviderHandler)
+
+    // Valid ConfigJSON for SAML example for updates
+	validSamlConfigUpdate := json.RawMessage(`{"idp_entity_id":"http://updated.idp","idp_sso_url":"http://updated.idp/sso"}`)
+
+	t.Run("Successful IdP update", func(t *testing.T) {
+		isActive := false
+		payload := IdentityProviderPayload{
+			ProviderType: models.IDPTypeSAML,
+			Name:         "Updated Test SAML IdP",
+			IsActive:     &isActive,
+			ConfigJSON:   validSamlConfigUpdate,
+		}
+		body, _ := json.Marshal(payload)
+
+		originalIdP := models.IdentityProvider{ID: testIdpID, OrganizationID: testOrgID, Name: "Original Name", ProviderType: models.IDPTypeSAML, IsActive: true, ConfigJSON: "{}"}
+		rows := sqlmock.NewRows([]string{"id", "organization_id", "name", "provider_type", "is_active", "config_json"}).
+			AddRow(originalIdP.ID, originalIdP.OrganizationID, originalIdP.Name, originalIdP.ProviderType, originalIdP.IsActive, originalIdP.ConfigJSON)
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2 ORDER BY "identity_providers"."id" LIMIT $3`)).
+			WithArgs(testIdpID, testOrgID, 1).
+			WillReturnRows(rows)
+
+		sqlMock.ExpectBegin()
+		sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "identity_providers" SET`)).
+			WithArgs(sqlmock.AnyArg(), payload.IsActive, payload.Name, testOrgID, payload.ProviderType, sqlmock.AnyArg(), testIdpID). // Order of args for SET can be tricky
+			WillReturnResult(sqlmock.NewResult(0,1))
+		sqlMock.ExpectCommit()
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var updatedIdP models.IdentityProvider
+		err := json.Unmarshal(rr.Body.Bytes(), &updatedIdP)
+		assert.NoError(t, err)
+		assert.Equal(t, payload.Name, updatedIdP.Name)
+		assert.False(t, updatedIdP.IsActive)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+    // TODO: Test UpdateIdentityProviderHandler for IdP not found
+    // TODO: Test UpdateIdentityProviderHandler with invalid payload (e.g., invalid JSON in ConfigJSON)
+}
+
+func TestDeleteIdentityProviderHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
+	router.DELETE("/orgs/:orgId/identity-providers/:idpId", DeleteIdentityProviderHandler)
+
+	t.Run("Successful IdP deletion", func(t *testing.T) {
+		// Mock para buscar o IdP antes de deletar
+		rows := sqlmock.NewRows([]string{"id"}).AddRow(testIdpID)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2 ORDER BY "identity_providers"."id" LIMIT $3`)).
+			WithArgs(testIdpID, testOrgID, 1).
+			WillReturnRows(rows)
+
+		sqlMock.ExpectBegin()
+		sqlMock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "identity_providers" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testIdpID, testOrgID).
+			WillReturnResult(sqlmock.NewResult(0,1))
+		sqlMock.ExpectCommit()
+
+		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Identity provider deleted successfully")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+    // TODO: Test DeleteIdentityProviderHandler for IdP not found
+}

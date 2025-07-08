@@ -665,6 +665,111 @@ func TestApproveOrRejectRiskAcceptanceHandler(t *testing.T) {
 	// TODO: Testar caso de workflow não pendente
 }
 
+func TestUpdateRiskHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := getRouterWithAuthenticatedContext(testUserID, testOrgID)
+	router.PUT("/risks/:riskId", UpdateRiskHandler)
+
+	// testRiskID já definido globalmente para testes
+	// testUserID é o admin/manager que faz a ação
+	// testRiskOwnerID pode ser o owner do risco a ser atualizado
+
+	t.Run("Successful risk update - status changed", func(t *testing.T) {
+		payload := RiskPayload{
+			Title:       "Updated Risk Title",
+			Description: "Updated Description",
+			Category:    models.CategoryOperational,
+			Impact:      models.ImpactCritical,
+			Probability: models.ProbabilityCrítico, // Corrigido para Crítico
+			Status:      models.StatusInProgress, // Novo status
+			OwnerID:     testRiskOwnerID.String(),
+		}
+		body, _ := json.Marshal(payload)
+
+		originalRisk := models.Risk{
+			ID:             testRiskID,
+			OrganizationID: testOrgID,
+			Title:          "Original Risk Title",
+			Status:         models.StatusOpen, // Status original
+			OwnerID:        testRiskOwnerID,
+		}
+		riskRows := sqlmock.NewRows([]string{"id", "organization_id", "title", "status", "owner_id"}).
+			AddRow(originalRisk.ID, originalRisk.OrganizationID, originalRisk.Title, originalRisk.Status, originalRisk.OwnerID)
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2 ORDER BY "risks"."id" LIMIT $3`)).
+			WithArgs(testRiskID, testOrgID, 1).
+			WillReturnRows(riskRows)
+
+		sqlMock.ExpectBegin()
+		// A ordem dos campos no SET pode variar, ou pode ser mockado de forma mais genérica
+		sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "risks" SET`)). // Regex mais genérico para UPDATE
+			WithArgs(payload.Category, payload.Description, payload.Impact, testOrgID, testRiskOwnerID, payload.Probability, payload.Status, payload.Title, sqlmock.AnyArg(), testRiskID).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		sqlMock.ExpectCommit()
+
+		// Mock para o Preload("Owner") na resposta
+		ownerRows := sqlmock.NewRows([]string{"id", "name"}).AddRow(testRiskOwnerID, "Risk Owner Name")
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE "users"."id" = $1`)).
+			WithArgs(testRiskOwnerID).
+			WillReturnRows(ownerRows)
+
+		// Mock para a notificação de email devido à mudança de status
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT $2`)).
+			WithArgs(testRiskOwnerID, 1).
+			WillReturnRows(ownerRows) // Reutiliza ownerRows para simplificar
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/risks/%s", testRiskID.String()), bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var updatedRiskResp UserResponse // Assumindo que UpdateRiskHandler retorna o risco, não UserResponse
+		// Corrigir para models.Risk ou um RiskResponseDTO se existir
+		var updatedRisk models.Risk
+		err := json.Unmarshal(rr.Body.Bytes(), &updatedRisk)
+		assert.NoError(t, err)
+		assert.Equal(t, payload.Title, updatedRisk.Title)
+		assert.Equal(t, payload.Status, updatedRisk.Status)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+	// TODO: Testar UpdateRiskHandler sem mudança de status (sem notificação)
+	// TODO: Testar UpdateRiskHandler para risco não encontrado
+	// TODO: Testar UpdateRiskHandler com payload inválido
+}
+
+func TestDeleteRiskHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := getRouterWithAuthenticatedContext(testUserID, testOrgID)
+	router.DELETE("/risks/:riskId", DeleteRiskHandler)
+
+	// testRiskID já definido
+
+	t.Run("Successful risk deletion", func(t *testing.T) {
+		// Mock para buscar o risco antes de deletar (verificação de existência e org)
+		riskRows := sqlmock.NewRows([]string{"id"}).AddRow(testRiskID)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2 ORDER BY "risks"."id" LIMIT $3`)).
+			WithArgs(testRiskID, testOrgID, 1).
+			WillReturnRows(riskRows)
+
+		sqlMock.ExpectBegin()
+		sqlMock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "risks" WHERE "risks"."id" = $1`)).
+			WithArgs(testRiskID).
+			WillReturnResult(sqlmock.NewResult(0,1))
+		sqlMock.ExpectCommit()
+
+		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("/risks/%s", testRiskID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		assert.Contains(t, rr.Body.String(), "Risk deleted successfully")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+	// TODO: Testar DeleteRiskHandler para risco não encontrado
+}
+
+
 func TestGetRiskApprovalHistoryHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithAuthenticatedContext(testUserID, testOrgID) // Qualquer usuário da org pode ver

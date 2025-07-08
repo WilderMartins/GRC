@@ -278,6 +278,83 @@ func TestCreateOrUpdateAssessmentHandler(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "File storage service is not configured")
 	})
 
+    t.Run("Successful assessment upsert - update existing with file upload", func(t *testing.T) {
+		mockUploader := &MockFileStorageProvider{}
+		var uploadedObjectName string
+		mockUploader.UploadFileFunc = func(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (string, error) {
+			uploadedObjectName = objectName // Captura o nome do objeto para verificação
+			return "http://mockgcs.com/" + objectName, nil
+		}
+		filestorage.DefaultFileStorageProvider = mockUploader
+
+		updatedScore := 90
+		payload := AssessmentPayload{
+			AuditControlID: testControlID.String(),
+			Status:         models.ControlStatusConformant,
+			Score:          &updatedScore,
+			AssessmentDate: time.Now().Format("2006-01-02"),
+		}
+		payloadJSON, _ := json.Marshal(payload)
+
+		bodyBuf := &bytes.Buffer{}
+		mpWriter := multipart.NewWriter(bodyBuf)
+		_ = mpWriter.WriteField("data", string(payloadJSON))
+		fileWriter, _ := mpWriter.CreateFormFile("evidence_file", "updated_evidence.png")
+		_, _ = fileWriter.Write([]byte("new dummy png content"))
+		mpWriter.Close()
+
+		sqlMock.ExpectBegin()
+        // A query de UPSERT é a mesma, o GORM/DB lida com o conflito
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "audit_assessments" ("id","organization_id","audit_control_id","status","evidence_url","score","assessment_date","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT ("organization_id","audit_control_id") DO UPDATE SET "status"=$10,"evidence_url"=$11,"score"=$12,"assessment_date"=$13,"updated_at"=$14 RETURNING "id"`)).
+			WithArgs(sqlmock.AnyArg(), testOrgID, testControlID, payload.Status, sqlmock.AnyArg() /* evidence_url do GCS */, *payload.Score, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+                     payload.Status, sqlmock.AnyArg() /* evidence_url do GCS */, *payload.Score, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(testAssessmentID)) // Assume que o ID é o mesmo se for update
+		sqlMock.ExpectCommit()
+
+		// Mock para o re-fetch após o upsert
+        // A URL da evidência será a nova URL do GCS
+		refetchRows := sqlmock.NewRows([]string{"id", "organization_id", "audit_control_id", "status", "evidence_url", "score", "assessment_date"}).
+			AddRow(testAssessmentID, testOrgID, testControlID, payload.Status, "http://mockgcs.com/somepath/updated_evidence.png", *payload.Score, time.Now())
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id = $2 ORDER BY "audit_assessments"."id" LIMIT $3`)).
+			WithArgs(testOrgID, testControlID, 1).
+			WillReturnRows(refetchRows)
+
+		req, _ := http.NewRequest(http.MethodPost, "/audit/assessments", bodyBuf)
+		req.Header.Set("Content-Type", mpWriter.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var resultAssessment models.AuditAssessment
+		err := json.Unmarshal(rr.Body.Bytes(), &resultAssessment)
+		assert.NoError(t, err)
+		assert.True(t, strings.HasPrefix(resultAssessment.EvidenceURL, "http://mockgcs.com/"))
+        assert.True(t, strings.Contains(resultAssessment.EvidenceURL, "updated_evidence.png"))
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+
+    t.Run("Invalid payload - invalid status", func(t *testing.T) {
+        filestorage.DefaultFileStorageProvider = nil
+        payloadJSON := `{"audit_control_id": "` + testControlID.String() + `", "status": "INVALID_STATUS"}`
+
+        bodyBuf := &bytes.Buffer{}
+		writer := multipart.NewWriter(bodyBuf)
+		_ = writer.WriteField("data", string(payloadJSON))
+		writer.Close()
+
+        req, _ := http.NewRequest(http.MethodPost, "/audit/assessments", bodyBuf)
+        req.Header.Set("Content-Type", writer.FormDataContentType())
+        rr := httptest.NewRecorder()
+        router.ServeHTTP(rr, req)
+        assert.Equal(t, http.StatusBadRequest, rr.Code)
+        // A mensagem de erro exata dependerá da biblioteca de validação do Gin e das tags do struct.
+        // Ex: "Key: 'AssessmentPayload.Status' Error:Field validation for 'Status' failed on the 'oneof' tag"
+        assert.Contains(t, rr.Body.String(), "Invalid request payload")
+    })
+
+    // TODO: Testar validações de payload mais granulares (data malformatada, score fora do range)
+    // TODO: Testar o cenário onde o upload do arquivo falha (mockando o FileStorageProvider para retornar erro).
 }
 
 
