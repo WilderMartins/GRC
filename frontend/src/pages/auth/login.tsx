@@ -78,12 +78,34 @@ export default function LoginPage() {
   };
 
   const handleSSOLogin = (provider: IdentityProvider) => {
-    // TODO: Implementar redirecionamento para provider.loginUrl
-    // window.location.href = provider.loginUrl; // Exemplo simples
-    if (provider.loginUrl) {
-      alert(`Redirecionar para: ${provider.name} (${provider.loginUrl})`);
+    // O backend espera que o idpId seja o UUID da configuração do IdentityProvider.
+    // A URL base da API do backend é process.env.NEXT_PUBLIC_API_BASE_URL (sem /api/v1)
+    // ou podemos construir a URL completa se soubermos o host do backend.
+    // Por enquanto, vamos assumir que o backend está no mesmo host ou a URL completa é conhecida.
+    // O APP_ROOT_URL do backend (ex: http://localhost:8080) é usado para construir os endpoints de auth.
+
+    // Este NEXT_PUBLIC_APP_ROOT_URL seria o mesmo que o APP_ROOT_URL do backend.
+    // Idealmente, o backend deveria fornecer essas URLs de início de login completas.
+    // Por agora, vamos montá-las no frontend.
+    const backendAuthRoot = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080'; // Exemplo
+
+    let ssoLoginUrl = '';
+    if (provider.type === 'saml') {
+      ssoLoginUrl = `${backendAuthRoot}/auth/saml/${provider.id}/login`;
+    } else if (provider.type === 'oauth2_google') {
+      ssoLoginUrl = `${backendAuthRoot}/auth/oauth2/google/${provider.id}/login`;
+    } else if (provider.type === 'oauth2_github') {
+      // ssoLoginUrl = `${backendAuthRoot}/auth/oauth2/github/${provider.id}/login`; // Se implementado
+      alert(`Provedor ${provider.name} ainda não implementado.`);
+      return;
     } else {
-      alert(`Configuração de login para ${provider.name} pendente.`);
+      alert(`Tipo de provedor desconhecido: ${provider.type}`);
+      return;
+    }
+
+    if (ssoLoginUrl) {
+      // Redirecionamento direto do navegador para o endpoint de início do fluxo no backend
+      window.location.href = ssoLoginUrl;
     }
   };
 

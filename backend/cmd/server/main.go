@@ -306,6 +306,10 @@ func startServer() {
 				userManagementRoutes.PUT("/:userId/status", handlers.UpdateOrganizationUserStatusHandler)
 				// TODO: Adicionar rota para Convidar Usuário no futuro
 			}
+
+			// Organization Branding/Whitelabeling Route
+			orgRoutes.PUT("/branding", handlers.UpdateOrganizationBrandingHandler)
+			orgRoutes.GET("/branding", handlers.GetOrganizationBrandingHandler) // Para o frontend buscar as configs
 		}
 
 		// Vulnerability Management Routes
