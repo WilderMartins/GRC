@@ -663,6 +663,60 @@ func TestApproveOrRejectRiskAcceptanceHandler(t *testing.T) {
 
 	// TODO: Testar caso de usuário não autorizado (não é o approver_id)
 	// TODO: Testar caso de workflow não pendente
+
+	t.Run("Fail if user not authorized (not approver)", func(t *testing.T) {
+		anotherUserID := uuid.New()
+		// Roteador com contexto de OUTRO usuário tentando decidir
+		otherUserRouter := getRouterWithOrgAdminContext(anotherUserID, testOrgID, models.RoleUser)
+		otherUserRouter.POST("/risks/:riskId/approval/:approvalId/decide", ApproveOrRejectRiskAcceptanceHandler)
+
+		payload := DecisionPayload{Decision: models.ApprovalApproved, Comments: "Trying to approve."}
+		body, _ := json.Marshal(payload)
+
+		mockAWF := models.ApprovalWorkflow{
+			ID: testApprovalWorkflowID, RiskID: testRiskForApprovalID, ApproverID: testRiskOwnerID, // testRiskOwnerID é o aprovador correto
+			Status: models.ApprovalPending, Risk: models.Risk{OrganizationID: testOrgID},
+		}
+		awfRows := sqlmock.NewRows([]string{"id", "risk_id", "approver_id", "status", "Risk__organization_id"}).
+			AddRow(mockAWF.ID, mockAWF.RiskID, mockAWF.ApproverID, mockAWF.Status, mockAWF.Risk.OrganizationID)
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT "approval_workflows"."id","approval_workflows"."risk_id"`)). // Query simplificada para o mock
+			WithArgs(testApprovalWorkflowID, testRiskForApprovalID, testOrgID).
+			WillReturnRows(awfRows)
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/approval/%s/decide", testRiskForApprovalID.String(), testApprovalWorkflowID.String()), bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		otherUserRouter.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+		assert.Contains(t, rr.Body.String(), "You are not authorized to decide")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("Fail if workflow not pending", func(t *testing.T) {
+		payload := DecisionPayload{Decision: models.ApprovalApproved}
+		body, _ := json.Marshal(payload)
+
+		mockAWF_Approved := models.ApprovalWorkflow{ // Workflow já aprovado
+			ID: testApprovalWorkflowID, RiskID: testRiskForApprovalID, ApproverID: testRiskOwnerID,
+			Status: models.ApprovalApproved, Risk: models.Risk{OrganizationID: testOrgID},
+		}
+		awfRows_Approved := sqlmock.NewRows([]string{"id", "risk_id", "approver_id", "status", "Risk__organization_id"}).
+			AddRow(mockAWF_Approved.ID, mockAWF_Approved.RiskID, mockAWF_Approved.ApproverID, mockAWF_Approved.Status, mockAWF_Approved.Risk.OrganizationID)
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT "approval_workflows"."id","approval_workflows"."risk_id"`)). // Query simplificada
+			WithArgs(testApprovalWorkflowID, testRiskForApprovalID, testOrgID).
+			WillReturnRows(awfRows_Approved)
+
+		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/risks/%s/approval/%s/decide", testRiskForApprovalID.String(), testApprovalWorkflowID.String()), bytes.NewBuffer(body))
+		rr := httptest.NewRecorder()
+		// Usar o router original onde o usuário logado é o testRiskOwnerID (o aprovador correto)
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusConflict, rr.Code)
+		assert.Contains(t, rr.Body.String(), "already been decided")
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
 }
 
 func TestUpdateRiskHandler(t *testing.T) {
@@ -734,8 +788,38 @@ func TestUpdateRiskHandler(t *testing.T) {
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
 	// TODO: Testar UpdateRiskHandler sem mudança de status (sem notificação)
-	// TODO: Testar UpdateRiskHandler para risco não encontrado
-	// TODO: Testar UpdateRiskHandler com payload inválido
+
+	t.Run("UpdateRiskHandler - Risk not found", func(t *testing.T) {
+		payload := RiskPayload{Title: "Updated Title", Impact: models.ImpactLow, Probability: models.ProbabilityLow, Status: models.StatusOpen}
+		body, _ := json.Marshal(payload)
+		nonExistentRiskID := uuid.New()
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(nonExistentRiskID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/risks/%s", nonExistentRiskID.String()), bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("UpdateRiskHandler - Invalid payload", func(t *testing.T) {
+		// Exemplo: Impacto inválido
+		invalidPayloadJSON := `{"title": "Test", "impact": "INVALID_IMPACT", "probability": "Baixo", "status": "aberto"}`
+		body := bytes.NewBuffer([]byte(invalidPayloadJSON))
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/risks/%s", testRiskID.String()), body)
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Invalid request payload")
+		// Nenhuma interação com o banco de dados esperada se o binding falhar
+	})
 }
 
 func TestDeleteRiskHandler(t *testing.T) {
@@ -766,7 +850,19 @@ func TestDeleteRiskHandler(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "Risk deleted successfully")
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
-	// TODO: Testar DeleteRiskHandler para risco não encontrado
+
+	t.Run("DeleteRiskHandler - Risk not found", func(t *testing.T) {
+		nonExistentRiskID := uuid.New()
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "risks" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(nonExistentRiskID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("/risks/%s", nonExistentRiskID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
 }
 
 

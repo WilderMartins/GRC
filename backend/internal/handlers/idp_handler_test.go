@@ -213,6 +213,14 @@ func TestGetIdentityProviderHandler(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, rr.Code)
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
+
+	t.Run("GetIdentityProviderHandler - Invalid idpId format", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), "not-a-uuid"), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Invalid identity provider ID format")
+	})
 }
 
 func TestUpdateIdentityProviderHandler(t *testing.T) {
@@ -260,8 +268,67 @@ func TestUpdateIdentityProviderHandler(t *testing.T) {
 		assert.False(t, updatedIdP.IsActive)
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
-    // TODO: Test UpdateIdentityProviderHandler for IdP not found
-    // TODO: Test UpdateIdentityProviderHandler with invalid payload (e.g., invalid JSON in ConfigJSON)
+
+	t.Run("UpdateIdentityProviderHandler - IdP not found", func(t *testing.T) {
+		isActive := true
+		payload := IdentityProviderPayload{Name: "Update NonExistent", ProviderType: models.IDPTypeSAML, IsActive: &isActive, ConfigJSON: json.RawMessage(`{}`)}
+		body, _ := json.Marshal(payload)
+		nonExistentIdpID := uuid.New()
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(nonExistentIdpID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), nonExistentIdpID.String()), bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("UpdateIdentityProviderHandler - Invalid ConfigJSON", func(t *testing.T) {
+		isActive := true
+		// Payload com JSON inválido em ConfigJSON
+		payload := IdentityProviderPayload{Name: "Update Invalid JSON", ProviderType: models.IDPTypeSAML, IsActive: &isActive, ConfigJSON: json.RawMessage(`{"key": "value`)} // JSON incompleto
+		body, _ := json.Marshal(payload) // Isso vai falhar ao tentar fazer marshal do json.RawMessage se ele não for um JSON válido.
+                                        // O teste deve ser sobre o backend recebendo um JSON string malformado.
+                                        // Então, o payload JSON string enviado na requisição é o que importa.
+
+        // Corrigindo: Montar o JSON da requisição manualmente para simular um JSON string malformado
+        requestBodyJSON := `{"name": "Update Invalid JSON", "provider_type": "saml", "is_active": true, "config_json": "{malformed}"}`
+
+
+		// Mock para buscar o IdP original (o handler busca antes de tentar atualizar)
+		originalIdP := models.IdentityProvider{ID: testIdpID, OrganizationID: testOrgID}
+		rows := sqlmock.NewRows([]string{"id"}).AddRow(originalIdP.ID)
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testIdpID, testOrgID).
+			WillReturnRows(rows)
+        // Não esperamos Begin/Commit/Exec se a validação do payload do JSON falhar no handler
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), bytes.NewBuffer([]byte(requestBodyJSON)))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Invalid ConfigJSON format")
+		assert.NoError(t, sqlMock.ExpectationsWereMet()) // Verifica se o SELECT foi chamado, mas não o UPDATE
+	})
+
+    t.Run("UpdateIdentityProviderHandler - Invalid provider_type in payload", func(t *testing.T) {
+		requestBodyJSON := `{"name": "Update Invalid Type", "provider_type": "invalid_type", "is_active": true, "config_json": "{}"}`
+		body := bytes.NewBuffer([]byte(requestBodyJSON))
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), body)
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Invalid request payload")
+        // Nenhuma interação com o banco de dados esperada se o binding do payload principal falhar.
+	})
 }
 
 func TestDeleteIdentityProviderHandler(t *testing.T) {
@@ -290,5 +357,17 @@ func TestDeleteIdentityProviderHandler(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "Identity provider deleted successfully")
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
-    // TODO: Test DeleteIdentityProviderHandler for IdP not found
+
+	t.Run("DeleteIdentityProviderHandler - IdP not found", func(t *testing.T) {
+		nonExistentIdpID := uuid.New()
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(nonExistentIdpID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), nonExistentIdpID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
 }

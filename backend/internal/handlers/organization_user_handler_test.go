@@ -99,6 +99,27 @@ func TestGetOrganizationUserHandler(t *testing.T) {
         assert.Equal(t, mockUser.Name, respUser.Name)
         assert.NoError(t, sqlMock.ExpectationsWereMet())
     })
+
+    t.Run("GetOrganizationUserHandler - User Not Found", func(t *testing.T) {
+        nonExistentUserID := uuid.New()
+        sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 AND organization_id = $2`)).
+            WithArgs(nonExistentUserID, testOrgID).
+            WillReturnError(gorm.ErrRecordNotFound)
+
+        req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/orgs/%s/users/%s", testOrgID.String(), nonExistentUserID.String()), nil)
+        rr := httptest.NewRecorder()
+        router.ServeHTTP(rr, req)
+        assert.Equal(t, http.StatusNotFound, rr.Code)
+        assert.NoError(t, sqlMock.ExpectationsWereMet())
+    })
+
+    t.Run("GetOrganizationUserHandler - Invalid userId format", func(t *testing.T) {
+        req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/orgs/%s/users/%s", testOrgID.String(), "not-a-uuid"), nil)
+        rr := httptest.NewRecorder()
+        router.ServeHTTP(rr, req)
+        assert.Equal(t, http.StatusBadRequest, rr.Code)
+        assert.Contains(t, rr.Body.String(), "Formato de ID do usuário inválido")
+    })
 }
 
 
@@ -205,5 +226,96 @@ func TestUpdateOrganizationUserStatusHandler(t *testing.T) {
         assert.NoError(t, sqlMock.ExpectationsWereMet())
     })
 
-    // TODO: Adicionar teste para falha ao desativar último admin/manager ativo
+
+    t.Run("Successful activate user", func(t *testing.T) {
+        isActive := true
+        payload := UpdateUserStatusPayload{IsActive: &isActive}
+        body, _ := json.Marshal(payload)
+
+        userToUpdate := models.User{ID: testTargetUserID, OrganizationID: testOrgID, Name: "User To Activate", Role: models.RoleUser, IsActive: false} // Começa inativo
+        rowsUser := sqlmock.NewRows([]string{"id", "organization_id", "name", "role", "is_active"}).
+            AddRow(userToUpdate.ID, userToUpdate.OrganizationID, userToUpdate.Name, userToUpdate.Role, userToUpdate.IsActive)
+
+        sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 AND organization_id = $2 ORDER BY "users"."id" LIMIT $3`)).
+            WithArgs(testTargetUserID, testOrgID, 1).
+            WillReturnRows(rowsUser)
+
+        sqlMock.ExpectBegin()
+        sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "users" SET "is_active"=$1,"updated_at"=$2 WHERE "id" = $3`)).
+            WithArgs(true, sqlmock.AnyArg(), testTargetUserID).
+            WillReturnResult(sqlmock.NewResult(0,1))
+        sqlMock.ExpectCommit()
+
+        req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/users/%s/status", testOrgID.String(), testTargetUserID.String()), bytes.NewBuffer(body))
+        req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+        assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+        var respUser UserResponse
+        err := json.Unmarshal(rr.Body.Bytes(), &respUser)
+        assert.NoError(t, err)
+        assert.True(t, respUser.IsActive)
+        assert.NoError(t, sqlMock.ExpectationsWereMet())
+    })
+
+	t.Run("Fail to deactivate last active admin/manager (self)", func(t *testing.T) {
+		isActive := false
+        payload := UpdateUserStatusPayload{IsActive: &isActive}
+        body, _ := json.Marshal(payload)
+
+		// testUserID é o admin fazendo a ação em si mesmo
+        adminUser := models.User{ID: testUserID, OrganizationID: testOrgID, Name: "Admin User", Role: models.RoleAdmin, IsActive: true}
+        rowsAdmin := sqlmock.NewRows([]string{"id", "organization_id", "name", "role", "is_active"}).
+            AddRow(adminUser.ID, adminUser.OrganizationID, adminUser.Name, adminUser.Role, adminUser.IsActive)
+
+        sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 AND organization_id = $2 ORDER BY "users"."id" LIMIT $3`)).
+            WithArgs(testUserID, testOrgID, 1).
+            WillReturnRows(rowsAdmin)
+
+        // Mock para a contagem de admins/managers ativos
+        sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "users" WHERE organization_id = $1 AND is_active = $2 AND (role = $3 OR role = $4)`)).
+            WithArgs(testOrgID, true, models.RoleAdmin, models.RoleManager).
+            WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1)) // Só existe 1 admin/manager ativo
+
+        req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/users/%s/status", testOrgID.String(), testUserID.String()), bytes.NewBuffer(body))
+        req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+        assert.Equal(t, http.StatusForbidden, rr.Code)
+        assert.Contains(t, rr.Body.String(), "Não é possível desativar o último administrador/gerente ativo")
+        assert.NoError(t, sqlMock.ExpectationsWereMet())
+    })
+
+	t.Run("UpdateUserStatusHandler - User not found", func(t *testing.T) {
+		isActive := true
+        payload := UpdateUserStatusPayload{IsActive: &isActive}
+        body, _ := json.Marshal(payload)
+        nonExistentUserID := uuid.New()
+
+        sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 AND organization_id = $2`)).
+            WithArgs(nonExistentUserID, testOrgID).
+            WillReturnError(gorm.ErrRecordNotFound)
+
+        req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/users/%s/status", testOrgID.String(), nonExistentUserID.String()), bytes.NewBuffer(body))
+        req.Header.Set("Content-Type", "application/json")
+        rr := httptest.NewRecorder()
+        router.ServeHTTP(rr, req)
+        assert.Equal(t, http.StatusNotFound, rr.Code)
+        assert.NoError(t, sqlMock.ExpectationsWereMet())
+    })
+
+	t.Run("UpdateUserStatusHandler - Invalid payload (is_active missing)", func(t *testing.T) {
+		// Enviar JSON vazio, o binding:"required" para IsActive deve falhar
+        body := bytes.NewBuffer([]byte(`{}`))
+
+        req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/users/%s/status", testOrgID.String(), testTargetUserID.String()), body)
+        req.Header.Set("Content-Type", "application/json")
+        rr := httptest.NewRecorder()
+        router.ServeHTTP(rr, req)
+        assert.Equal(t, http.StatusBadRequest, rr.Code)
+        assert.Contains(t, rr.Body.String(), "Payload inválido")
+	})
+    // TODO: Testar prevenção de bloqueio ao tentar desativar *outro* admin/manager se este for o último ativo.
 }

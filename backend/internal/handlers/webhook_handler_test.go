@@ -156,7 +156,26 @@ func TestGetWebhookHandler(t *testing.T) {
 		assert.Equal(t, mockWH.Name, respWH.Name)
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
-    // TODO: Testar GetWebhookHandler para webhook não encontrado
+
+	t.Run("GetWebhookHandler - Not Found", func(t *testing.T) {
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "webhook_configurations" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(testWebhookID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/orgs/%s/webhooks/%s", testOrgID.String(), testWebhookID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("GetWebhookHandler - Invalid webhookId format", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/orgs/%s/webhooks/%s", testOrgID.String(), "not-a-uuid"), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Invalid webhook ID format")
+	})
 }
 
 func TestUpdateWebhookHandler(t *testing.T) {
@@ -194,7 +213,38 @@ func TestUpdateWebhookHandler(t *testing.T) {
 		assert.False(t, respWH.IsActive)
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
-    // TODO: Testar UpdateWebhookHandler para webhook não encontrado e payload inválido
+
+	t.Run("UpdateWebhookHandler - Not Found", func(t *testing.T) {
+		isActive := true
+		payload := WebhookPayload{Name: "WH Update NF", URL: "http://nf.com", EventTypes: []string{"risk_created"}, IsActive: &isActive}
+		body, _ := json.Marshal(payload)
+		nonExistentID := uuid.New()
+
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "webhook_configurations" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(nonExistentID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/webhooks/%s", testOrgID.String(), nonExistentID.String()), bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
+
+	t.Run("UpdateWebhookHandler - Invalid Payload (e.g., empty URL)", func(t *testing.T) {
+		// O handler CreateWebhookHandler já testa payload inválido com URL vazia e event_types inválido.
+		// A validação do payload para Update é a mesma.
+		payload := WebhookPayload{Name: "Valid Name", URL: "", EventTypes: []string{"risk_created"}} // URL vazia
+		body, _ := json.Marshal(payload)
+
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/webhooks/%s", testOrgID.String(), testWebhookID.String()), bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req) // O binding do Gin deve falhar
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "Invalid request payload")
+	})
 }
 
 func TestDeleteWebhookHandler(t *testing.T) {
@@ -220,5 +270,17 @@ func TestDeleteWebhookHandler(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "Webhook configuration deleted successfully")
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
-    // TODO: Testar DeleteWebhookHandler para webhook não encontrado
+
+	t.Run("DeleteWebhookHandler - Not Found", func(t *testing.T) {
+		nonExistentID := uuid.New()
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "webhook_configurations" WHERE id = $1 AND organization_id = $2`)).
+			WithArgs(nonExistentID, testOrgID).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("/orgs/%s/webhooks/%s", testOrgID.String(), nonExistentID.String()), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
 }
