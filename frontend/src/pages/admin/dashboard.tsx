@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import apiClient from '@/lib/axios';
 import Link from 'next/link';
 import { useNotifier } from '@/hooks/useNotifier';
+import StatCard from '@/components/common/StatCard'; // Importar o StatCard comum
 
 interface AdminStatistics {
   active_users_count?: number;
@@ -21,17 +22,7 @@ interface ActivityLog {
   target_link?: string;
 }
 
-const StatCard: React.FC<{ title: string; value: number | string; isLoading: boolean; error?: string | null }> = ({ title, value, isLoading, error }) => {
-  return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-      <h2 className="text-xl font-semibold text-gray-700 dark:text-white mb-2">{title}</h2>
-      {isLoading && <p className="text-2xl font-bold text-gray-500 dark:text-gray-400 animate-pulse">Carregando...</p>}
-      {error && !isLoading && <p className="text-sm font-bold text-red-500 dark:text-red-400">Erro ao carregar</p>}
-      {!isLoading && !error && <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{value}</p>}
-    </div>
-  );
-};
-
+// Definição local do StatCard removida
 
 const AdminDashboardContent = () => {
   const { user } = useAuth();

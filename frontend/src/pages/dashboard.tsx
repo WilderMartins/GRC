@@ -5,6 +5,7 @@ import WithAuth from '../components/auth/WithAuth';
 import Link from 'next/link';
 import apiClient from '@/lib/axios';
 import { useNotifier } from '@/hooks/useNotifier';
+import StatCard from '@/components/common/StatCard'; // Importar o StatCard comum
 
 interface UserDashboardSummary {
   assigned_risks_open_count?: number;
@@ -12,33 +13,7 @@ interface UserDashboardSummary {
   pending_approval_tasks_count?: number;
 }
 
-// Reutilizando o StatCard do admin/dashboard.tsx, idealmente seria um componente comum
-const StatCard: React.FC<{ title: string; value: number | string; isLoading: boolean; linkTo?: string; error?: string | null }> = ({ title, value, isLoading, linkTo, error }) => {
-  const cardContent = (
-    <>
-      <h2 className="text-xl font-semibold text-gray-700 dark:text-white mb-2 truncate">{title}</h2>
-      {isLoading && <p className="text-2xl font-bold text-gray-500 dark:text-gray-400 animate-pulse">Carregando...</p>}
-      {error && !isLoading && <p className="text-sm font-bold text-red-500 dark:text-red-400">Erro</p>}
-      {!isLoading && !error && <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{value}</p>}
-    </>
-  );
-
-  if (linkTo) {
-    return (
-      <Link href={linkTo} legacyBehavior>
-        <a className="block bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-150">
-          {cardContent}
-        </a>
-      </Link>
-    );
-  }
-  return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-      {cardContent}
-    </div>
-  );
-};
-
+// Definição local do StatCard removida
 
 const DashboardPageContent = () => {
   const { user, logout } = useAuth();
