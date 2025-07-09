@@ -12,14 +12,15 @@
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "react-toastify": "^11.0.5",
     "tailwindcss": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "typescript": "latest",
     "autoprefixer": "latest",
-    "postcss": "latest"
+    "postcss": "latest",
+    "typescript": "latest"
   }
 }

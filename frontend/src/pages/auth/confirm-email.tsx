@@ -4,12 +4,15 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import apiClient from '@/lib/axios'; // Ajuste o path se necessário
 import { useAuth } from '@/contexts/AuthContext'; // Para possível login automático
+import { useNotifier } from '@/hooks/useNotifier'; // Importar o hook
 
 export default function ConfirmEmailPage() {
   const router = useRouter();
-  const auth = useAuth(); // Para o caso de o backend logar automaticamente e retornar token
+  const auth = useAuth();
+  const notify = useNotifier();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState<string>('Verificando seu email...');
+  const [showLoginButton, setShowLoginButton] = useState(false);
 
   useEffect(() => {
     if (router.isReady) {
@@ -19,9 +22,10 @@ export default function ConfirmEmailPage() {
         apiClient.post('/auth/confirm-email', { token })
           .then(response => {
             setStatus('success');
-            setMessage(response.data?.message || 'Email confirmado com sucesso! Você já pode fazer login.');
+            const successMsg = response.data?.message || 'Email confirmado com sucesso!';
+            setMessage(successMsg);
+            notify.success(successMsg);
 
-            // Opcional: Se o backend retornar um token JWT e dados do usuário para login automático
             if (response.data?.token && response.data?.user) {
               const userData = {
                 id: response.data.user.id,
@@ -30,21 +34,32 @@ export default function ConfirmEmailPage() {
                 role: response.data.user.role,
                 organization_id: response.data.user.organization_id,
               };
-              auth.login(userData, response.data.token); // AuthContext fará o redirect
+              auth.login(userData, response.data.token);
               setMessage('Email confirmado e login realizado com sucesso! Redirecionando...');
+              // O redirecionamento é feito pelo auth.login()
+              setShowLoginButton(false);
+            } else {
+              // Não houve login automático, mostrar botão de login
+              setShowLoginButton(true);
             }
           })
           .catch(err => {
             setStatus('error');
-            setMessage(err.response?.data?.error || 'Falha ao confirmar o email. O link pode ser inválido ou ter expirado.');
+            const errorMsg = err.response?.data?.error || 'Falha ao confirmar o email. O link pode ser inválido ou ter expirado.';
+            setMessage(errorMsg);
+            notify.error(errorMsg);
+            setShowLoginButton(true); // Mostrar botão de login para o usuário tentar manualmente
             console.error("Erro ao confirmar email:", err);
           });
       } else {
         setStatus('error');
-        setMessage('Token de confirmação não encontrado ou inválido. Por favor, verifique o link em seu email ou tente se registrar novamente.');
+        const errorMsg = 'Token de confirmação não encontrado ou inválido.';
+        setMessage(errorMsg);
+        notify.error(errorMsg + " Por favor, verifique o link em seu email ou tente se registrar novamente.");
+        setShowLoginButton(true);
       }
     }
-  }, [router.isReady, router.query, auth]); // Adicionado auth como dependência
+  }, [router.isReady, router.query, auth, notify]);
 
   return (
     <>
@@ -79,7 +94,7 @@ export default function ConfirmEmailPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <p className="text-lg text-green-700 dark:text-green-400 mb-6">{message}</p>
-              {!response.data?.token && ( // Mostrar botão de login apenas se não houve login automático
+              {showLoginButton && (
                 <Link href="/auth/login">
                     <span className="inline-block rounded-md border border-transparent bg-indigo-600 px-6 py-3 text-base font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
                     Ir para Login
@@ -96,11 +111,13 @@ export default function ConfirmEmailPage() {
              </svg>
               <p className="text-lg text-red-600 dark:text-red-400 mb-6">{message}</p>
               <div className="space-y-3">
-                <Link href="/auth/login">
-                    <span className="inline-block rounded-md border border-transparent bg-indigo-600 px-6 py-3 text-base font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                    Tentar Login
-                    </span>
-                </Link>
+                {showLoginButton && (
+                    <Link href="/auth/login">
+                        <span className="inline-block rounded-md border border-transparent bg-indigo-600 px-6 py-3 text-base font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                        Tentar Login
+                        </span>
+                    </Link>
+                )}
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                     Se você ainda não se registrou, <Link href="/auth/register"><span className="text-indigo-600 hover:underline dark:text-indigo-400">registre-se aqui</span></Link>.
                 </p>

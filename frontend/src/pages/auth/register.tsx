@@ -2,8 +2,10 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useState } from 'react';
 import apiClient from '@/lib/axios'; // Ajuste o path se necessário
+import { useNotifier } from '@/hooks/useNotifier'; // Importar o hook
 
 export default function RegisterPage() {
+  const notify = useNotifier();
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userPassword, setUserPassword] = useState('');
@@ -11,19 +13,33 @@ export default function RegisterPage() {
   const [organizationName, setOrganizationName] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // Para erros de validação em tela
+  const [isSuccess, setIsSuccess] = useState(false); // Para controlar estado do form após sucesso
 
   // Basic password strength check (example)
   const isPasswordStrong = (password: string): boolean => {
-    return password.length >= 8; // Add more checks: uppercase, lowercase, number, special char
+    // TODO: Melhorar a validação de força da senha (ex: regex para maiúscula, minúscula, número, símbolo)
+    if (password.length < 8) {
+      setError('A senha deve ter pelo menos 8 caracteres.');
+      return false;
+    }
+    // Exemplo de verificação adicional (pode ser expandido)
+    // if (!/[A-Z]/.test(password)) {
+    //   setError('A senha deve conter pelo menos uma letra maiúscula.');
+    //   return false;
+    // }
+    // if (!/[0-9]/.test(password)) {
+    //   setError('A senha deve conter pelo menos um número.');
+    //   return false;
+    // }
+    return true;
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setError(null); // Limpar erros de validação anteriores
     setIsLoading(true);
-    setError(null);
-    setSuccessMessage(null);
+    // setIsSuccess(false); // Não precisa resetar success aqui, o form já estará desabilitado
 
     if (!userName || !userEmail || !userPassword || !confirmPassword || !organizationName) {
       setError('Todos os campos obrigatórios devem ser preenchidos.');
@@ -36,7 +52,7 @@ export default function RegisterPage() {
       return;
     }
     if (!isPasswordStrong(userPassword)) {
-      setError('A senha deve ter pelo menos 8 caracteres. Considere usar letras maiúsculas, minúsculas, números e símbolos.');
+      // A mensagem de erro já é setada dentro de isPasswordStrong
       setIsLoading(false);
       return;
     }
@@ -54,16 +70,14 @@ export default function RegisterPage() {
 
     try {
       const response = await apiClient.post('/auth/register', payload);
-      setSuccessMessage(response.data?.message || 'Registro bem-sucedido! Verifique seu email para confirmação.');
-      // Limpar formulário
-      setUserName('');
-      setUserEmail('');
-      setUserPassword('');
-      setConfirmPassword('');
-      setOrganizationName('');
+      notify.success(response.data?.message || 'Registro bem-sucedido! Verifique seu email para confirmação.');
+      setIsSuccess(true); // Desabilita o formulário e mostra mensagem em tela
+      // Não limpar formulário imediatamente para o usuário ver os dados enviados se desejar,
+      // mas os campos estarão desabilitados.
     } catch (err: any) {
       console.error('Erro no registro:', err);
-      setError(err.response?.data?.error || 'Ocorreu um erro durante o registro. Tente novamente.');
+      notify.error(err.response?.data?.error || 'Ocorreu um erro durante o registro. Tente novamente.');
+      // setError(err.response?.data?.error || 'Ocorreu um erro...'); // Opcional, para erro em tela
     } finally {
       setIsLoading(false);
     }
@@ -88,14 +102,14 @@ export default function RegisterPage() {
             <p className="text-gray-600 dark:text-gray-300">Junte-se ao Phoenix GRC.</p>
           </div>
 
-          {error && (
+          {error && ( // Erro de validação de campo
             <div className="mb-4 rounded-md bg-red-50 p-3">
               <p className="text-sm font-medium text-red-700">{error}</p>
             </div>
           )}
-          {successMessage && !error && (
+          {isSuccess && ( // Mensagem em tela após sucesso, complementando o toast
             <div className="mb-4 rounded-md bg-green-50 p-3">
-              <p className="text-sm font-medium text-green-700">{successMessage}</p>
+              <p className="text-sm font-medium text-green-700">Registro enviado! Verifique seu email para confirmação.</p>
             </div>
           )}
 

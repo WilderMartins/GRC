@@ -3,15 +3,17 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import apiClient from '@/lib/axios'; // Ajuste o path se necessário
+import { useNotifier } from '@/hooks/useNotifier'; // Importar o hook
 
 export default function ResetPasswordPage() {
   const router = useRouter();
+  const notify = useNotifier();
   const [token, setToken] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // Para erros de validação em tela
+  const [isSuccess, setIsSuccess] = useState(false); // Para controlar o estado do formulário após sucesso
 
   useEffect(() => {
     if (router.isReady) {
@@ -19,53 +21,56 @@ export default function ResetPasswordPage() {
       if (typeof queryToken === 'string' && queryToken) {
         setToken(queryToken);
       } else {
-        setError('Token de redefinição inválido ou não fornecido. Por favor, solicite um novo link de redefinição.');
-        // Opcionalmente, redirecionar para forgot-password após um tempo
-        // setTimeout(() => router.push('/auth/forgot-password'), 5000);
+        setError('Token de redefinição inválido ou não fornecido.');
+        notify.error('Token de redefinição inválido ou não fornecido. Por favor, solicite um novo link de redefinição.');
       }
     }
-  }, [router.isReady, router.query]);
+  }, [router.isReady, router.query, notify]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
-    setError(null);
-    setSuccessMessage(null);
+    setError(null); // Limpa erros de validação em tela
 
     if (!newPassword || !confirmPassword) {
       setError('Por favor, preencha ambos os campos de senha.');
+      // notify.warn('Por favor, preencha ambos os campos de senha.'); // Pode ser toast também
       setIsLoading(false);
       return;
     }
     if (newPassword !== confirmPassword) {
       setError('As senhas não conferem.');
+      // notify.warn('As senhas não conferem.');
       setIsLoading(false);
       return;
     }
     if (!token) {
       setError('Token de redefinição não encontrado. Solicite um novo link.');
+      // notify.error('Token de redefinição não encontrado. Solicite um novo link.');
       setIsLoading(false);
       return;
     }
 
     // TODO: Adicionar validação de força da senha no frontend (opcional, mas bom UX)
+    // Ex: if (!isPasswordStrong(newPassword)) { setError('Senha fraca...'); setIsLoading(false); return; }
 
     try {
       const response = await apiClient.post('/auth/reset-password', {
         token,
         new_password: newPassword,
-        confirm_password: confirmPassword, // Enviando confirmação para o backend também
+        confirm_password: confirmPassword,
       });
-      setSuccessMessage(response.data?.message || 'Sua senha foi redefinida com sucesso! Você será redirecionado para o login.');
-      // Limpar campos e desabilitar formulário
+      notify.success(response.data?.message || 'Sua senha foi redefinida com sucesso! Você será redirecionado para o login.');
+      setIsSuccess(true); // Marcar sucesso para desabilitar form e mostrar mensagem
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => {
         router.push('/auth/login');
-      }, 3000); // Redirecionar após 3 segundos
+      }, 3000);
     } catch (err: any) {
       console.error('Erro ao redefinir senha:', err);
-      setError(err.response?.data?.error || 'Ocorreu um erro ao redefinir sua senha. O link pode ter expirado ou ser inválido.');
+      notify.error(err.response?.data?.error || 'Ocorreu um erro ao redefinir sua senha. O link pode ter expirado ou ser inválido.');
+      // setError(err.response?.data?.error || 'Ocorreu um erro...'); // Para exibir em tela se necessário
     } finally {
       setIsLoading(false);
     }
@@ -88,10 +93,10 @@ export default function ResetPasswordPage() {
             <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Redefinir Sua Senha</h1>
           </div>
 
-          {error && !successMessage && ( // Mostrar erro apenas se não houver mensagem de sucesso
+          {error && ( // Mostrar erro de validação em tela
             <div className="mb-4 rounded-md bg-red-50 p-3">
               <p className="text-sm font-medium text-red-700">{error}</p>
-              {error.includes("inválido ou não fornecido") && (
+              {error.includes("Token de redefinição inválido ou não fornecido") && (
                 <p className="mt-2 text-sm">
                   <Link href="/auth/forgot-password">
                     <span className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300">
@@ -102,19 +107,20 @@ export default function ResetPasswordPage() {
               )}
             </div>
           )}
-          {successMessage && (
+          {/* Mensagem de sucesso será via toast, mas podemos ter uma mensagem em tela se isSuccess for true */}
+          {isSuccess && (
             <div className="mb-4 rounded-md bg-green-50 p-3">
-              <p className="text-sm font-medium text-green-700">{successMessage}</p>
+              <p className="text-sm font-medium text-green-700">Senha redefinida! Você será redirecionado para o login.</p>
             </div>
           )}
 
-          {!token && !error && ( // Mostra carregando token ou se o token não foi encontrado inicialmente e não há erro ainda
+          {!token && !error && !isSuccess && (
              <div className="text-center py-4">
                 <p className="text-sm text-gray-500 dark:text-gray-400">Verificando token...</p>
              </div>
           )}
 
-          {token && !successMessage && ( // Mostrar formulário apenas se token existir e não houver mensagem de sucesso
+          {token && !isSuccess && ( // Mostrar formulário apenas se token existir e não houver sucesso
             <form className="space-y-6" onSubmit={handleSubmit}>
               <div>
                 <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-200">
