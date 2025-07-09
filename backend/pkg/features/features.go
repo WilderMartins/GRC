@@ -2,7 +2,7 @@ package features
 
 import (
 	"phoenixgrc/backend/pkg/config" // Importa o pacote de configuração da aplicação
-	"strings"
+	// "strings" // Removido pois não está sendo usado diretamente aqui
 )
 
 // IsEnabled verifica se um feature toggle específico está habilitado.

@@ -258,4 +258,5 @@ func TestGetOrganizationBrandingHandler(t *testing.T) {
 		// No sqlmock expectations to check here
 	})
 }
-```
+
+// Ensure newline at end of file

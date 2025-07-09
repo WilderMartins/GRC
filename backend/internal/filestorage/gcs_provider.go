@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
+	// "os" // Removido, config.Cfg é usado
+	"phoenixgrc/backend/pkg/config" // Adicionado para acessar config.Cfg
+
 	// "path/filepath" // Para manipulação de nomes de arquivo, se necessário
 	// "github.com/google/uuid" // Para gerar nomes de arquivo únicos
 
@@ -13,13 +15,8 @@ import (
 	// "google.golang.org/api/option" // Para credenciais explícitas, se necessário
 )
 
-var (
-	gcsClient     *storage.Client
-	gcsBucketName string
-	// gcsProjectID  string // gcsProjectID não é usado diretamente pelo GCSStorageProvider struct, mas sim na inicialização.
-)
-
 // GCSStorageProvider implements FileStorageProvider using Google Cloud Storage.
+// Variáveis globais gcsClient e gcsBucketName não são mais necessárias aqui.
 type GCSStorageProvider struct {
 	client     *storage.Client
 	bucketName string
@@ -29,21 +26,23 @@ type GCSStorageProvider struct {
 func InitializeGCSProvider() (*GCSStorageProvider, error) {
 	ctx := context.Background()
 
-	gcsProjectID = os.Getenv("GCS_PROJECT_ID")
-	gcsBucketName = os.Getenv("GCS_BUCKET_NAME")
-	// GOOGLE_APPLICATION_CREDENTIALS é lido automaticamente pela biblioteca cliente se estiver definido.
+	// Usa config.Cfg para obter as configurações em vez de variáveis de ambiente diretas ou globais do pacote
+	projectID := config.Cfg.GCSProjectID
+	bucketName := config.Cfg.GCSBucketName
 
-	if gcsProjectID == "" {
-		log.Println("GCS_PROJECT_ID not set. File upload to GCS will be disabled.")
+	// GOOGLE_APPLICATION_CREDENTIALS é lido automaticamente pela biblioteca cliente se estiver definido no ambiente.
+
+	if projectID == "" {
+		log.Println("GCS_PROJECT_ID not set in config. File upload to GCS will be disabled.")
 		return nil, nil // Retorna nil, nil para indicar que o provedor está desabilitado
 	}
-	if gcsBucketName == "" {
-		log.Println("GCS_BUCKET_NAME not set. File upload to GCS will be disabled.")
+	if bucketName == "" {
+		log.Println("GCS_BUCKET_NAME not set in config. File upload to GCS will be disabled.")
 		return nil, nil // Retorna nil, nil para indicar que o provedor está desabilitado
 	}
 
 	var err error
-	gcsClient, err = storage.NewClient(ctx) // Tenta usar credenciais do ambiente
+	localStorageClient, err := storage.NewClient(ctx) // Renomeado para localStorageClient para evitar confusão com globais (que foram removidas)
 	// Se GOOGLE_APPLICATION_CREDENTIALS estiver definido e válido, será usado.
 	// Em um ambiente GCP (Cloud Run, GKE, etc.), as credenciais da conta de serviço associada são usadas.
 
@@ -51,11 +50,11 @@ func InitializeGCSProvider() (*GCSStorageProvider, error) {
 		return nil, fmt.Errorf("failed to create Google Cloud Storage client: %w. Ensure GOOGLE_APPLICATION_CREDENTIALS is set correctly for local/Docker or Workload Identity is configured in GCP.", err)
 	}
 
-	log.Printf("Google Cloud Storage provider initialized for project %s, bucket %s", gcsProjectID, gcsBucketName)
+	log.Printf("Google Cloud Storage provider initialized for project %s, bucket %s", projectID, bucketName)
 
 	provider := &GCSStorageProvider{
-		client:     gcsClient,
-		bucketName: gcsBucketName,
+		client:     localStorageClient, // Usa o cliente localmente definido
+		bucketName: bucketName,       // Usa o bucketName localmente definido
 	}
 	// Atribuir o provider a uma variável global ou retorná-lo para ser injetado onde necessário.
 	// Por enquanto, vamos apenas logar e a instanciação real será feita quando for usado.

@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/rand" // Adicionado para gerar códigos de backup
 	"encoding/base64"
+	"encoding/json" // Adicionado para Marshal/Unmarshal de backup codes
 	"fmt"
 	"image/png"
 	"net/http"
@@ -82,49 +84,30 @@ func SetupTOTPHandler(c *gin.Context) {
 	}
 
 	// Generate QR code image.
-	var qrCodeImage bytes.Buffer
+	// var qrCodeImage bytes.Buffer // Removida pois pngBytes é usado diretamente
 	// The URL for the QR code is otpauth://totp/ISSUER:ACCOUNT?secret=SECRET&issuer=ISSUER
 	// The key.String() method provides this URL.
-	err = qrcode.Encode(key.String(), qrcode.Medium, 256) // Generate a 256x256 QR code
-	if err != nil {
-		// If direct Encode to writer fails (it shouldn't for bytes.Buffer), try generating png then encoding
-		pngData, errPng := qrcode.Encode(key.String(), qrcode.Medium, 256)
-		if errPng != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate QR code PNG data: " + errPng.Error()})
-			return
-		}
-		_,_ = qrCodeImage.Write(pngData) // Write png to buffer
-	} else {
-		// This path might not be taken if qrcode.Encode directly to writer isn't a thing,
-		// but qrcode.WriteColorPNG or similar might be. Let's assume qrcode.Encode returns []byte
-		// For skip2/go-qrcode, qrcode.Encode returns []byte if writer is nil.
-		// If we use qrcode.Write(&qrCodeImage, key.String(), qrcode.Medium, 256) it would write to buffer.
-		// Let's adjust to use the common pattern of generating PNG bytes then base64 encoding.
 
-		pngBytes, errPng := qrcode.Encode(key.String(), qrcode.Medium, 256)
-		if errPng != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate QR code PNG: " + errPng.Error()})
-			return
-		}
-		// For some reason, the above qrcode.Encode might not be working as expected with the library.
-		// Let's try generating the PNG directly.
+	// Generate PNG image of the QR code
+	pngBytes, err := qrcode.Encode(key.String(), qrcode.Medium, 256) // Returns []byte, error
+	if err != nil {
+		// Fallback or alternative if direct Encode fails or to be more explicit with png encoding
 		img, errImg := qrcode.New(key.String(), qrcode.Medium)
 		if errImg != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create QR code object: " + errImg.Error()})
 			return
 		}
-		errPng = png.Encode(&qrCodeImage, img.Image(256))
-		if errPng != nil {
+		var buf bytes.Buffer
+		if errPng := png.Encode(&buf, img.Image(256)); errPng != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encode QR code to PNG: " + errPng.Error()})
 			return
 		}
-		pngBytes = qrCodeImage.Bytes() // Use the bytes from the buffer
+		pngBytes = buf.Bytes()
 	}
-
 
 	response := SetupTOTPResponse{
 		Secret:    key.Secret(), // The Base32 encoded secret string
-		QRCode:    fmt.Sprintf("data:image/png;base64,%s", base64.StdEncoding.EncodeToString(qrCodeImage.Bytes())),
+		QRCode:    fmt.Sprintf("data:image/png;base64,%s", base64.StdEncoding.EncodeToString(pngBytes)),
 		Account:   user.Email,
 		Issuer:    issuer,
 		BackupCodesGenerated: false, // Set to true if backup codes were generated
@@ -232,7 +215,7 @@ func DisableTOTPHandler(c *gin.Context) {
 
 	user.IsTOTPEnabled = false
 	user.TOTPSecret = "" // Clear the secret
-	// user.TOTPBackupCodes = "" // Clear backup codes if they were stored similarly
+	user.TOTPBackupCodes = "" // Clear backup codes as well
 
 	if err := db.Save(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to disable TOTP: " + err.Error()})
@@ -242,9 +225,87 @@ func DisableTOTPHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "TOTP has been successfully disabled."})
 }
 
+const numBackupCodes = 10
+const backupCodeLength = 10 // Length of each backup code
 
-// TODO: Implement GenerateBackupCodesHandler
+// generateRandomString generates a random alphanumeric string of a given length.
+// Used for backup codes.
+func generateRandomString(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	for i, b := range bytes {
+		bytes[i] = charset[b%byte(len(charset))]
+	}
+	return string(bytes), nil
+}
+
+// GenerateBackupCodesResponse defines the response for generating backup codes.
+type GenerateBackupCodesResponse struct {
+	BackupCodes []string `json:"backup_codes"`
+}
+
+// GenerateBackupCodesHandler generates new backup codes for the user.
+// This invalidates any previously generated backup codes.
+func GenerateBackupCodesHandler(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+		return
+	}
+	userUUID := userID.(uuid.UUID)
+
+	db := database.GetDB()
+	var user models.User
+	if err := db.First(&user, "id = ?", userUUID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if !user.IsTOTPEnabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "TOTP must be enabled to generate backup codes."})
+		return
+	}
+
+	var plainTextCodes []string
+	var hashedCodes []string
+
+	for i := 0; i < numBackupCodes; i++ {
+		code, err := generateRandomString(backupCodeLength)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate backup code string"})
+			return
+		}
+		plainTextCodes = append(plainTextCodes, code)
+
+		hashedCode, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash backup code"})
+			return
+		}
+		hashedCodes = append(hashedCodes, string(hashedCode))
+	}
+
+	backupCodesJSON, err := json.Marshal(hashedCodes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal hashed backup codes"})
+		return
+	}
+	user.TOTPBackupCodes = string(backupCodesJSON)
+
+	if err := db.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save backup codes: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, GenerateBackupCodesResponse{BackupCodes: plainTextCodes})
+}
+
+
 // TODO: Implement VerifyBackupCodeHandler
 // TODO: Modify LoginHandler to check for 2FA
 // TODO: Create a new /auth/login/2fa/verify endpoint
-```
+
+// Ensure newline at end of file

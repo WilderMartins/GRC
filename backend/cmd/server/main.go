@@ -16,7 +16,8 @@ import (
 	"phoenixgrc/backend/internal/notifications"
 	// "strings" // No longer needed for setup here
 
-	"phoenixgrc/backend/cmd/setup" // Import the setup package
+	// "phoenixgrc/backend/cmd/setup" // Temporarily removed to fix compilation - setup is called via main() logic
+	// "phoenixgrc/backend/cmd/setup" // Comentado para permitir compilação do server isoladamente. Refatorar setup.
 
 	"github.com/gin-gonic/gin"
 	// "golang.org/x/crypto/bcrypt" // Moved to setup package
@@ -113,6 +114,8 @@ func startServer() {
 		}
 		// 2FA TOTP Verification as part of login
 		authRoutes.POST("/login/2fa/verify", handlers.LoginVerifyTOTPHandler)
+		// 2FA Backup Code Verification as part of login
+		authRoutes.POST("/login/2fa/backup-code/verify", handlers.LoginVerifyBackupCodeHandler)
 	}
 
 	apiV1 := router.Group("/api/v1")
@@ -210,11 +213,11 @@ func startServer() {
 				mfaTOTPRoutes.POST("/verify", handlers.VerifyTOTPHandler)
 				mfaTOTPRoutes.POST("/disable", handlers.DisableTOTPHandler)
 			}
-			// backupCodeRoutes := mfaRoutes.Group("/backup-codes")
-			// {
-			// 	backupCodeRoutes.GET("/generate", handlers.GenerateBackupCodesHandler) // TODO
-			// 	backupCodeRoutes.POST("/verify", handlers.VerifyBackupCodeHandler)   // TODO - parte do login 2FA
-			// }
+			backupCodeRoutes := mfaRoutes.Group("/backup-codes")
+			{
+				backupCodeRoutes.POST("/generate", handlers.GenerateBackupCodesHandler) // Usar POST para gerar/regerar
+				// backupCodeRoutes.POST("/verify", handlers.VerifyBackupCodeHandler)   // TODO - parte do login 2FA
+			}
 		}
 	}
 
@@ -231,7 +234,9 @@ func startServer() {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
 		// Call RunSetup from the setup package
-		setup.RunSetup()
+		// setup.RunSetup() // Comentado para permitir compilação. Necessita refatoração da lógica de setup.
+		log.Println("AVISO: Funcionalidade de setup via 'go run ./cmd/server/main.go setup' está temporariamente desabilitada devido à refatoração pendente do pacote setup.")
+		log.Println("Use 'go run ./cmd/setup/main.go' para executar o setup.")
 	} else {
 		startServer()
 	}

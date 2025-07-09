@@ -161,4 +161,5 @@ func TestSetupTOTPHandler_Success(t *testing.T) {
 // TODO: TestDisableTOTPHandler_Success
 // TODO: TestDisableTOTPHandler_InvalidPassword
 // TODO: TestDisableTOTPHandler_TOTPNotEnabled
-```
+
+// Ensure newline at end of file

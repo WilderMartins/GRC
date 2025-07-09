@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid" // Added for parsing UserID
 	"github.com/pquerna/otp/totp" // Added for TOTP validation
 	"golang.org/x/crypto/bcrypt"
+	"encoding/json" // Added for backup codes
 )
 
 type LoginPayload struct {
@@ -73,6 +74,97 @@ func LoginHandler(c *gin.Context) {
 	}
 
 	// If 2FA is not enabled, proceed with normal login and token issuance
+	c.JSON(http.StatusOK, LoginResponse{
+		Token:          tokenString,
+		UserID:         user.ID.String(),
+		Email:          user.Email,
+		Name:           user.Name,
+		Role:           user.Role,
+		OrganizationID: user.OrganizationID.String(),
+	})
+}
+
+type LoginVerifyBackupCodePayload struct {
+	UserID     string `json:"user_id" binding:"required"`
+	BackupCode string `json:"backup_code" binding:"required"`
+}
+
+// LoginVerifyBackupCodeHandler handles the 2FA step using a backup code.
+func LoginVerifyBackupCodeHandler(c *gin.Context) {
+	var payload LoginVerifyBackupCodePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+		return
+	}
+
+	userUUID, err := uuid.Parse(payload.UserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UserID format"})
+		return
+	}
+
+	db := database.GetDB()
+	var user models.User
+	if err := db.First(&user, "id = ?", userUUID).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found or invalid state"})
+		return
+	}
+
+	if !user.IsActive {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User account is inactive"})
+		return
+	}
+
+	if !user.IsTOTPEnabled || user.TOTPBackupCodes == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "2FA / Backup codes not enabled or not generated for this user."})
+		return
+	}
+
+	var storedHashedCodes []string
+	if err := json.Unmarshal([]byte(user.TOTPBackupCodes), &storedHashedCodes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse stored backup codes."})
+		return
+	}
+
+	validCodeFound := false
+	updatedHashedCodes := []string{}
+
+	for _, hashedCode := range storedHashedCodes {
+		err := bcrypt.CompareHashAndPassword([]byte(hashedCode), []byte(payload.BackupCode))
+		if err == nil { // Match found
+			validCodeFound = true
+			// This code is now used, do not add it to updatedHashedCodes
+		} else {
+			updatedHashedCodes = append(updatedHashedCodes, hashedCode) // Keep unused codes
+		}
+	}
+
+	if !validCodeFound {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid backup code."})
+		return
+	}
+
+	// Update user's backup codes (remove the used one)
+	newBackupCodesJSON, err := json.Marshal(updatedHashedCodes)
+	if err != nil {
+		// Log this error, but proceed with login as code was valid.
+		// User should be prompted to regenerate backup codes if this list becomes empty.
+		log.Printf("Error marshalling updated backup codes for user %s: %v", user.ID, err)
+	} else {
+		user.TOTPBackupCodes = string(newBackupCodesJSON)
+		if err := db.Save(&user).Error; err != nil {
+			// Log this error, but proceed with login.
+			log.Printf("Error saving updated backup codes for user %s: %v", user.ID, err)
+		}
+	}
+
+	// Backup code is valid, issue JWT
+	tokenString, err := auth.GenerateToken(&user, user.OrganizationID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token: " + err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, LoginResponse{
 		Token:          tokenString,
 		UserID:         user.ID.String(),

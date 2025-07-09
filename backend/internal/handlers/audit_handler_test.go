@@ -330,4 +330,5 @@ func TestListFrameworksHandler(t *testing.T) {
 // 6. router.ServeHTTP(rr, req).
 // 7. Assert status code and response body.
 // 8. Assert sqlMock.ExpectationsWereMet().
-```
+
+// Ensure newline at end of file

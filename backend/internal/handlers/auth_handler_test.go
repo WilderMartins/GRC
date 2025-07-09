@@ -385,4 +385,5 @@ func TestLoginVerifyTOTPHandler_Success(t *testing.T) {
 // - TOTP not enabled for user
 // - Invalid TOTP token (explicitly if we can control/mock validation)
 // - User inactive
-```
+
+// Ensure newline at end of file

@@ -113,4 +113,5 @@ func (s *S3StorageProvider) DeleteFile(ctx context.Context, fileURL string) erro
 
 // TODO: Adicionar lógica de deleção se o prompt exigir ou for uma melhoria futura.
 // TODO: Considerar URLs assinadas para acesso privado em vez de ACLs públicas.
-```
+
+// Ensure newline at end of file
