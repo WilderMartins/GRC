@@ -1,0 +1,58 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": 2021,
+    "sourceType": "module",
+    "ecmaFeatures": {
+      "jsx": true
+    }
+  },
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "node": true,
+    "jest": true
+  },
+  "settings": {
+    "react": {
+      "version": "detect"
+    },
+    "import/resolver": {
+      "typescript": {}
+    }
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:react/recommended",
+    "plugin:react-hooks/recommended",
+    "next/core-web-vitals",
+    "plugin:jsx-a11y/recommended",
+    "plugin:prettier/recommended" // Garante que o Prettier rode como uma regra ESLint e desabilita regras conflitantes
+  ],
+  "plugins": [
+    "@typescript-eslint",
+    "react",
+    "react-hooks",
+    "jsx-a11y",
+    "prettier"
+  ],
+  "rules": {
+    "prettier/prettier": "warn", // Mostra erros do Prettier como warnings do ESLint
+    "react/react-in-jsx-scope": "off", // Next.js não requer importação explícita do React
+    "react/prop-types": "off", // Desabilitado pois usamos TypeScript para tipos de props
+    "@typescript-eslint/explicit-module-boundary-types": "off", // Permite não definir explicitamente o tipo de retorno de funções exportadas
+    "@typescript-eslint/no-explicit-any": "warn", // Avisar sobre 'any' em vez de erro, para flexibilidade inicial
+    "no-console": ["warn", { "allow": ["warn", "error", "info"] }], // Avisar sobre console.log, mas permitir warn/error/info
+    "jsx-a11y/anchor-is-valid": [ // Next.js Link component requer isso
+      "error",
+      {
+        "components": ["Link"],
+        "specialLink": ["hrefLeft", "hrefRight"],
+        "aspects": ["invalidHref", "preferButton"]
+      }
+    ]
+    // Adicionar outras regras customizadas aqui se necessário
+  }
+}
