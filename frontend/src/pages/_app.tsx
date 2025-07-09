@@ -3,6 +3,7 @@ import 'react-toastify/dist/ReactToastify.css'; // Importar o CSS do react-toast
 import type { AppProps } from 'next/app';
 import { AuthProvider } from '../contexts/AuthContext'; // Ajuste o path se necessário
 import { ToastContainer } from 'react-toastify'; // Importar o ToastContainer
+import { appWithTranslation } from 'next-i18next'; // Importar o HOC
 
 function MyApp({ Component, pageProps }: AppProps) {
   return (
@@ -26,4 +27,5 @@ function MyApp({ Component, pageProps }: AppProps) {
   );
 }
 
-export default MyApp;
+// Envolver o MyApp com o HOC appWithTranslation
+export default appWithTranslation(MyApp /*, nextI18NextConfig */); // O segundo argumento (config) é opcional se você tiver next-i18next.config.js

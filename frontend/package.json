@@ -11,9 +11,12 @@
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,css,scss,md}\""
   },
   "dependencies": {
+    "i18next": "^25.3.2",
     "next": "latest",
+    "next-i18next": "^15.4.2",
     "react": "latest",
     "react-dom": "latest",
+    "react-i18next": "^15.6.0",
     "react-toastify": "^11.0.5",
     "tailwindcss": "latest"
   },
