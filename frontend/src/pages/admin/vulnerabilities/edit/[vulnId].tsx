@@ -51,7 +51,8 @@ const EditVulnerabilityPageContent = () => {
   }, [vulnId]);
 
   const handleSuccess = () => {
-    alert('Vulnerabilidade atualizada com sucesso!'); // Placeholder
+    // Notificação de sucesso agora é tratada pelo VulnerabilityForm
+    // alert('Vulnerabilidade atualizada com sucesso!'); // Removido
     router.push('/admin/vulnerabilities');
   };
 

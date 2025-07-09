@@ -9,8 +9,8 @@ const NewVulnerabilityPageContent = () => {
   const router = useRouter();
 
   const handleSuccess = () => {
-    // Poderia exibir uma notificação de sucesso aqui antes de redirecionar
-    alert('Vulnerabilidade criada com sucesso!'); // Placeholder
+    // Notificação de sucesso agora é tratada pelo VulnerabilityForm
+    // alert('Vulnerabilidade criada com sucesso!'); // Removido
     router.push('/admin/vulnerabilities');
   };
 
