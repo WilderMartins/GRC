@@ -7,6 +7,7 @@ import (
 	"phoenixgrc/backend/internal/models"
 	"testing"
 	"time"
+	"errors" // Adicionado para errors.Is
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -116,13 +117,17 @@ func TestValidateToken_Expired(t *testing.T) {
 
 	_, err = ValidateToken(tokenString)
 	assert.Error(t, err)
-	// For jwt/v5, the error is typically *jwt.ErrTokenExpired
-	if verr, ok := err.(*jwt.ValidationError); ok {
-		assert.True(t, verr.Is(jwt.ErrTokenExpired), "Error should be due to token expiration")
+	// Para jwt/v5, usamos errors.Is para verificar erros de token expirado
+	if !errors.Is(err, jwt.ErrTokenExpired) {
+		// O erro não é jwt.ErrTokenExpired como esperado.
+		// Logar o erro real para diagnóstico.
+		t.Errorf("Expected error to be or wrap jwt.ErrTokenExpired, but got %T: %v", err, err)
+		// Forçar a falha do teste se não for o erro esperado.
+		assert.True(t, false, "Error was not jwt.ErrTokenExpired")
 	} else {
-		t.Fatalf("Expected jwt.ValidationError, got %T: %v", err, err)
+		// Se errors.Is(err, jwt.ErrTokenExpired) for verdadeiro, o teste está correto.
+		assert.True(t, true, "Correctly identified jwt.ErrTokenExpired")
 	}
-
 
 	os.Setenv("JWT_TOKEN_LIFESPAN_HOURS", "1") // Reset lifespan for other tests
 	InitializeJWT()

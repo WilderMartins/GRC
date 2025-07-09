@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	// "gorm.io/gorm" // Não é necessário aqui se não formos simular gorm.ErrRecordNotFound diretamente
+	"gorm.io/gorm" // Descomentado
 )
 
 // testOrgAdminID, testUserID (que é um admin/manager de testOrgID) são definidos em main_test_handler.go
@@ -24,6 +24,7 @@ var testUserNonAdminID = uuid.New()
 var testTargetUserID = uuid.New() // O usuário que será gerenciado
 
 func TestListOrganizationUsersHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	// Roteador com contexto de usuário admin (testUserID) para testOrgID
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
@@ -75,6 +76,7 @@ func TestListOrganizationUsersHandler(t *testing.T) {
 }
 
 func TestGetOrganizationUserHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
     gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.GET("/orgs/:orgId/users/:userId", GetOrganizationUserHandler)
@@ -124,6 +126,7 @@ func TestGetOrganizationUserHandler(t *testing.T) {
 
 
 func TestUpdateOrganizationUserRoleHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
     gin.SetMode(gin.TestMode)
     // Usuário admin (testUserID) atualizando outro usuário (testTargetUserID)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
@@ -190,6 +193,7 @@ func TestUpdateOrganizationUserRoleHandler(t *testing.T) {
 }
 
 func TestUpdateOrganizationUserStatusHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
     gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.PUT("/orgs/:orgId/users/:userId/status", UpdateOrganizationUserStatusHandler)
@@ -317,5 +321,61 @@ func TestUpdateOrganizationUserStatusHandler(t *testing.T) {
         assert.Equal(t, http.StatusBadRequest, rr.Code)
         assert.Contains(t, rr.Body.String(), "Payload inválido")
 	})
-    // TODO: Testar prevenção de bloqueio ao tentar desativar *outro* admin/manager se este for o último ativo.
+
+	t.Run("Fail to deactivate another user if they are the last active admin/manager", func(t *testing.T) {
+		// actingAdminID := testUserID // Removido - testUserID no setup do router já é o ator
+		lastActiveAdminID := uuid.New() // O ID do último admin/manager ativo que será alvo
+
+		isActivePayload := false
+        payload := UpdateUserStatusPayload{IsActive: &isActivePayload}
+        body, _ := json.Marshal(payload)
+
+		// Mock para buscar o usuário alvo (lastActiveAdminID)
+        targetAdminUser := models.User{
+			ID: lastActiveAdminID,
+			OrganizationID: testOrgID,
+			Name: "Last Admin User",
+			Role: models.RoleAdmin, // ou RoleManager
+			IsActive: true,
+		}
+        rowsTargetAdmin := sqlmock.NewRows([]string{"id", "organization_id", "name", "role", "is_active"}).
+            AddRow(targetAdminUser.ID, targetAdminUser.OrganizationID, targetAdminUser.Name, targetAdminUser.Role, targetAdminUser.IsActive)
+        sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 AND organization_id = $2 ORDER BY "users"."id" LIMIT $3`)).
+            WithArgs(lastActiveAdminID, testOrgID, 1).
+            WillReturnRows(rowsTargetAdmin)
+
+		// Mock para a contagem de admins/managers ativos
+		// Esta contagem é crucial: deve retornar 1 para simular que targetAdminUser é o último.
+        sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "users" WHERE organization_id = $1 AND is_active = $2 AND (role = $3 OR role = $4)`)).
+            WithArgs(testOrgID, true, models.RoleAdmin, models.RoleManager).
+            WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1)) // Só existe 1 admin/manager ativo
+
+		// O roteador já está configurado com actingAdminID (testUserID) como o ator.
+		// A URL do request usará lastActiveAdminID como o alvo.
+        req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/users/%s/status", testOrgID.String(), lastActiveAdminID.String()), bytes.NewBuffer(body))
+        req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req) // router usa testUserID (actingAdminID) como o requisitante
+
+        assert.Equal(t, http.StatusForbidden, rr.Code)
+		// A mensagem de erro exata pode variar dependendo da lógica exata no handler.
+		// O handler atual tem uma verificação: `if userToUpdate.ID == actingUserID.(uuid.UUID) && ...`
+		// Esta verificação só se aplica se o usuário alvo é o mesmo que o ator.
+		// Para o caso de desativar *outro* usuário que é o último admin, a lógica de prevenção precisa ser ajustada.
+		// Assumindo que a lógica seja ajustada para:
+		// if !(*payload.IsActive) && (userToUpdate.Role == models.RoleAdmin || userToUpdate.Role == models.RoleManager) {
+		//     ... (contagem) ...
+		//     if activeAdminOrManagerCount <= 1 { Forbidden }
+		// }
+		// Então a mensagem seria "Não é possível desativar o último administrador/gerente ativo".
+		// Se a lógica atual não for alterada, este teste pode não passar como Forbidden, mas sim OK,
+		// o que indicaria uma falha na lógica de prevenção que o TODO apontava.
+		// Vamos assumir que a intenção do TODO é que essa prevenção exista e testá-la.
+		// O handler atual verifica `userToUpdate.ID == actingUserID`, o que não cobre este cenário.
+		// Para que este teste passe como Forbidden, o handler precisaria ser modificado.
+		// Por enquanto, este teste vai falhar (ou passar com OK) se o handler não for corrigido.
+		// Vamos escrever o teste como se o handler *devesse* prevenir.
+        assert.Contains(t, rr.Body.String(), "Não é possível desativar o último administrador/gerente ativo")
+        assert.NoError(t, sqlMock.ExpectationsWereMet())
+	})
 }

@@ -3,95 +3,96 @@ package notifications
 import (
 	"os"
 	"testing"
+	appCfg "phoenixgrc/backend/pkg/config" // Adicionado para acessar a config da app
 
 	"github.com/stretchr/testify/assert"
 	// Não vamos importar o SDK da AWS aqui para manter os testes unitários focados na nossa lógica
 )
 
 func TestInitializeAWSSession(t *testing.T) {
-	originalRegion := os.Getenv("AWS_REGION")
-	defer os.Setenv("AWS_REGION", originalRegion) // Restaurar variável
+	// Salvar e restaurar o valor original de appCfg.Cfg.AWSRegion
+	originalAppAWSRegion := appCfg.Cfg.AWSRegion
+	defer func() {
+		appCfg.Cfg.AWSRegion = originalAppAWSRegion
+		sesInitializationError = nil
+		awsSDKConfig.Region = ""
+	}()
 
-	t.Run("AWS_REGION not set", func(t *testing.T) {
-		os.Unsetenv("AWS_REGION")
+	t.Run("AWS_REGION not set in appCfg", func(t *testing.T) {
+		appCfg.Cfg.AWSRegion = "" // Simula que não está na config da app
 		err := InitializeAWSSession()
 		assert.NoError(t, err, "InitializeAWSSession should not return fatal error if region is not set, only log")
 		assert.NotNil(t, sesInitializationError, "sesInitializationError should be set")
-		assert.Contains(t, sesInitializationError.Error(), "AWS_REGION não está configurada")
-		sesInitializationError = nil // Reset for other tests
-		cfg.Region = "" // Reset for other tests
+		assert.Contains(t, sesInitializationError.Error(), "AWS_REGION não está configurada na app config")
+		sesInitializationError = nil
+		awsSDKConfig.Region = ""
 	})
 
 	t.Run("AWS_REGION set but AWS SDK fails to load config (simulated by not having credentials)", func(t *testing.T) {
-		// Esta é difícil de simular perfeitamente sem mockar o SDK profundamente
-		// ou garantir que nenhuma credencial esteja disponível no ambiente de teste.
-		// A função config.LoadDefaultConfig pode ter múltiplos fallbacks.
-		// Por enquanto, vamos assumir que se a região estiver lá, o SDK tentará carregar.
-		// O erro real viria do SDK se as credenciais não pudessem ser encontradas/validadas.
-		// O nosso wrapper InitializeAWSSession deve logar e retornar nil.
-		os.Setenv("AWS_REGION", "test-region-1")
+		appCfg.Cfg.AWSRegion = "test-region-1" // Simula que está na config da app
 
-		// Para garantir que não pegue credenciais reais do ambiente de teste, se houver
 		originalAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 		originalSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 		originalSessionToken := os.Getenv("AWS_SESSION_TOKEN")
 		os.Unsetenv("AWS_ACCESS_KEY_ID")
 		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
 		os.Unsetenv("AWS_SESSION_TOKEN")
-		// Também pode ser necessário limpar ~/.aws/credentials e config se o SDK os ler.
-		// Este teste é mais um teste de integração "leve".
+		defer func() {
+			os.Setenv("AWS_ACCESS_KEY_ID", originalAccessKey)
+			os.Setenv("AWS_SECRET_ACCESS_KEY", originalSecretKey)
+			os.Setenv("AWS_SESSION_TOKEN", originalSessionToken)
+		}()
 
-		err := InitializeAWSSession() // Isso vai tentar carregar credenciais e falhar se não encontrar
+		err := InitializeAWSSession()
 		assert.NoError(t, err, "InitializeAWSSession should log error but return nil")
-		// Se sesInitializationError foi setado pela falta de credenciais, o teste é válido.
-		// O erro exato do SDK pode variar.
-		// assert.NotNil(t, sesInitializationError) // Difícil de garantir sem um mock do SDK
-
+		// O erro específico de credenciais é difícil de mockar/garantir sem mais controle sobre o SDK loader.
+		// sesInitializationError pode ou não ser setado dependendo de como o SDK lida com a ausência de credenciais.
+		// Por enquanto, o importante é que InitializeAWSSession não retorne um erro fatal.
 		sesInitializationError = nil
-		cfg.Region = ""
-		os.Setenv("AWS_ACCESS_KEY_ID", originalAccessKey)
-		os.Setenv("AWS_SECRET_ACCESS_KEY", originalSecretKey)
-		os.Setenv("AWS_SESSION_TOKEN", originalSessionToken)
+		awsSDKConfig.Region = ""
 	})
 }
 
 func TestNewSESEmailNotifier(t *testing.T) {
-	originalRegion := os.Getenv("AWS_REGION")
-	originalSender := os.Getenv("EMAIL_SENDER_ADDRESS")
+	originalAppAWSRegion := appCfg.Cfg.AWSRegion
+	originalAppSender := appCfg.Cfg.AWSSESEmailSender
 	defer func() {
-		os.Setenv("AWS_REGION", originalRegion)
-		os.Setenv("EMAIL_SENDER_ADDRESS", originalSender)
+		appCfg.Cfg.AWSRegion = originalAppAWSRegion
+		appCfg.Cfg.AWSSESEmailSender = originalAppSender
 		sesInitializationError = nil
-		cfg.Region = ""
+		awsSDKConfig.Region = ""
 	}()
 
-	t.Run("SES Notifier creation fails if AWS session not initialized", func(t *testing.T) {
-		os.Unsetenv("AWS_REGION") // Garante que a sessão falhe
-		InitializeAWSSession()    // Define sesInitializationError
+	t.Run("SES Notifier creation fails if AWS session not initialized (AWSRegion empty in appCfg)", func(t *testing.T) {
+		appCfg.Cfg.AWSRegion = ""  // Garante que a sessão falhe ao ler de appCfg
+		InitializeAWSSession()     // Isso vai setar sesInitializationError
 
 		_, err := NewSESEmailNotifier()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "sessão AWS não foi inicializada")
+		assert.Contains(t, sesInitializationError.Error(), "AWS_REGION não está configurada na app config")
 	})
 
-	t.Run("SES Notifier creation fails if sender email not set", func(t *testing.T) {
-		os.Setenv("AWS_REGION", "test-region") // Simula sessão AWS OK
-		InitializeAWSSession() // Limpa sesInitializationError e define cfg.Region
-		os.Unsetenv("EMAIL_SENDER_ADDRESS")
+	t.Run("SES Notifier creation fails if sender email not set in appCfg", func(t *testing.T) {
+		appCfg.Cfg.AWSRegion = "us-east-1" // Configura região para passar na inicialização da sessão
+		sesInitializationError = nil      // Limpa erro anterior
+		awsSDKConfig.Region = ""          // Força InitializeAWSSession a tentar carregar
 
-		_, err := NewSESEmailNotifier()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "EMAIL_SENDER_ADDRESS não está configurado")
+		err := InitializeAWSSession()
+		assert.NoError(t, err)
+		assert.Nil(t, sesInitializationError)
+		assert.Equal(t, "us-east-1", awsSDKConfig.Region)
+
+		appCfg.Cfg.AWSSESEmailSender = "" // Remove o sender da config da app
+
+		_, errNotifier := NewSESEmailNotifier()
+		assert.Error(t, errNotifier)
+		assert.Contains(t, errNotifier.Error(), "EMAIL_SENDER_ADDRESS (AWSSESEmailSender na app config) não está configurado")
 	})
-
-    // Teste para criação bem-sucedida é mais um teste de integração,
-    // pois requer que config.LoadDefaultConfig funcione e encontre credenciais válidas.
-    // Não faremos aqui para manter unitário.
 }
 
 
 func TestSendEmailNotificationLogic(t *testing.T) {
-    // Testar a lógica de fallback da função SendEmailNotification
     originalNotifier := DefaultEmailNotifier
     defer func() { DefaultEmailNotifier = originalNotifier }()
 
@@ -118,13 +119,10 @@ func TestSendEmailNotificationLogic(t *testing.T) {
     })
 
     t.Run("SendEmail falls back to logging if DefaultEmailNotifier is nil", func(t *testing.T) {
-        DefaultEmailNotifier = nil // Garantir que não há notificador real
+        DefaultEmailNotifier = nil
 
-        // Como verificar o log é mais complexo, vamos apenas garantir que não dá erro
-        // e assumir que o log ocorreu (coberto por inspeção visual ou testes de log mais avançados)
         err := SendEmailNotification("log@example.com", "Log Subject", "<p>Log HTML</p>", "Log Text")
         assert.NoError(t, err, "Fallback logging should not produce an error")
-        // Para verificar o log, você precisaria de um logger mockado ou capturar stdout/stderr.
     })
 
     t.Run("SendEmail returns error if toEmail is empty", func(t *testing.T) {
@@ -134,7 +132,6 @@ func TestSendEmailNotificationLogic(t *testing.T) {
     })
 }
 
-// MockEmailNotifier para testar a lógica de SendEmailNotification
 type MockEmailNotifier struct {
     SendEmailFunc   func(toEmail, subject, htmlBody, textBody string) error
     SendEmailCalled bool
@@ -147,14 +144,3 @@ func (m *MockEmailNotifier) SendEmail(toEmail, subject, htmlBody, textBody strin
     }
     return nil
 }
-
-// Testes para NotifyUserByEmail (verificando se busca usuário e chama SendEmailNotification)
-// Estes testes precisarão de mocks de banco de dados, então seriam melhor colocados
-// em um contexto onde o DB mock (sqlmock) está configurado, como nos testes de handler.
-// Ou, refatorar NotifyUserByEmail para aceitar uma interface de DB.
-// Por enquanto, vamos focar nos testes acima.
-
-// Lembre-se que InitializeAWSSession e NewSESEmailNotifier dependem de variáveis de ambiente
-// e do comportamento real do AWS SDK para carregar configurações/credenciais.
-// Testes unitários puros para eles são limitados sem mocks profundos do SDK.
-// Os testes acima focam mais na lógica de erro e fallback da nossa aplicação.

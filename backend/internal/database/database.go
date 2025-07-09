@@ -49,6 +49,8 @@ func MigrateDB() error {
 		&models.AuditFramework{},
 		&models.AuditControl{},
 		&models.AuditAssessment{},
+		&models.IdentityProvider{},     // Added
+		&models.WebhookConfiguration{}, // Added
 	)
 	if err != nil {
 		return fmt.Errorf("database migration failed: %w", err)

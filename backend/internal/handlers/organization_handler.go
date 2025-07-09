@@ -3,14 +3,16 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io" // Mantido para io.EOF na leitura do buffer do arquivo
 	"log"
-	"mime/multipart"
+	// "mime/multipart" // Removido - não usado diretamente aqui, o Gin lida com isso
 	"net/http"
 	"path/filepath"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/filestorage"
 	"phoenixgrc/backend/internal/models"
 	"regexp" // Para validar cores HEX
+	"time"   // Adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

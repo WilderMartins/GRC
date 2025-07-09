@@ -4,19 +4,19 @@ import (
 	"net/http"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	"strings" // Adicionado para strings.ToLower e strings.Join
 	"time"
-	"net/http/httputil" // Para detectar MIME type (embora http.DetectContentType seja mais simples)
-
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"encoding/json"
 	"fmt"
 	"log"
-	"mime/multipart"
+	// "mime/multipart" // Removido - não usado diretamente aqui, o Gin lida com isso
 	"path/filepath"
 	"phoenixgrc/backend/internal/filestorage"
 	"io" // Necessário para file.Seek e http.DetectContentType
+	// "net/http/httputil" // Removido - não usado
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause" // Para Upsert
@@ -393,4 +393,147 @@ func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
 		PageSize:   pageSize,
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// ComplianceScoreResponse defines the structure for the compliance score endpoint.
+type ComplianceScoreResponse struct {
+	FrameworkID                 uuid.UUID `json:"framework_id"`
+	FrameworkName               string    `json:"framework_name"`
+	OrganizationID            uuid.UUID `json:"organization_id"`
+	ComplianceScore             float64   `json:"compliance_score"` // Percentage
+	TotalControls               int       `json:"total_controls"`
+	EvaluatedControls           int       `json:"evaluated_controls"`
+	ConformantControls          int       `json:"conformant_controls"`
+	PartiallyConformantControls int       `json:"partially_conformant_controls"`
+	NonConformantControls       int       `json:"non_conformant_controls"`
+}
+
+// GetComplianceScoreHandler calculates and returns the compliance score for a framework within an organization.
+func GetComplianceScoreHandler(c *gin.Context) {
+	orgIDStr := c.Param("orgId")
+	targetOrgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid organization ID format"})
+		return
+	}
+
+	frameworkIDStr := c.Param("frameworkId")
+	frameworkID, err := uuid.Parse(frameworkIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid framework ID format"})
+		return
+	}
+
+	// Security check (similar to ListOrgAssessmentsByFrameworkHandler)
+	tokenOrgID, tokenOrgExists := c.Get("organizationID")
+	userRole, roleExists := c.Get("userRole")
+	if !tokenOrgExists || !roleExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing token information"})
+		return
+	}
+	if tokenOrgID.(uuid.UUID) != targetOrgID && userRole.(models.UserRole) != models.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this organization's compliance score"})
+		return
+	}
+
+	db := database.GetDB()
+
+	// 1. Get Framework Details
+	var framework models.AuditFramework
+	if err := db.First(&framework, "id = ?", frameworkID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Framework not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch framework details: " + err.Error()})
+		return
+	}
+
+	// 2. Get all controls for the framework
+	var controls []models.AuditControl
+	if err := db.Where("framework_id = ?", frameworkID).Find(&controls).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve controls for framework: " + err.Error()})
+		return
+	}
+
+	totalControls := len(controls)
+	if totalControls == 0 {
+		resp := ComplianceScoreResponse{
+			FrameworkID:    frameworkID,
+			FrameworkName:  framework.Name,
+			OrganizationID: targetOrgID,
+			// All other counts will be 0, score 0.0 or NaN (handle NaN to be 0)
+		}
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
+	var controlIDs []uuid.UUID
+	for _, ctrl := range controls {
+		controlIDs = append(controlIDs, ctrl.ID)
+	}
+
+	// 3. Get all assessments for these controls within the target organization
+	var assessments []models.AuditAssessment
+	if err := db.Where("organization_id = ? AND audit_control_id IN (?)", targetOrgID, controlIDs).Find(&assessments).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list assessments for score calculation: " + err.Error()})
+		return
+	}
+
+	// 4. Calculate score and counts
+	evaluatedControls := 0
+	conformantControls := 0
+	partiallyConformantControls := 0
+	nonConformantControls := 0
+	totalScoreSum := 0
+
+	assessmentMap := make(map[uuid.UUID]models.AuditAssessment)
+	for _, assess := range assessments {
+		assessmentMap[assess.AuditControlID] = assess
+	}
+
+	for _, ctrl := range controls {
+		if assessment, found := assessmentMap[ctrl.ID]; found {
+			evaluatedControls++
+			totalScoreSum += assessment.Score // Assumes Score is 0-100
+			switch assessment.Status {
+			case models.ControlStatusConformant:
+				conformantControls++
+			case models.ControlStatusPartiallyConformant:
+				partiallyConformantControls++
+			case models.ControlStatusNonConformant:
+				nonConformantControls++
+			}
+		}
+	}
+
+	var complianceScore float64
+	if evaluatedControls > 0 {
+		// Simple average of scores of *evaluated* controls.
+		// Another interpretation could be average score across *all* controls, treating unevaluated as 0.
+		// For now, average of evaluated.
+		complianceScore = float64(totalScoreSum) / float64(evaluatedControls)
+	} else {
+		complianceScore = 0.0 // Or handle as NaN/null if preferred by frontend
+	}
+
+	// Ensure score is not NaN if evaluatedControls is 0, though already handled
+	if evaluatedControls == 0 && totalScoreSum != 0 { // Should not happen if logic is correct
+		complianceScore = 0.0
+	}
+
+
+	resp := ComplianceScoreResponse{
+		FrameworkID:                 frameworkID,
+		FrameworkName:               framework.Name,
+		OrganizationID:            targetOrgID,
+		ComplianceScore:             complianceScore,
+		TotalControls:               totalControls,
+		EvaluatedControls:           evaluatedControls,
+		ConformantControls:          conformantControls,
+		PartiallyConformantControls: partiallyConformantControls,
+		NonConformantControls:       nonConformantControls,
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

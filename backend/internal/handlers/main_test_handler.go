@@ -9,6 +9,7 @@ import (
 	"regexp" // For sqlmock query matching
 	"testing"
 	"time"
+	"database/sql/driver" // Adicionado para driver.Value
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
@@ -21,35 +22,43 @@ import (
 var mockDB *gorm.DB
 var sqlMock sqlmock.Sqlmock
 
+// setupMockDB inicializa sqlMock e mockDB para um teste específico.
+func setupMockDB(t *testing.T) {
+	// t.Helper() // Helper para não reportar esta função na stack de erro do teste
+	var db *sql.DB
+	var err error
+	// Usar QueryMatcherRegexp para que ExpectQuery com regexp.QuoteMeta funcione de forma mais confiável.
+	db, sqlMock, err = sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("Failed to create sqlmock: %v", err)
+	}
+	// O defer db.Close() aqui fecharia o db após cada teste.
+	// Se você quiser que o db mockado persista entre os sub-testes de uma função TestXxx,
+	// o defer db.Close() deve estar na função TestXxx que chama setupMockDB.
+	// Por enquanto, vamos omitir o defer aqui para simplicidade, mas pode ser necessário.
+
+	dialector := postgres.New(postgres.Config{
+		Conn:       db,
+		PreferSimpleProtocol: true, // Para compatibilidade com sqlmock
+	})
+	gormDB, err := gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("Failed to open GORM with mock: %v", err)
+	}
+	mockDB = gormDB       // Atribui à variável global do pacote de teste
+	database.DB = mockDB // Configura o DB global usado pelos handlers
+}
+
+
 // TestMain sets up the test environment for handlers.
-// It initializes a mock database and JWT.
+// Agora foca principalmente no JWT e modo Gin, já que mockDB é por teste.
 func TestMain(m *testing.M) {
+	log.Println("--- TestMain in main_test_handler.go START ---")
 	gin.SetMode(gin.TestMode)
 
-	// Setup mock DB
-	var err error
-	var db *sql.DB
-	db, sqlMock, err = sqlmock.New()
-	if err != nil {
-		log.Fatalf("Failed to create sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	// Use a GORM dialector that uses the sqlmock connection
-	dialector := postgres.New(postgres.Config{
-		Conn: db,
-		// PreferSimpleProtocol: true, // Avoids implicit prepared statements that can complicate mocking
-	})
-
-	mockDB, err = gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent), // Or logger.Info for debugging
-	})
-	if err != nil {
-		log.Fatalf("Failed to open GORM with mock: %v", err)
-	}
-	database.DB = mockDB // Override the global DB instance with the mock
-
-	// Setup JWT
+	// Setup JWT - Ainda pode ser global para o pacote de teste
 	os.Setenv("JWT_SECRET_KEY", "handler_test_secret_key")
 	os.Setenv("JWT_TOKEN_LIFESPAN_HOURS", "1")
 	if err := auth.InitializeJWT(); err != nil {
@@ -59,6 +68,7 @@ func TestMain(m *testing.M) {
 	// Run tests
 	exitVal := m.Run()
 
+	log.Println("--- TestMain in main_test_handler.go END ---") // Log adicionado
 	os.Unsetenv("JWT_SECRET_KEY")
 	os.Unsetenv("JWT_TOKEN_LIFESPAN_HOURS")
 	os.Exit(exitVal)
@@ -94,7 +104,7 @@ func anyTimeArg() sqlmock.Argument { return anyArgOfType("time.Time") } // sqlmo
 // or when you want to be more explicit. For time.Time, GORM often handles it,
 // but this is an example.
 type anyArgOfType string
-func (a anyArgOfType) Match(v interface{}) bool {
+func (a anyArgOfType) Match(v driver.Value) bool { // Corrigido para driver.Value
 	// For time.Time, you might compare types or just return true if AnyArg isn't enough.
 	// This is a placeholder; for most cases, sqlmock.AnyArg() is sufficient.
 	// If specific time matching is needed, you'd implement it here.

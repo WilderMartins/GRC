@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,149 +8,45 @@ import (
 	"phoenixgrc/backend/internal/auth"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/handlers"
-	"phoenixgrc/backend/internal/models"
-	"phoenixgrc/backend/internal/oauth2auth" // Import OAuth2 auth package
-	"phoenixgrc/backend/internal/samlauth"   // Import SAML auth package
-	"phoenixgrc/backend/internal/seeders"    // Import seeders package
-	"phoenixgrc/backend/internal/filestorage" // Import filestorage package
-	"strings"
+	// "phoenixgrc/backend/internal/models" // No longer directly used here for setup
+	"phoenixgrc/backend/internal/oauth2auth"
+	// "phoenixgrc/backend/internal/samlauth"   // Temporariamente comentado
+	// "phoenixgrc/backend/internal/seeders" // Setup will handle its own seeding call
+	"phoenixgrc/backend/internal/filestorage"
+	"phoenixgrc/backend/internal/notifications"
+	// "strings" // No longer needed for setup here
+
+	"phoenixgrc/backend/cmd/setup" // Import the setup package
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
-	// "github.com/google/uuid" // uuid.New() is used in models' BeforeCreate
+	// "golang.org/x/crypto/bcrypt" // Moved to setup package
 )
 
-func runSetup() {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("--- Phoenix GRC Setup ---")
-
-	// 1. Coletar credenciais do banco de dados
-	fmt.Println("\n--- Database Configuration ---")
-	fmt.Print("Enter Database Host (e.g., localhost or 'db' if using docker-compose): ")
-	dbHost, _ := reader.ReadString('\n')
-	dbHost = strings.TrimSpace(dbHost)
-
-	fmt.Print("Enter Database Port (e.g., 5432): ")
-	dbPort, _ := reader.ReadString('\n')
-	dbPort = strings.TrimSpace(dbPort)
-
-	fmt.Print("Enter Database User: ")
-	dbUser, _ := reader.ReadString('\n')
-	dbUser = strings.TrimSpace(dbUser)
-
-	fmt.Print("Enter Database Password: ")
-	dbPassword, _ := reader.ReadString('\n')
-	dbPassword = strings.TrimSpace(dbPassword)
-
-	fmt.Print("Enter Database Name: ")
-	dbName, _ := reader.ReadString('\n')
-	dbName = strings.TrimSpace(dbName)
-
-	fmt.Print("Enter Database SSL Mode (e.g., disable, require): ")
-	dbSSLMode, _ := reader.ReadString('\n')
-	dbSSLMode = strings.TrimSpace(dbSSLMode)
-
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
-		dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode)
-
-	// 2. Conectar ao banco de dados
-	if err := database.ConnectDB(dsn); err != nil {
-		log.Fatalf("Failed to connect to database during setup: %v", err)
-	}
-	fmt.Println("Successfully connected to the database during setup.")
-
-	// 3. Executar migrações
-	if err := database.MigrateDB(); err != nil {
-		log.Fatalf("Failed to run database migrations during setup: %v", err)
-	}
-	fmt.Println("Database migrations completed successfully during setup.")
-
-	// Seed Audit Frameworks and Controls
-	fmt.Println("\n--- Seeding Audit Frameworks and Controls ---")
-	if err := seeders.SeedAuditFrameworksAndControls(database.GetDB()); err != nil {
-		log.Fatalf("Failed to seed audit frameworks and controls: %v", err)
-	}
-	fmt.Println("Audit frameworks and controls seeded successfully.")
-
-	// 4. Criar a primeira organização
-	fmt.Println("\n--- Organization Setup ---")
-	fmt.Print("Enter the name for the first organization: ")
-	orgName, _ := reader.ReadString('\n')
-	orgName = strings.TrimSpace(orgName)
-
-	organization := models.Organization{
-		Name: orgName,
-	}
-	db := database.GetDB()
-	if err := db.Create(&organization).Error; err != nil {
-		log.Fatalf("Failed to create organization during setup: %v", err)
-	}
-	fmt.Printf("Organization '%s' created successfully with ID: %s\n", organization.Name, organization.ID)
-
-	// 5. Criar o primeiro usuário administrador
-	fmt.Println("\n--- Admin User Setup ---")
-	fmt.Print("Enter Admin User Name: ")
-	adminName, _ := reader.ReadString('\n')
-	adminName = strings.TrimSpace(adminName)
-
-	fmt.Print("Enter Admin User Email: ")
-	adminEmail, _ := reader.ReadString('\n')
-	adminEmail = strings.TrimSpace(adminEmail)
-
-	fmt.Print("Enter Admin User Password: ")
-	adminPassword, _ := reader.ReadString('\n')
-	adminPassword = strings.TrimSpace(adminPassword)
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
-	if err != nil {
-		log.Fatalf("Failed to hash password during setup: %v", err)
-	}
-
-	adminUser := models.User{
-		OrganizationID: organization.ID,
-		Name:           adminName,
-		Email:          adminEmail,
-		PasswordHash:   string(hashedPassword),
-		Role:           models.RoleAdmin,
-	}
-
-	if err := db.Create(&adminUser).Error; err != nil {
-		log.Fatalf("Failed to create admin user during setup: %v", err)
-	}
-	fmt.Printf("Admin user '%s' created successfully during setup.\n", adminUser.Email)
-
-	fmt.Println("\n--- Setup Complete ---")
-	fmt.Println("Phoenix GRC initial setup is complete.")
-}
+// runSetup() function is now removed from here and exists in backend/cmd/setup/main.go
 
 func startServer() {
-	// Initialize JWT
 	if err := auth.InitializeJWT(); err != nil {
 		log.Fatalf("Failed to initialize JWT: %v", err)
 	}
 	log.Println("JWT Initialized.")
 
-	// Initialize SAML SP Global Config
+	/* // SAML Temporariamente Comentado
 	if err := samlauth.InitializeSAMLSPGlobalConfig(); err != nil {
 		log.Fatalf("Failed to initialize SAML SP Global Config: %v", err)
 	}
 	log.Println("SAML SP Global Config Initialized.")
+	*/
 
-	// Initialize OAuth2 Global Config
 	if err := oauth2auth.InitializeOAuth2GlobalConfig(); err != nil {
 		log.Fatalf("Failed to initialize OAuth2 Global Config: %v", err)
 	}
 	log.Println("OAuth2 Global Config Initialized.")
 
-	// Initialize File Storage Provider
 	if err := filestorage.InitFileStorage(); err != nil {
-		// Log o erro, mas não necessariamente fatal, a app pode rodar sem uploads.
-		// A função InitFileStorage já loga internamente.
 		log.Printf("Warning: File storage initialization failed: %v. Uploads may not work.", err)
 	}
 
-	// Initialize Email Service
-	notifications.InitEmailService() // Chamada para inicializar o DefaultEmailNotifier
+	notifications.InitEmailService()
 
 	dbHost := os.Getenv("POSTGRES_HOST")
 	dbPort := os.Getenv("POSTGRES_PORT")
@@ -160,17 +55,11 @@ func startServer() {
 	dbName := os.Getenv("POSTGRES_DB")
 	dbSSLMode := os.Getenv("POSTGRES_SSLMODE")
 
-	if dbHost == "" {
-		dbHost = "db"
-	}
-	if dbPort == "" {
-		dbPort = "5432"
-	}
-	if dbSSLMode == "" {
-		dbSSLMode = "disable"
-	}
+	if dbHost == "" { dbHost = "db" }
+	if dbPort == "" { dbPort = "5432" }
+	if dbSSLMode == "" { dbSSLMode = "disable" }
 	if dbUser == "" || dbPassword == "" || dbName == "" {
-		log.Fatal("Database credentials (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB) must be set in environment variables or .env file for the server.")
+		log.Fatal("Database credentials (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB) must be set for the server.")
 	}
 
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
@@ -183,7 +72,6 @@ func startServer() {
 
 	router := gin.Default()
 
-	// Public routes
 	router.GET("/health", func(c *gin.Context) {
 		sqlDB, err := database.DB.DB()
 		if err != nil {
@@ -203,49 +91,38 @@ func startServer() {
 
 	authRoutes := router.Group("/auth")
 	{
-		authRoutes.POST("/login", handlers.LoginHandler)
-
-		// SAML Authentication Routes
-		// These routes are specific to an IdP configuration
+		authRoutes.POST("/login", handlers.LoginHandler) // Restaurado para usar o handler implementado
+		/* // SAML Temporariamente Comentado
 		samlIdPGroup := authRoutes.Group("/saml/:idpId")
 		{
-			samlIdPGroup.GET("/metadata", samlauth.MetadataHandler) // SP Metadata endpoint
-			samlIdPGroup.POST("/acs", samlauth.ACSHandler)          // Assertion Consumer Service
-			// Gin doesn't route GET and POST to the same handler func by default for the same path
-			// So if ACS can be GET (not typical but possible), add another route or check method.
-			// Most IdPs will POST to ACS.
-			samlIdPGroup.GET("/login", samlauth.SAMLLoginHandler) // Initiates login to IdP
-			// TODO: Add SLO (Single Logout) routes if needed
-			// samlIdPGroup.POST("/slo", samlauth.SLOHandler)
-			// samlIdPGroup.GET("/slo", samlauth.SLOHandler)
+			samlIdPGroup.GET("/metadata", samlauth.MetadataHandler)
+			samlIdPGroup.POST("/acs", samlauth.ACSHandler)
+			samlIdPGroup.GET("/login", samlauth.SAMLLoginHandler)
 		}
-
-		// OAuth2 Authentication Routes (Example for Google)
-		// These routes are also specific to an IdP configuration instance
+		*/
 		oauth2GoogleGroup := authRoutes.Group("/oauth2/google/:idpId")
 		{
 			oauth2GoogleGroup.GET("/login", oauth2auth.GoogleLoginHandler)
 			oauth2GoogleGroup.GET("/callback", oauth2auth.GoogleCallbackHandler)
 		}
-		// TODO: Add routes for other OAuth2 providers (e.g., GitHub) in a similar fashion
-		// oauth2GithubGroup := authRoutes.Group("/oauth2/github/:idpId")
-		// {
-		// 	oauth2GithubGroup.GET("/login", oauth2auth.GithubLoginHandler)
-		// 	oauth2GithubGroup.GET("/callback", oauth2auth.GithubCallbackHandler)
-		// }
+
+		oauth2GithubGroup := authRoutes.Group("/oauth2/github/:idpId")
+		{
+			oauth2GithubGroup.GET("/login", oauth2auth.GithubLoginHandler)
+			oauth2GithubGroup.GET("/callback", oauth2auth.GithubCallbackHandler)
+		}
+		// 2FA TOTP Verification as part of login
+		authRoutes.POST("/login/2fa/verify", handlers.LoginVerifyTOTPHandler)
 	}
 
-	// Protected API v1 routes
 	apiV1 := router.Group("/api/v1")
-	apiV1.Use(auth.AuthMiddleware()) // Apply JWT auth middleware to this group
+	apiV1.Use(auth.AuthMiddleware())
 	{
-		// Example protected route
 		apiV1.GET("/me", func(c *gin.Context) {
 			userID, _ := c.Get("userID")
 			userEmail, _ := c.Get("userEmail")
 			userRole, _ := c.Get("userRole")
 			orgID, _ := c.Get("organizationID")
-
 			c.JSON(http.StatusOK, gin.H{
 				"message":      "This is a protected route",
 				"user_id":      userID,
@@ -255,7 +132,6 @@ func startServer() {
 			})
 		})
 
-		// Risk Management Routes
 		riskRoutes := apiV1.Group("/risks")
 		{
 			riskRoutes.POST("", handlers.CreateRiskHandler)
@@ -263,19 +139,20 @@ func startServer() {
 			riskRoutes.GET("/:riskId", handlers.GetRiskHandler)
 			riskRoutes.PUT("/:riskId", handlers.UpdateRiskHandler)
 			riskRoutes.DELETE("/:riskId", handlers.DeleteRiskHandler)
-
-			// Approval Workflow Routes nested under a specific risk
 			riskRoutes.POST("/:riskId/submit-acceptance", handlers.SubmitRiskForAcceptanceHandler)
 			riskRoutes.GET("/:riskId/approval-history", handlers.GetRiskApprovalHistoryHandler)
-			// Note: approvalId is the ID of the ApprovalWorkflow record itself
 			riskRoutes.POST("/:riskId/approval/:approvalId/decide", handlers.ApproveOrRejectRiskAcceptanceHandler)
-
-			// Bulk Upload Route (não aninhada sob :riskId)
 			riskRoutes.POST("/bulk-upload-csv", handlers.BulkUploadRisksCSVHandler)
+
+			// Stakeholder routes
+			stakeholderRoutes := riskRoutes.Group("/:riskId/stakeholders")
+			{
+				stakeholderRoutes.POST("", handlers.AddRiskStakeholderHandler)
+				stakeholderRoutes.GET("", handlers.ListRiskStakeholdersHandler)
+				stakeholderRoutes.DELETE("/:userId", handlers.RemoveRiskStakeholderHandler)
+			}
 		}
 
-		// Identity Provider Management Routes (nested under organizations)
-		// Example path: /api/v1/organizations/{orgId}/identity-providers
 		orgRoutes := apiV1.Group("/organizations/:orgId")
 		{
 			idpRoutes := orgRoutes.Group("/identity-providers")
@@ -286,8 +163,6 @@ func startServer() {
 				idpRoutes.PUT("/:idpId", handlers.UpdateIdentityProviderHandler)
 				idpRoutes.DELETE("/:idpId", handlers.DeleteIdentityProviderHandler)
 			}
-
-			// Webhook Configuration Routes nested under organizations
 			webhookRoutes := orgRoutes.Group("/webhooks")
 			{
 				webhookRoutes.POST("", handlers.CreateWebhookHandler)
@@ -296,23 +171,17 @@ func startServer() {
 				webhookRoutes.PUT("/:webhookId", handlers.UpdateWebhookHandler)
 				webhookRoutes.DELETE("/:webhookId", handlers.DeleteWebhookHandler)
 			}
-
-			// Organization User Management Routes
 			userManagementRoutes := orgRoutes.Group("/users")
 			{
 				userManagementRoutes.GET("", handlers.ListOrganizationUsersHandler)
 				userManagementRoutes.GET("/:userId", handlers.GetOrganizationUserHandler)
 				userManagementRoutes.PUT("/:userId/role", handlers.UpdateOrganizationUserRoleHandler)
 				userManagementRoutes.PUT("/:userId/status", handlers.UpdateOrganizationUserStatusHandler)
-				// TODO: Adicionar rota para Convidar Usuário no futuro
 			}
-
-			// Organization Branding/Whitelabeling Route
 			orgRoutes.PUT("/branding", handlers.UpdateOrganizationBrandingHandler)
-			orgRoutes.GET("/branding", handlers.GetOrganizationBrandingHandler) // Para o frontend buscar as configs
+			orgRoutes.GET("/branding", handlers.GetOrganizationBrandingHandler)
 		}
 
-		// Vulnerability Management Routes
 		vulnerabilityRoutes := apiV1.Group("/vulnerabilities")
 		{
 			vulnerabilityRoutes.POST("", handlers.CreateVulnerabilityHandler)
@@ -322,23 +191,30 @@ func startServer() {
 			vulnerabilityRoutes.DELETE("/:vulnId", handlers.DeleteVulnerabilityHandler)
 		}
 
-		// Audit and Compliance Routes
 		auditRoutes := apiV1.Group("/audit")
 		{
-			// Frameworks and Controls (publicly readable or requires basic auth)
-			// For now, let's assume they are part of the protected API needing a valid token
 			auditRoutes.GET("/frameworks", handlers.ListFrameworksHandler)
 			auditRoutes.GET("/frameworks/:frameworkId/controls", handlers.GetFrameworkControlsHandler)
-
-			// Assessments (specific to an organization, thus protected and context-aware)
-			auditRoutes.POST("/assessments", handlers.CreateOrUpdateAssessmentHandler) // orgId from token
-			auditRoutes.GET("/assessments/control/:controlId", handlers.GetAssessmentForControlHandler) // orgId from token, controlId is AuditControl UUID
-
-			// Route to get all assessments for a specific organization and framework
-			// This path is slightly different as it includes orgId in the path,
-			// which might be useful for superadmin scenarios later, or if orgId from token is always primary.
-			// For now, handler logic uses orgId from path but checks against token.
+			auditRoutes.POST("/assessments", handlers.CreateOrUpdateAssessmentHandler)
+			auditRoutes.GET("/assessments/control/:controlId", handlers.GetAssessmentForControlHandler)
 			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/assessments", handlers.ListOrgAssessmentsByFrameworkHandler)
+			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/compliance-score", handlers.GetComplianceScoreHandler)
+		}
+
+		// MFA Routes (operam no usuário autenticado - /me)
+		mfaRoutes := apiV1.Group("/users/me/2fa")
+		{
+			mfaTOTPRoutes := mfaRoutes.Group("/totp")
+			{
+				mfaTOTPRoutes.POST("/setup", handlers.SetupTOTPHandler)
+				mfaTOTPRoutes.POST("/verify", handlers.VerifyTOTPHandler)
+				mfaTOTPRoutes.POST("/disable", handlers.DisableTOTPHandler)
+			}
+			// backupCodeRoutes := mfaRoutes.Group("/backup-codes")
+			// {
+			// 	backupCodeRoutes.GET("/generate", handlers.GenerateBackupCodesHandler) // TODO
+			// 	backupCodeRoutes.POST("/verify", handlers.VerifyBackupCodeHandler)   // TODO - parte do login 2FA
+			// }
 		}
 	}
 
@@ -354,7 +230,8 @@ func startServer() {
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
-		runSetup()
+		// Call RunSetup from the setup package
+		setup.RunSetup()
 	} else {
 		startServer()
 	}

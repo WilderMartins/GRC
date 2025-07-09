@@ -29,6 +29,14 @@ const (
 	ProbabilityHigh     RiskProbability = "Alto"  // Ajustado para masculino e capitalizado
 	ProbabilityCritical RiskProbability = "Crítico"// Ajustado para masculino e capitalizado
 
+	// RiskLevel é o nível de risco calculado (ex: Baixo, Moderado, Alto, Extremo)
+	RiskLevelLow      string = "Baixo"
+	RiskLevelModerate string = "Moderado"
+	RiskLevelHigh     string = "Alto"
+	RiskLevelExtreme  string = "Extremo"
+	// RiskLevelUndefined é usado se o cálculo não for possível
+	RiskLevelUndefined string = "Indefinido"
+
 	StatusOpen        RiskStatus = "aberto" // Mantido como está, não faz parte da solicitação de Baixo/Médio/Alto/Crítico
 	StatusInProgress  RiskStatus = "em_andamento"
 	StatusMitigated   RiskStatus = "mitigado"
@@ -94,6 +102,9 @@ type User struct {
 	SocialLoginID  string    `gorm:"size:100"`
 	Role           UserRole  `gorm:"type:varchar(20);not null;default:'user'"`
 	IsActive       bool      `gorm:"default:true;not null;index"` // Novo campo para status do usuário
+	TOTPSecret     string    `gorm:"size:255"` // Armazenar criptografado! No DB será string.
+	IsTOTPEnabled  bool      `gorm:"default:false;not null"`
+	TOTPBackupCodes string   `gorm:"type:text"` // JSON array de hashes dos códigos de backup
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	AuthoredRisks  []Risk `gorm:"foreignKey:OwnerID"` // Risks where this user is the owner
@@ -117,6 +128,7 @@ type Risk struct {
 	Category       RiskCategory    `gorm:"type:varchar(50)"`
 	Impact         RiskImpact      `gorm:"type:varchar(20)"`
 	Probability    RiskProbability `gorm:"type:varchar(20)"`
+	RiskLevel      string          `gorm:"type:varchar(20);default:'Indefinido'"` // Nível de Risco Calculado
 	Status         RiskStatus      `gorm:"type:varchar(20);default:'aberto'"`
 	OwnerID        uuid.UUID       `gorm:"type:uuid"` // FK to User
 	CreatedAt      time.Time
@@ -205,7 +217,7 @@ type AuditControl struct {
 	Description string    `gorm:"type:text"`
 	Family      string    `gorm:"size:100"` // e.g., Access Control, Identify
 	Framework   AuditFramework `gorm:"foreignKey:FrameworkID"`
-	AuditAssessments []AuditAssessment `gorm:"foreignKey:ControlID"` // This assumes ControlID in AuditAssessment refers to AuditControl.ID
+	AuditAssessments []AuditAssessment `gorm:"foreignKey:AuditControlID"` // TODO: JULES - Resolvido descomentando.
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -230,7 +242,7 @@ type AuditAssessment struct {
 	AssessmentDate time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	AuditControl   AuditControl       `gorm:"foreignKey:AuditControlID"`
+	AuditControl   AuditControl       `gorm:"foreignKey:AuditControlID"` // TODO: JULES - Resolvido descomentando.
 }
 
 func (as *AuditAssessment) BeforeCreate(tx *gorm.DB) (err error) {

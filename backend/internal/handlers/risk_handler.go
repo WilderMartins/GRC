@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"fmt" // Adicionado
 	"net/http"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	"phoenixgrc/backend/internal/riskutils" // Import riskutils package
 
 	"phoenixgrc/backend/internal/notifications" // Import notifications package
 	"strings"                                   // Para CSV
@@ -14,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause" // Needed for OnConflict
 )
 
 // RiskPayload defines the structure for creating or updating a risk.
@@ -76,6 +79,8 @@ func CreateRiskHandler(c *gin.Context) {
 		risk.Status = models.StatusOpen
 	}
 
+	// Calculate Risk Level
+	risk.RiskLevel = riskutils.CalculateRiskLevel(risk.Impact, risk.Probability)
 
 	if err := db.Create(&risk).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create risk: " + err.Error()})
@@ -83,6 +88,7 @@ func CreateRiskHandler(c *gin.Context) {
 	}
 
 	// Disparar notificação de criação de risco
+	organizationID := orgID.(uuid.UUID) // Corrigido: assertion de tipo e atribuição
 	go notifications.NotifyRiskEvent(organizationID, risk, models.EventTypeRiskCreated)
 	// Simular email para o proprietário do risco
 	if risk.OwnerID != uuid.Nil {
@@ -270,6 +276,10 @@ func UpdateRiskHandler(c *gin.Context) {
 		risk.OwnerID = parsedOwnerID
 	}
 
+	// Recalculate Risk Level if impact or probability changed
+	if payload.Impact != "" || payload.Probability != "" {
+		risk.RiskLevel = riskutils.CalculateRiskLevel(risk.Impact, risk.Probability)
+	}
 
 	if err := db.Save(&risk).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update risk: " + err.Error()})
@@ -424,12 +434,30 @@ func SubmitRiskForAcceptanceHandler(c *gin.Context) {
 
     // Placeholder for notification
 	var requesterUser models.User
-	var approverUser models.User
-	db.First(&requesterUser, "id = ?", approvalWorkflow.RequesterID)
-	db.First(&approverUser, "id = ?", approvalWorkflow.ApproverID)
-	log.Printf("NOTIFICAÇÃO (Simulada): Risco '%s' (ID: %s) submetido para aprovação por '%s' para o aprovador '%s'. Workflow ID: %s",
-		risk.Title, risk.ID.String(), requesterUser.Email, approverUser.Email, approvalWorkflow.ID.String())
+	var approverUser models.User // Approver is the risk owner
+	var requesterUser models.User
 
+	db.First(&requesterUser, "id = ?", approvalWorkflow.RequesterID) // Fetch requester details for the email
+	db.First(&approverUser, "id = ?", approvalWorkflow.ApproverID)   // Fetch approver details for the email
+
+	// Notify the approver (risk owner) by email
+	if approverUser.ID != uuid.Nil && approverUser.IsActive {
+		emailSubject := fmt.Sprintf("Ação Requerida: Aprovação de Aceite para o Risco '%s'", risk.Title)
+		emailBody := fmt.Sprintf(
+			"Olá %s,\n\nO risco '%s' (Descrição: %s) foi submetido para sua aprovação de aceite por %s.\n\nPor favor, acesse o Phoenix GRC para revisar e tomar uma decisão.\n\nDetalhes do Risco:\nImpacto: %s\nProbabilidade: %s\nNível de Risco: %s",
+			approverUser.Name,
+			risk.Title,
+			risk.Description,
+			requesterUser.Name, // Assume requesterUser was fetched successfully
+			risk.Impact,
+			risk.Probability,
+			risk.RiskLevel,
+		)
+		notifications.NotifyUserByEmail(approverUser.ID, emailSubject, emailBody)
+		log.Printf("Notificação por email enviada para o aprovador %s sobre submissão de risco '%s'", approverUser.Email, risk.Title)
+	} else {
+		log.Printf("Aprovador (ID: %s) não encontrado ou inativo, notificação por email não enviada para submissão do risco '%s'.", approvalWorkflow.ApproverID, risk.Title)
+	}
 
 	c.JSON(http.StatusCreated, approvalWorkflow)
 }
@@ -555,10 +583,20 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
 				notifications.NotifyUserByEmail(approvedRisk.OwnerID, emailSubjectOwner, emailBodyOwner)
 			}
 			if approvalWorkflow.RequesterID != uuid.Nil && approvalWorkflow.RequesterID != approvedRisk.OwnerID { // Notificar o Requisitante, se diferente do aprovador
-				emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
-				emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada por %s (proprietário do risco).\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
-					approvedRisk.Title, approverUser.Name, /* Precisa buscar o nome do aprovador */ approvedRisk.Status, approvalWorkflow.Comments)
-				notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+				var approverDetails models.User
+				if errDb := db.First(&approverDetails, tokenUserID.(uuid.UUID)).Error; errDb == nil {
+					emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
+					emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada por %s.\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
+						approvedRisk.Title, approverDetails.Name, approvedRisk.Status, approvalWorkflow.Comments)
+					notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+				} else {
+					log.Printf("Erro ao buscar detalhes do aprovador %s para notificação: %v", tokenUserID.(uuid.UUID), errDb)
+					// Fallback: Enviar notificação sem o nome do aprovador se a busca falhar
+					emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
+					emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada.\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
+						approvedRisk.Title, approvedRisk.Status, approvalWorkflow.Comments)
+					notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+				}
 			}
 		} else {
 			log.Printf("Erro ao buscar risco para notificação de status alterado após aprovação: %v", err)
@@ -576,6 +614,201 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
     }
 
 	c.JSON(http.StatusOK, approvalWorkflow)
+}
+
+// --- Risk Stakeholder Handlers ---
+
+type AddStakeholderPayload struct {
+	UserID string `json:"user_id" binding:"required"`
+}
+
+// AddRiskStakeholderHandler adds a user as a stakeholder to a risk.
+func AddRiskStakeholderHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	var payload AddStakeholderPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+		return
+	}
+
+	stakeholderUserID, err := uuid.Parse(payload.UserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UserID format for stakeholder"})
+		return
+	}
+
+	orgID, exists := c.Get("organizationID")
+	if !exists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgID.(uuid.UUID)
+
+	db := database.GetDB()
+
+	// 1. Verify the risk exists and belongs to the organization
+	var risk models.Risk
+	if err := db.Where("id = ? AND organization_id = ?", riskID, organizationID).First(&risk).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()})
+		return
+	}
+
+	// 2. Verify the user to be added as stakeholder exists and belongs to the same organization
+	var stakeholderUser models.User
+	if err := db.Where("id = ? AND organization_id = ?", stakeholderUserID, organizationID).First(&stakeholderUser).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User to be added as stakeholder not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user: " + err.Error()})
+		return
+	}
+
+	// 3. Create the RiskStakeholder association
+	riskStakeholder := models.RiskStakeholder{
+		RiskID: riskID,
+		UserID: stakeholderUserID,
+	}
+
+	// Use OnConflict to avoid duplicate errors if the association already exists
+	// GORM's Create will return an error if the primary key (RiskID, UserID) already exists,
+	// unless OnConflict is used.
+	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&riskStakeholder)
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add stakeholder to risk: " + result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+         // This means the stakeholder association already existed.
+         // Return 200 OK or a specific message instead of 201 Created.
+        c.JSON(http.StatusOK, gin.H{"message": "Stakeholder association already exists or was successfully processed."})
+        return
+    }
+
+	c.JSON(http.StatusCreated, gin.H{"message": "Stakeholder added successfully"})
+}
+
+// RemoveRiskStakeholderHandler removes a user as a stakeholder from a risk.
+func RemoveRiskStakeholderHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	stakeholderUserIDStr := c.Param("userId") // Matches the route param {userId}
+	stakeholderUserID, err := uuid.Parse(stakeholderUserIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid stakeholder UserID format"})
+		return
+	}
+
+	orgID, exists := c.Get("organizationID")
+	if !exists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgID.(uuid.UUID) // For verification
+
+	db := database.GetDB()
+
+	// Optional: Verify the risk exists and belongs to the organization to ensure context
+	var risk models.Risk
+	if err := db.Where("id = ? AND organization_id = ?", riskID, organizationID).First(&risk).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// If the risk doesn't exist in the org, the stakeholder link shouldn't either or is irrelevant.
+			// Depending on strictness, could return 404 here.
+			// For now, we'll allow the delete attempt on the join table directly.
+		}
+		// Log other errors but don't necessarily block if the main goal is to delete the join entry.
+		log.Printf("Warning/Error fetching risk context for stakeholder removal: %v", err)
+	}
+
+
+	// Delete the RiskStakeholder association
+	// The where clause must ensure that the risk in question belongs to the user's organization.
+	// This is implicitly handled if we only allow deletion based on risk_id that the user can access.
+	// However, an explicit check on the risk's organization_id before deleting the stakeholder is safer.
+	// If risk object is fetched as above, we already have this check.
+	// If not, we'd need a subquery or join to verify organization_id of the risk.
+	// Given we fetched `risk` above (and it belongs to `organizationID`),
+	// we can be sure that `riskID` is valid for this organization.
+
+	result := db.Where("risk_id = ? AND user_id = ?", riskID, stakeholderUserID).Delete(&models.RiskStakeholder{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove stakeholder: " + result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Stakeholder association not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Stakeholder removed successfully"})
+}
+
+// ListRiskStakeholdersHandler lists all stakeholders for a specific risk.
+// Returns a list of User objects (or a subset of their fields).
+func ListRiskStakeholdersHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	orgID, exists := c.Get("organizationID")
+	if !exists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgID.(uuid.UUID)
+
+	db := database.GetDB()
+
+	// 1. Verify the risk exists and belongs to the organization
+	var risk models.Risk
+	if err := db.Where("id = ? AND organization_id = ?", riskID, organizationID).First(&risk).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()})
+		return
+	}
+
+	var stakeholders []models.User
+	// Query users who are listed in RiskStakeholder for the given riskID
+	// and also belong to the same organization.
+	err = db.Joins("JOIN risk_stakeholders rs ON rs.user_id = users.id").
+		Where("rs.risk_id = ? AND users.organization_id = ?", riskID, organizationID).
+		Select("users.id, users.name, users.email, users.role"). // Select specific fields
+		Find(&stakeholders).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list stakeholders: " + err.Error()})
+		return
+	}
+
+	// If we want to return the full User model but without PasswordHash,
+    // we would need to map to a different struct or set PasswordHash to empty.
+    // For now, Select specific fields is safer. If the full User model (minus password) is needed,
+    // the response struct should be adjusted.
+
+	c.JSON(http.StatusOK, stakeholders) // stakeholders will only contain the selected fields
 }
 
 
@@ -644,6 +877,190 @@ func GetRiskApprovalHistoryHandler(c *gin.Context) {
 		PageSize:   pageSize,
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+// --- Risk Stakeholder Handlers ---
+
+type AddStakeholderPayload struct {
+	UserID string `json:"user_id" binding:"required"`
+}
+
+// AddRiskStakeholderHandler adds a user as a stakeholder to a risk.
+func AddRiskStakeholderHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	var payload AddStakeholderPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+		return
+	}
+
+	stakeholderUserID, err := uuid.Parse(payload.UserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UserID format for stakeholder"})
+		return
+	}
+
+	orgID, exists := c.Get("organizationID")
+	if !exists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgID.(uuid.UUID)
+
+	db := database.GetDB()
+
+	// 1. Verify the risk exists and belongs to the organization
+	var risk models.Risk
+	if err := db.Where("id = ? AND organization_id = ?", riskID, organizationID).First(&risk).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()})
+		return
+	}
+
+	// 2. Verify the user to be added as stakeholder exists and belongs to the same organization
+	var stakeholderUser models.User
+	if err := db.Where("id = ? AND organization_id = ?", stakeholderUserID, organizationID).First(&stakeholderUser).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User to be added as stakeholder not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user: " + err.Error()})
+		return
+	}
+
+	// 3. Create the RiskStakeholder association
+	riskStakeholder := models.RiskStakeholder{
+		RiskID: riskID,
+		UserID: stakeholderUserID,
+	}
+
+	// Use OnConflict to avoid duplicate errors if the association already exists
+	// GORM's Create will return an error if the primary key (RiskID, UserID) already exists,
+	// unless OnConflict is used.
+	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&riskStakeholder)
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add stakeholder to risk: " + result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+         // This means the stakeholder association already existed.
+         // Return 200 OK or a specific message instead of 201 Created.
+        c.JSON(http.StatusOK, gin.H{"message": "Stakeholder association already exists."}) // Specific message
+        return
+    }
+
+	c.JSON(http.StatusCreated, gin.H{"message": "Stakeholder added successfully"})
+}
+
+// RemoveRiskStakeholderHandler removes a user as a stakeholder from a risk.
+func RemoveRiskStakeholderHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	stakeholderUserIDStr := c.Param("userId") // Matches the route param {userId}
+	stakeholderUserID, err := uuid.Parse(stakeholderUserIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid stakeholder UserID format"})
+		return
+	}
+
+	orgID, exists := c.Get("organizationID")
+	if !exists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgID.(uuid.UUID)
+
+	db := database.GetDB()
+
+	// Verify the risk (and thus its organization_id) before allowing stakeholder removal.
+	// This ensures that the operation is scoped to the user's organization.
+	var risk models.Risk
+	if err := db.Where("id = ? AND organization_id = ?", riskID, organizationID).First(&risk).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization, cannot remove stakeholder."})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify risk before stakeholder removal: " + err.Error()})
+		return
+	}
+
+	result := db.Where("risk_id = ? AND user_id = ?", riskID, stakeholderUserID).Delete(&models.RiskStakeholder{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove stakeholder: " + result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Stakeholder association not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Stakeholder removed successfully"})
+}
+
+// ListRiskStakeholdersHandler lists all stakeholders for a specific risk.
+// Returns a list of User objects (or a subset of their fields).
+func ListRiskStakeholdersHandler(c *gin.Context) {
+	riskIDStr := c.Param("riskId")
+	riskID, err := uuid.Parse(riskIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
+		return
+	}
+
+	orgID, exists := c.Get("organizationID")
+	if !exists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgID.(uuid.UUID)
+
+	db := database.GetDB()
+
+	// 1. Verify the risk exists and belongs to the organization
+	var risk models.Risk
+	if err := db.Where("id = ? AND organization_id = ?", riskID, organizationID).First(&risk).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()})
+		return
+	}
+
+	var stakeholders []models.UserResponse // Use UserResponse to omit PasswordHash
+
+	err = db.Table("users").
+		Select("users.id, users.name, users.email, users.role, users.organization_id, users.is_active, users.created_at, users.updated_at").
+		Joins("JOIN risk_stakeholders rs ON rs.user_id = users.id").
+		Where("rs.risk_id = ? AND users.organization_id = ?", riskID, organizationID).
+		Find(&stakeholders).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list stakeholders: " + err.Error()})
+		return
+	}
+
+	if stakeholders == nil { // Ensure we return an empty list instead of null if no stakeholders
+        stakeholders = []models.UserResponse{}
+    }
+
+	c.JSON(http.StatusOK, stakeholders)
 }
 
 
