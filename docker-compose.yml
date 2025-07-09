@@ -50,6 +50,37 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  nginx:
+    image: nginx:alpine
+    container_name: phoenix_grc_nginx
+    ports:
+      - "${NGINX_PORT:-80}:80" # Expose Nginx on port 80 (or custom via NGINX_PORT)
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # Mount custom nginx config
+      # If serving static frontend files via Nginx:
+      # - ./frontend/out:/usr/share/nginx/html:ro # Example for Next.js static export
+    depends_on:
+      - backend
+    environment:
+      # Pass SERVER_PORT to Nginx so it knows where the backend is.
+      # This is used by nginx.conf for `proxy_pass http://backend:${SERVER_PORT:-8080}`.
+      # Nginx doesn't directly use this env var in its own config parsing,
+      # but it's a common pattern to pass it for entrypoint scripts that might process the conf.
+      # For direct use in nginx.conf, a tool like `envsubst` is needed at container startup,
+      # or hardcode the port if it's fixed within the docker network.
+      # For this setup, nginx.conf uses `${SERVER_PORT:-8080}` which requires envsubst.
+      # A simpler nginx.conf would hardcode `backend:8080`.
+      # Let's assume for now the Nginx image or an entrypoint handles env var substitution in nginx.conf,
+      # or we simplify nginx.conf. For robustness, we'll ensure Nginx can resolve `backend:8080`.
+      # The `${SERVER_PORT:-8080}` in nginx.conf only works if `envsubst` is run on the conf file.
+      # For a standard nginx image, it's better to hardcode the internal port or use a fixed one.
+      # Let's simplify and assume backend is always on 8080 internally from Nginx's perspective.
+      # The `backend` service itself maps SERVER_PORT from host to its internal 8080.
+      # So Nginx can always talk to `backend:8080`.
+      # The SERVER_PORT variable here is more for documentation or if an entrypoint script uses it.
+      SERVER_PORT_BACKEND: ${SERVER_PORT:-8080} # Informational, actual proxy_pass uses service name and internal port
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local
