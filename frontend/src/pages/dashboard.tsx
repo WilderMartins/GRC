@@ -4,15 +4,28 @@ import { useAuth } from '../contexts/AuthContext';
 import WithAuth from '../components/auth/WithAuth';
 import Link from 'next/link';
 import apiClient from '@/lib/axios';
-import { useNotifier } from '@/hooks/useNotifier';
-import StatCard from '@/components/common/StatCard'; // Importar o StatCard comum
+// import { useNotifier } from '@/hooks/useNotifier'; // Notifier não está sendo usado ativamente aqui para erros de fetch
+import StatCard from '@/components/common/StatCard';
 import { UserDashboardSummary } from '@/types';
+import { useTranslation } from 'next-i18next';
+import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
+import type { GetStaticProps, InferGetStaticPropsType } from 'next';
 
-// Definição local de UserDashboardSummary removida
+type Props = {
+  // Props from getStaticProps
+}
 
-const DashboardPageContent = () => {
+export const getStaticProps: GetStaticProps<Props> = async ({ locale }) => ({
+  props: {
+    ...(await serverSideTranslations(locale ?? 'pt', ['common', 'dashboard', 'auth'])), // Incluindo 'auth' para consistência e se user.name for usado
+  },
+});
+
+
+const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>) => {
+  const { t } = useTranslation(['dashboard', 'common']);
   const { user, logout } = useAuth();
-  const notify = useNotifier();
+  // const notify = useNotifier(); // Mantido se formos adicionar notificações de erro aqui
 
   const [summary, setSummary] = useState<UserDashboardSummary | null>(null);
   const [isLoadingSummary, setIsLoadingSummary] = useState(true);
@@ -28,106 +41,104 @@ const DashboardPageContent = () => {
         setSummary(response.data);
       } catch (err: any) {
         console.error("Erro ao buscar resumo do dashboard do usuário:", err);
-        setSummaryError(err.response?.data?.error || "Falha ao carregar resumo do dashboard.");
-        // notify.error("Falha ao carregar dados do seu dashboard."); // Opcional: notificar erro
+        const apiError = err.response?.data?.error || t('common:unknown_error');
+        setSummaryError(t('user.error_loading_summary', { message: apiError }));
       } finally {
         setIsLoadingSummary(false);
       }
     };
     fetchUserSummary();
-  }, [user, notify]); // Adicionado notify, embora não usado no fetch, por consistência
+  }, [user, t]); // Adicionado t como dependência
+
+  const pageTitle = t('user.page_title');
+  const appName = t('common:app_name');
 
   return (
     <>
       <Head>
-        <title>Dashboard - Phoenix GRC</title>
+        <title>{`${pageTitle} - ${appName}`}</title>
       </Head>
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
-        {/* Header Simples */}
         <header className="bg-white dark:bg-gray-800 shadow">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center">
                 <Link href="/dashboard" legacyBehavior>
                   <a className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
-                    Phoenix GRC
+                    {appName}
                   </a>
                 </Link>
               </div>
               <div className="flex items-center">
                 {user && (
                   <span className="text-gray-700 dark:text-gray-300 mr-4">
-                    Olá, {user.name || user.email}!
+                    {t('user.welcome_greeting_header', { userName: user.name || user.email || t('common:guest_user')})}
                   </span>
                 )}
                 <button
                   onClick={logout}
                   className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                 >
-                  Logout
+                  {t('common:logout_button')}
                 </button>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Conteúdo Principal */}
         <main className="py-10">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white mb-8">
-              Seu Dashboard
+              {t('user.header')}
             </h1>
 
-            {/* Cards de Resumo do Usuário */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
               <StatCard
-                title="Riscos Abertos Atribuídos"
+                title={t('user.summary_assigned_risks_open')}
                 value={summary?.assigned_risks_open_count ?? '-'}
                 isLoading={isLoadingSummary}
-                linkTo="/admin/risks" // Exemplo, ajustar o link correto
-                error={summaryError && summary?.assigned_risks_open_count === undefined ? "Erro" : null}
+                linkTo="/admin/risks" // TODO: Link para riscos do usuário, não admin
+                error={summaryError && summary?.assigned_risks_open_count === undefined ? t('common:error_loading_specific') : null}
               />
               <StatCard
-                title="Vulnerabilidades Abertas Atribuídas"
+                title={t('user.summary_assigned_vulnerabilities_open')}
                 value={summary?.assigned_vulnerabilities_open_count ?? '-'}
                 isLoading={isLoadingSummary}
-                linkTo="/admin/vulnerabilities" // Exemplo
-                error={summaryError && summary?.assigned_vulnerabilities_open_count === undefined ? "Erro" : null}
+                linkTo="/admin/vulnerabilities" // TODO: Link para vulnerabilidades do usuário
+                error={summaryError && summary?.assigned_vulnerabilities_open_count === undefined ? t('common:error_loading_specific') : null}
               />
               <StatCard
-                title="Tarefas de Aprovação Pendentes"
+                title={t('user.summary_pending_approval_tasks')}
                 value={summary?.pending_approval_tasks_count ?? '-'}
                 isLoading={isLoadingSummary}
-                // linkTo="/approvals" // Exemplo, se houver uma página de aprovações
-                error={summaryError && summary?.pending_approval_tasks_count === undefined ? "Erro" : null}
+                // linkTo="/approvals" // TODO: Link para página de aprovações do usuário
+                error={summaryError && summary?.pending_approval_tasks_count === undefined ? t('common:error_loading_specific') : null}
               />
             </div>
-            {summaryError && !summary && ( // Erro geral para o bloco de resumo se tudo falhar
-                 <p className="text-sm text-red-500 dark:text-red-400 mb-6 text-center">Não foi possível carregar seu resumo: {summaryError}</p>
+            {summaryError && !summary && (
+                 <p className="text-sm text-red-500 dark:text-red-400 mb-6 text-center">{summaryError}</p>
             )}
 
-
-            {/* Informações do Usuário (Mantido) */}
             {user && (
               <div className="mt-6 bg-white dark:bg-gray-800 shadow rounded-lg p-6">
                 <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Informações do Perfil
+                  {t('user.profile_info_header')}
                 </h2>
                 <dl className="mt-5 grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
                   <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Nome</dt>
+                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{t('user.profile_name_label')}</dt>
                     <dd className="mt-1 text-sm text-gray-900 dark:text-white">{user.name}</dd>
                   </div>
                   <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Email</dt>
+                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{t('user.profile_email_label')}</dt>
                     <dd className="mt-1 text-sm text-gray-900 dark:text-white">{user.email}</dd>
                   </div>
                   <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Role</dt>
+                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{t('user.profile_role_label')}</dt>
                     <dd className="mt-1 text-sm text-gray-900 dark:text-white">{user.role}</dd>
                   </div>
                   <div className="sm:col-span-1">
-                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Organization ID</dt>
+                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{t('user.profile_org_id_label')}</dt>
                     <dd className="mt-1 text-sm text-gray-900 dark:text-white">{user.organization_id}</dd>
                   </div>
                 </dl>
@@ -137,11 +148,19 @@ const DashboardPageContent = () => {
             <div className="mt-8">
               {user?.role === 'admin' || user?.role === 'manager' ? (
                 <p className="text-gray-700 dark:text-gray-300">
-                  Você também pode acessar o <Link href="/admin/dashboard"><span className="text-indigo-600 hover:underline dark:text-indigo-400">Painel Administrativo</span></Link> para gerenciamento da plataforma.
+                  {t('user.admin_panel_link_text', {
+                      adminDashboardLink: (
+                          <Link href="/admin/dashboard">
+                            <span className="text-indigo-600 hover:underline dark:text-indigo-400">
+                                {t('user.admin_dashboard_link_name')}
+                            </span>
+                          </Link>
+                      )
+                  })}
                 </p>
               ) : (
                 <p className="text-gray-700 dark:text-gray-300">
-                  Use os menus de navegação para acessar as funcionalidades do sistema.
+                  {t('user.user_navigation_prompt')}
                 </p>
               )}
             </div>

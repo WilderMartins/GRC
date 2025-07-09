@@ -3,16 +3,27 @@ import WithAuth from '@/components/auth/WithAuth';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import apiClient from '@/lib/axios';
-import Link from 'next/link';
-import { useNotifier } from '@/hooks/useNotifier';
-import StatCard from '@/components/common/StatCard'; // Importar o StatCard comum
+import Link from 'next/link'; // Mantido para o caso de links de atividade recente
+import StatCard from '@/components/common/StatCard';
 import { AdminStatistics, ActivityLog } from '@/types';
+import { useTranslation } from 'next-i18next';
+import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
+import type { GetStaticProps, InferGetStaticPropsType } from 'next';
+import Head from 'next/head'; // Adicionado Head para o título da página
 
-// Definições de tipos locais removidas
+type Props = {
+  // Props from getStaticProps
+}
 
-const AdminDashboardContent = () => {
+export const getStaticProps: GetStaticProps<Props> = async ({ locale }) => ({
+  props: {
+    ...(await serverSideTranslations(locale ?? 'pt', ['common', 'dashboard', 'auth'])), // Adicionado 'auth' se user.name for usado em saudações
+  },
+});
+
+const AdminDashboardContent = (props: InferGetStaticPropsType<typeof getStaticProps>) => {
+  const { t } = useTranslation(['dashboard', 'common']); // Especificar namespaces
   const { user } = useAuth();
-  const notify = useNotifier();
 
   const [statistics, setStatistics] = useState<AdminStatistics | null>(null);
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
@@ -25,7 +36,6 @@ const AdminDashboardContent = () => {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      // Fetch Statistics
       setIsLoadingStats(true);
       setStatsError(null);
       try {
@@ -33,13 +43,12 @@ const AdminDashboardContent = () => {
         setStatistics(statsResponse.data);
       } catch (err: any) {
         console.error("Erro ao buscar estatísticas do admin:", err);
-        setStatsError(err.response?.data?.error || "Falha ao carregar estatísticas.");
-        // notify.error("Falha ao carregar estatísticas do dashboard.");
+        const apiError = err.response?.data?.error || t('common:unknown_error');
+        setStatsError(t('admin.error_loading_statistics', { message: apiError }));
       } finally {
         setIsLoadingStats(false);
       }
 
-      // Fetch Recent Activity
       setIsLoadingActivity(true);
       setActivityError(null);
       try {
@@ -47,21 +56,21 @@ const AdminDashboardContent = () => {
         setRecentActivity(activityResponse.data || []);
       } catch (err: any) {
         console.error("Erro ao buscar atividade recente:", err);
-        setActivityError(err.response?.data?.error || "Falha ao carregar atividade recente.");
-        // notify.error("Falha ao carregar atividade recente.");
+        const apiError = err.response?.data?.error || t('common:unknown_error');
+        setActivityError(t('admin.error_loading_activities', { message: apiError }));
       } finally {
         setIsLoadingActivity(false);
       }
     };
 
-    if (user) { // Garante que o usuário (admin) está carregado/autenticado
+    if (user) {
       fetchDashboardData();
     }
-  }, [user, notify]); // Adicionado notify, embora não usado diretamente no fetch, é boa prática se fosse
+  }, [user, t]); // Adicionado t como dependência para as mensagens de erro
 
   const formatTimestamp = (timestamp: string) => {
     try {
-      return new Date(timestamp).toLocaleString('pt-BR', {
+      return new Date(timestamp).toLocaleString(t('common:locale_date_time_format') || 'pt-BR', { // Usar locale para formatação
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -69,59 +78,62 @@ const AdminDashboardContent = () => {
         minute: '2-digit',
       });
     } catch (e) {
-      return timestamp; // Retorna o original se houver erro de formatação
+      return timestamp;
     }
   };
 
+  const pageTitle = t('admin.page_title');
+  const appName = t('common:app_name');
+
   return (
-    <AdminLayout title="Dashboard - Admin Phoenix GRC">
+    <AdminLayout title={`${pageTitle} - ${appName}`}>
+      <Head>
+        <title>{`${pageTitle} - ${appName}`}</title>
+      </Head>
       <div className="container mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-6">
-          Dashboard Administrativo
+          {t('admin.header')}
         </h1>
         <p className="text-gray-600 dark:text-gray-300 mb-8">
-          Bem-vindo ao painel de administração do Phoenix GRC, {user?.name || user?.email}.
+          {t('admin.welcome_message', { userName: user?.name || user?.email || t('common:guest_user') })}
         </p>
 
-        {/* Cards de Estatísticas */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard
-            title="Usuários Ativos"
+            title={t('admin.stats_active_users')}
             value={statistics?.active_users_count ?? '-'}
             isLoading={isLoadingStats}
-            error={statsError && !statistics?.active_users_count ? "Erro" : null} // Mostrar erro no card se a stat específica falhou
+            error={statsError && statistics?.active_users_count === undefined ? t('common:error_loading_specific') : null}
           />
           <StatCard
-            title="Riscos Totais"
+            title={t('admin.stats_total_risks')}
             value={statistics?.total_risks_count ?? '-'}
             isLoading={isLoadingStats}
-            error={statsError && !statistics?.total_risks_count ? "Erro" : null}
+            error={statsError && statistics?.total_risks_count === undefined ? t('common:error_loading_specific') : null}
           />
           <StatCard
-            title="Frameworks Ativos"
+            title={t('admin.stats_active_frameworks')}
             value={statistics?.active_frameworks_count ?? '-'}
             isLoading={isLoadingStats}
-            error={statsError && !statistics?.active_frameworks_count ? "Erro" : null}
+            error={statsError && statistics?.active_frameworks_count === undefined ? t('common:error_loading_specific') : null}
           />
           <StatCard
-            title="Vulnerabilidades Abertas"
+            title={t('admin.stats_open_vulnerabilities')}
             value={statistics?.open_vulnerabilities_count ?? '-'}
             isLoading={isLoadingStats}
-            error={statsError && !statistics?.open_vulnerabilities_count ? "Erro" : null}
+            error={statsError && statistics?.open_vulnerabilities_count === undefined ? t('common:error_loading_specific') : null}
           />
         </div>
-        {statsError && !statistics && ( // Erro geral para o bloco de estatísticas se tudo falhar
-             <p className="text-sm text-red-500 dark:text-red-400 mb-6 text-center">Não foi possível carregar as estatísticas: {statsError}</p>
+        {statsError && !statistics && (
+             <p className="text-sm text-red-500 dark:text-red-400 mb-6 text-center">{statsError}</p>
         )}
 
-
-        {/* Atividade Recente */}
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-700 dark:text-white mb-4">Atividade Recente</h2>
-          {isLoadingActivity && <p className="text-gray-500 dark:text-gray-400">Carregando atividades...</p>}
-          {activityError && <p className="text-red-500 dark:text-red-400">Erro ao carregar atividades: {activityError}</p>}
+          <h2 className="text-xl font-semibold text-gray-700 dark:text-white mb-4">{t('admin.recent_activity_header')}</h2>
+          {isLoadingActivity && <p className="text-gray-500 dark:text-gray-400">{t('admin.loading_activities')}</p>}
+          {activityError && <p className="text-red-500 dark:text-red-400">{activityError}</p>}
           {!isLoadingActivity && !activityError && recentActivity.length === 0 && (
-            <p className="text-gray-500 dark:text-gray-400">Nenhuma atividade recente encontrada.</p>
+            <p className="text-gray-500 dark:text-gray-400">{t('admin.no_recent_activity')}</p>
           )}
           {!isLoadingActivity && !activityError && recentActivity.length > 0 && (
             <ul className="space-y-4">
@@ -139,7 +151,7 @@ const AdminDashboardContent = () => {
                   {activity.target_link && (
                     <Link href={activity.target_link} legacyBehavior>
                       <a className="text-sm text-indigo-500 hover:underline dark:text-indigo-300 mt-1 inline-block">
-                        Ver detalhes
+                        {t('admin.view_details_link')}
                       </a>
                     </Link>
                   )}
