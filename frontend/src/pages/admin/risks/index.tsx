@@ -3,18 +3,27 @@ import WithAuth from '@/components/auth/WithAuth';
 import Head from 'next/head';
 import Link from 'next/link';
 import ApprovalDecisionModal from '@/components/risks/ApprovalDecisionModal';
-import RiskBulkUploadModal from '@/components/risks/RiskBulkUploadModal'; // Importar o modal de upload
+import RiskBulkUploadModal from '@/components/risks/RiskBulkUploadModal';
+import PaginationControls from '@/components/common/PaginationControls';
+import { useNotifier } from '@/hooks/useNotifier';
+import { useAuth } from '@/contexts/AuthContext';
+import { useEffect, useState, useCallback } from 'react';
+import apiClient from '@/lib/axios';
+import { useDebounce } from '@/hooks/useDebounce'; // Supondo que este hook exista
 
-import { useEffect, useState, useCallback } from 'react'; // Adicionado useCallback
-import apiClient from '@/lib/axios'; // Ajuste o path se necessário
-import { useAuth } from '@/contexts/AuthContext'; // Para verificar role do usuário
+// Tipos
+type RiskStatusFilter = "aberto" | "em_andamento" | "mitigado" | "aceito" | "";
+type RiskImpactFilter = "Baixo" | "Médio" | "Alto" | "Crítico" | "";
+type RiskProbabilityFilter = "Baixo" | "Médio" | "Alto" | "Crítico" | "";
+type RiskCategoryFilter = "tecnologico" | "operacional" | "legal" | "";
+type SortOrder = "asc" | "desc";
 
-// Tipos do backend (idealmente compartilhados ou gerados)
-type RiskStatus = "aberto" | "em_andamento" | "mitigado" | "aceito";
-type RiskImpact = "Baixo" | "Médio" | "Alto" | "Crítico";
-type RiskProbability = "Baixo" | "Médio" | "Alto" | "Crítico";
+interface UserLookup {
+    id: string;
+    name: string;
+}
 
-interface RiskOwner { // Supondo que o preload de Owner retorne pelo menos isso
+interface RiskOwner {
     id: string;
     name: string;
     email: string;
@@ -25,24 +34,21 @@ interface Risk {
   title: string;
   description: string;
   category: string;
-  impact: RiskImpact;
-  probability: RiskProbability;
-  status: RiskStatus;
+  impact: RiskImpactFilter | string;
+  probability: RiskProbabilityFilter | string;
+  status: RiskStatusFilter | string;
   owner_id: string;
-  owner?: RiskOwner; // GORM Preload pode popular isso
+  owner?: RiskOwner;
   created_at: string;
   updated_at: string;
-  hasPendingApproval?: boolean; // Novo campo para UI
+  hasPendingApproval?: boolean;
 }
 
-// Adicionar tipo para ApprovalWorkflow (simplificado)
 interface ApprovalWorkflow {
   id: string;
   risk_id: string;
-  status: string; // "pendente", "aprovado", "rejeitado"
-  // Outros campos se necessário para a lógica de exibição
+  status: string;
 }
-
 
 interface PaginatedRisksResponse {
   items: Risk[];
@@ -53,42 +59,88 @@ interface PaginatedRisksResponse {
 }
 
 const RisksPageContent = () => {
+  const notify = useNotifier();
+  const { user } = useAuth();
+
   const [risks, setRisks] = useState<Risk[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // Erro principal da busca
 
+  // Paginação
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10); // Pode ser configurável
+  const [pageSize, setPageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
-  const { user } = useAuth(); // Para verificar a role do usuário
 
+  // Filtros
+  const [filterCategory, setFilterCategory] = useState<RiskCategoryFilter>("");
+  const [filterImpact, setFilterImpact] = useState<RiskImpactFilter>("");
+  const [filterProbability, setFilterProbability] = useState<RiskProbabilityFilter>("");
+  const [filterStatus, setFilterStatus] = useState<RiskStatusFilter>("");
+  const [filterOwnerId, setFilterOwnerId] = useState<string>("");
+  const [searchTermTitle, setSearchTermTitle] = useState<string>("");
+  const debouncedSearchTitle = useDebounce(searchTermTitle, 500);
+  const [ownersForFilter, setOwnersForFilter] = useState<UserLookup[]>([]);
+  const [isLoadingOwners, setIsLoadingOwners] = useState(false);
+
+  // Ordenação
+  const [sortBy, setSortBy] = useState<string>('created_at');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+  // Modais
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [selectedRiskForDecision, setSelectedRiskForDecision] = useState<Risk | null>(null);
   const [pendingApprovalWorkflowId, setPendingApprovalWorkflowId] = useState<string | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
-  const [showUploadModal, setShowUploadModal] = useState(false); // Estado para o modal de upload
+  // Buscar proprietários para o filtro
+  useEffect(() => {
+    const fetchOwners = async () => {
+      if (!user) return;
+      setIsLoadingOwners(true);
+      try {
+        const response = await apiClient.get<UserLookup[]>('/users/organization-lookup');
+        setOwnersForFilter(response.data || []);
+      } catch (err) {
+        console.error("Erro ao buscar proprietários para filtro:", err);
+        notify.error("Falha ao carregar lista de proprietários para o filtro.");
+      } finally {
+        setIsLoadingOwners(false);
+      }
+    };
+    fetchOwners();
+  }, [user, notify]);
 
-
-  const fetchRisks = useCallback(async (page: number, size: number) => { // Envolver com useCallback
+  const fetchRisks = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await apiClient.get<PaginatedRisksResponse>('/risks', {
-        params: { page, page_size: size },
-      });
+      const params: any = {
+        page: currentPage,
+        page_size: pageSize,
+        sort_by: sortBy,
+        order: sortOrder,
+      };
+      if (filterCategory) params.category = filterCategory;
+      if (filterImpact) params.impact = filterImpact;
+      if (filterProbability) params.probability = filterProbability;
+      if (filterStatus) params.status = filterStatus;
+      if (filterOwnerId) params.owner_id = filterOwnerId;
+      if (debouncedSearchTitle) params.title_like = debouncedSearchTitle;
 
+      const response = await apiClient.get<PaginatedRisksResponse>('/risks', { params });
+
+      // Processar hasPendingApproval (mantendo lógica N+1 por enquanto)
       const risksData = response.data.items || [];
       const processedRisks = await Promise.all(
         risksData.map(async (risk) => {
-          if (user && risk.owner_id === user.id) {
+          if (user && risk.owner_id === user.id) { // Apenas checa para o usuário logado
             try {
               const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/risks/${risk.id}/approval-history`);
               const pendingApproval = historyResponse.data.find(wf => wf.status === 'pendente');
               return { ...risk, hasPendingApproval: !!pendingApproval };
             } catch (historyErr) {
-              console.error(`Erro ao buscar histórico de aprovação para risco ${risk.id}:`, historyErr);
-              return { ...risk, hasPendingApproval: false }; // Assume não pendente em caso de erro
+              return { ...risk, hasPendingApproval: false };
             }
           }
           return { ...risk, hasPendingApproval: false };
@@ -98,24 +150,60 @@ const RisksPageContent = () => {
       setRisks(processedRisks);
       setTotalItems(response.data.total_items);
       setTotalPages(response.data.total_pages);
-      setCurrentPage(response.data.page);
-      setPageSize(response.data.page_size);
+      // A API retorna a página e page_size, mas vamos confiar nos estados do frontend
+      // setCurrentPage(response.data.page);
+      // setPageSize(response.data.page_size);
 
     } catch (err: any) {
       console.error("Erro ao buscar riscos:", err);
-      setError(err.response?.data?.error || err.message || "Falha ao buscar riscos.");
-      setRisks([]); // Limpar riscos em caso de erro
+      setError(err.response?.data?.error || "Falha ao buscar riscos.");
+      setRisks([]);
+      setTotalItems(0);
+      setTotalPages(0);
     } finally {
       setIsLoading(false);
     }
+  }, [currentPage, pageSize, sortBy, sortOrder, filterCategory, filterImpact, filterProbability, filterStatus, filterOwnerId, debouncedSearchTitle, user]);
+
+  useEffect(() => {
+    fetchRisks();
+  }, [fetchRisks]);
+
+  // Resetar para primeira página ao mudar filtros ou ordenação
+  useEffect(() => {
+    if (currentPage !== 1) {
+        setCurrentPage(1);
+    }
+  }, [filterCategory, filterImpact, filterProbability, filterStatus, filterOwnerId, debouncedSearchTitle, sortBy, sortOrder]);
+
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+  };
+
+  const handleSort = (newSortBy: string) => {
+    if (sortBy === newSortBy) {
+      setSortOrder(prevOrder => prevOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(newSortBy);
+      setSortOrder('asc');
+    }
+  };
+
+  const clearFilters = () => {
+    setFilterCategory("");
+    setFilterImpact("");
+    setFilterProbability("");
+    setFilterStatus("");
+    setFilterOwnerId("");
+    setSearchTermTitle("");
+    setSortBy('created_at');
+    setSortOrder('desc');
+    if (currentPage !== 1) setCurrentPage(1);
   };
 
   const handleOpenDecisionModal = async (risk: Risk) => {
-    // Precisamos do ID do ApprovalWorkflow pendente.
-    // A flag `hasPendingApproval` apenas indica que existe um.
-    // Vamos buscar o histórico e pegar o ID do pendente.
-    // Isso poderia ser otimizado se a API de riscos já trouxesse o ID do workflow pendente.
-    setIsLoading(true); // Usar um loader específico para esta ação seria melhor
+    setIsLoading(true);
     try {
       const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/risks/${risk.id}/approval-history`);
       const pendingWF = historyResponse.data.find(wf => wf.status === 'pendente');
@@ -124,12 +212,11 @@ const RisksPageContent = () => {
         setPendingApprovalWorkflowId(pendingWF.id);
         setShowDecisionModal(true);
       } else {
-        alert("Não foi encontrado um workflow de aprovação pendente para este risco. A lista pode estar desatualizada.");
-        fetchRisks(currentPage, pageSize); // Re-sincronizar
+        notify.info("Não foi encontrado um workflow de aprovação pendente para este risco.");
+        fetchRisks();
       }
     } catch (err) {
-      console.error("Erro ao buscar workflow pendente:", err);
-      alert("Erro ao verificar status de aprovação do risco.");
+      notify.error("Erro ao verificar status de aprovação do risco.");
     } finally {
       setIsLoading(false);
     }
@@ -142,122 +229,167 @@ const RisksPageContent = () => {
   };
 
   const handleDecisionSubmitSuccess = () => {
-    fetchRisks(currentPage, pageSize); // Re-fetch para atualizar status do risco e remover badge/botão
-    // O modal já se fecha no seu próprio onSubmitSuccess
+    fetchRisks();
+    // O modal já se fecha
   };
 
   const handleSubmitForAcceptance = async (riskId: string, riskTitle: string) => {
-    // Idealmente, um estado de loading específico para esta ação
-    // const [isSubmitting, setIsSubmitting] = useState(false);
-    // setIsSubmitting(true);
     if (window.confirm(`Tem certeza que deseja submeter o risco "${riskTitle}" para aceite?`)) {
         try {
             await apiClient.post(`/risks/${riskId}/submit-acceptance`);
-            alert(`Risco "${riskTitle}" submetido para aceite com sucesso.`);
-            // Atualizar a UI: pode ser recarregando os dados ou atualizando o status do risco localmente.
-            // Recarregar é mais simples por enquanto.
-            fetchRisks(currentPage, pageSize);
+            notify.success(`Risco "${riskTitle}" submetido para aceite com sucesso.`);
+            fetchRisks();
         } catch (err: any) {
-            console.error("Erro ao submeter risco para aceite:", err);
-            setError(err.response?.data?.error || err.message || "Falha ao submeter risco para aceite.");
-            // Limpar o erro após um tempo ou quando o usuário interagir novamente
-            setTimeout(() => setError(null), 5000);
-        } finally {
-            // setIsSubmitting(false);
+            notify.error(err.response?.data?.error || "Falha ao submeter risco para aceite.");
         }
-    }
-  };
-
-  useEffect(() => {
-    fetchRisks(currentPage, pageSize);
-  }, [currentPage, pageSize, fetchRisks]); // Adicionar fetchRisks às dependências do useEffect
-
-
-  const handlePreviousPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
-    }
-  };
-
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
     }
   };
 
   const handleDeleteRisk = async (riskId: string, riskTitle: string) => {
     if (window.confirm(`Tem certeza que deseja deletar o risco "${riskTitle}"? Esta ação não pode ser desfeita.`)) {
-      // Idealmente, ter um estado de loading específico para a deleção da linha
-      // Para simplificar, vamos reusar o isLoading geral ou adicionar um novo se necessário.
-      // setIsLoading(true); // Ou um setLoadingDelete(true)
+      setIsLoading(true);
       try {
         await apiClient.delete(`/risks/${riskId}`);
-        alert(`Risco "${riskTitle}" deletado com sucesso.`); // Placeholder para notificação melhor
-        // Re-buscar os riscos para atualizar a lista
-        // Se estiver na última página e ela ficar vazia, ajustar currentPage
+        notify.success(`Risco "${riskTitle}" deletado com sucesso.`);
         if (risks.length === 1 && currentPage > 1) {
-            setCurrentPage(currentPage - 1);
+            setCurrentPage(currentPage - 1); // Trigger fetch via useEffect
         } else {
-            fetchRisks(currentPage, pageSize); // Re-fetch a página atual
+            fetchRisks();
         }
       } catch (err: any) {
-        console.error("Erro ao deletar risco:", err);
-        setError(err.response?.data?.error || err.message || "Falha ao deletar risco.");
+        notify.error(err.response?.data?.error || "Falha ao deletar risco.");
       } finally {
-        // setIsLoading(false); // Ou setLoadingDelete(false)
+        // setIsLoading(false); // fetchRisks() cuidará disso
       }
     }
   };
 
+  const TableHeader: React.FC<{ field: string; label: string }> = ({ field, label }) => (
+    <th scope="col" className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 dark:text-white cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 whitespace-nowrap"
+        onClick={() => handleSort(field)}>
+      {label}
+      {sortBy === field && (sortOrder === 'asc' ? ' ▲' : ' ▼')}
+    </th>
+  );
 
   return (
     <AdminLayout title="Gestão de Riscos - Phoenix GRC">
-      <Head>
-        <title>Gestão de Riscos - Phoenix GRC</title>
-      </Head>
-
+      <Head><title>Gestão de Riscos - Phoenix GRC</title></Head>
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-3">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
-            Gestão de Riscos
-          </h1>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">Gestão de Riscos</h1>
           <div className="flex space-x-3">
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="inline-flex items-center justify-center rounded-md border border-transparent bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
-            >
-              Importar Riscos CSV
+            <button onClick={() => setShowUploadModal(true)}
+              className="inline-flex items-center justify-center rounded-md border border-transparent bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+              Importar CSV
             </button>
             <Link href="/admin/risks/new" legacyBehavior>
               <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
-                Adicionar Novo Risco
+                Novo Risco
               </a>
             </Link>
+          </div>
+        </div>
+
+        {/* Filtros UI */}
+        <div className="my-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg shadow">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4 items-end">
+            <div>
+              <label htmlFor="searchTermTitle" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Título</label>
+              <input type="text" id="searchTermTitle" value={searchTermTitle} onChange={(e) => setSearchTermTitle(e.target.value)}
+                     placeholder="Buscar por título..."
+                     className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"/>
+            </div>
+            <div>
+              <label htmlFor="filterCategory" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Categoria</label>
+              <select id="filterCategory" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value as RiskCategoryFilter)}
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                <option value="">Todas</option>
+                <option value="tecnologico">Tecnológico</option>
+                <option value="operacional">Operacional</option>
+                <option value="legal">Legal</option>
+              </select>
+            </div>
+             <div>
+              <label htmlFor="filterImpact" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Impacto</label>
+              <select id="filterImpact" value={filterImpact} onChange={(e) => setFilterImpact(e.target.value as RiskImpactFilter)}
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                <option value="">Todos</option>
+                <option value="Crítico">Crítico</option>
+                <option value="Alto">Alto</option>
+                <option value="Médio">Médio</option>
+                <option value="Baixo">Baixo</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="filterProbability" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Probabilidade</label>
+              <select id="filterProbability" value={filterProbability} onChange={(e) => setFilterProbability(e.target.value as RiskProbabilityFilter)}
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                <option value="">Todas</option>
+                <option value="Crítico">Crítico</option> {/* Assumindo que probabilidade também pode ser Crítico */}
+                <option value="Alto">Alto</option>
+                <option value="Médio">Médio</option>
+                <option value="Baixo">Baixo</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="filterStatus" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Status</label>
+              <select id="filterStatus" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as RiskStatusFilter)}
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                <option value="">Todos</option>
+                <option value="aberto">Aberto</option>
+                <option value="em_andamento">Em Andamento</option>
+                <option value="mitigado">Mitigado</option>
+                <option value="aceito">Aceito</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="filterOwnerId" className="block text-sm font-medium text-gray-700 dark:text-gray-200">Proprietário</label>
+              <select id="filterOwnerId" value={filterOwnerId} onChange={(e) => setFilterOwnerId(e.target.value)}
+                      disabled={isLoadingOwners}
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:opacity-50">
+                <option value="">Todos</option>
+                {isLoadingOwners && <option value="" disabled>Carregando...</option>}
+                {ownersForFilter.map(owner => (
+                  <option key={owner.id} value={owner.id}>{owner.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <button onClick={clearFilters}
+                      className="w-full inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-100 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                Limpar Filtros
+              </button>
+            </div>
           </div>
         </div>
 
         {isLoading && <p className="text-center text-gray-500 dark:text-gray-400 py-4">Carregando riscos...</p>}
         {error && <p className="text-center text-red-500 py-4">Erro ao carregar riscos: {error}</p>}
 
-        {!isLoading && !error && (
+        {!isLoading && !error && risks.length === 0 && (
+             <div className="text-center py-10">
+                <p className="text-gray-500 dark:text-gray-400">Nenhum risco encontrado com os filtros aplicados.</p>
+            </div>
+        )}
+
+        {!isLoading && !error && risks.length > 0 && (
           <>
             <div className="mt-8 flow-root">
-              {/* ... (código da tabela e paginação existente) ... */}
               <div className="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
                 <div className="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
                   <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
                     <table className="min-w-full divide-y divide-gray-300 dark:divide-gray-700">
                       <thead className="bg-gray-50 dark:bg-gray-700">
                         <tr>
-                          <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 dark:text-white sm:pl-6">Título</th>
-                          <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Categoria</th>
-                          <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Impacto</th>
-                          <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Probabilidade</th>
-                          <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Status</th>
-                          <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Proprietário</th>
-                          <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                            <span className="sr-only">Ações</span>
-                          </th>
+                          <TableHeader field="title" label="Título" />
+                          <TableHeader field="category" label="Categoria" />
+                          <TableHeader field="impact" label="Impacto" />
+                          <TableHeader field="probability" label="Probabilidade" />
+                          <TableHeader field="status" label="Status" />
+                          <TableHeader field="owner.name" label="Proprietário" />
+                          {/* Ordenar por owner.name pode precisar de ajuste no backend se owner for uma relação */}
+                          <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6"><span className="sr-only">Ações</span></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 dark:divide-gray-600 bg-white dark:bg-gray-800">
@@ -266,16 +398,14 @@ const RisksPageContent = () => {
                             <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 dark:text-white sm:pl-6">
                               {risk.title}
                               {risk.hasPendingApproval && (
-                                <span className="ml-2 px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-500 text-white animate-pulse" title="Aprovação Pendente">
+                                <span className="ml-2 px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-700 dark:text-yellow-100 animate-pulse" title="Aprovação Pendente">
                                   Pendente
                                 </span>
                               )}
                               {risk.hasPendingApproval && user?.id === risk.owner_id && (
-                                <button
-                                  onClick={() => handleOpenDecisionModal(risk)}
+                                <button onClick={() => handleOpenDecisionModal(risk)}
                                   className="ml-2 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full hover:bg-blue-600"
-                                  title="Tomar Decisão sobre Aceite"
-                                >
+                                  title="Tomar Decisão sobre Aceite">
                                   Decidir
                                 </button>
                               )}
@@ -297,65 +427,32 @@ const RisksPageContent = () => {
                             <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{risk.owner?.name || risk.owner_id}</td>
                             <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6 space-x-2">
                               <Link href={`/admin/risks/edit/${risk.id}`} legacyBehavior><a className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200">Editar</a></Link>
-                              <button
-                                onClick={() => handleDeleteRisk(risk.id, risk.title)}
+                              <button onClick={() => handleDeleteRisk(risk.id, risk.title)}
                                 className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-200"
-                                disabled={isLoading}
-                              >
+                                disabled={isLoading}>
                                 Deletar
                               </button>
                               {(user?.role === 'admin' || user?.role === 'manager') && risk.status !== 'aceito' && risk.status !== 'mitigado' && !risk.hasPendingApproval && (
-                                <button
-                                  onClick={() => handleSubmitForAcceptance(risk.id, risk.title)}
+                                <button onClick={() => handleSubmitForAcceptance(risk.id, risk.title)}
                                   className="ml-2 text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-200"
-                                  disabled={isLoading}
-                                >
+                                  disabled={isLoading}>
                                   Submeter p/ Aceite
                                 </button>
                               )}
                             </td>
                           </tr>
                         ))}
-                        {risks.length === 0 && (
-                            <tr>
-                                <td colSpan={7} className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
-                                    Nenhum risco encontrado.
-                                </td>
-                            </tr>
-                        )}
                       </tbody>
                     </table>
                   </div>
-                  {totalPages > 0 && (
-                    <nav
-                      className="flex items-center justify-between border-t border-gray-200 bg-white dark:bg-gray-800 px-4 py-3 sm:px-6"
-                      aria-label="Paginação"
-                    >
-                      <div className="hidden sm:block">
-                        <p className="text-sm text-gray-700 dark:text-gray-300">
-                          Mostrando <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span>
-                          {' '}a <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span>
-                          {' '}de <span className="font-medium">{totalItems}</span> resultados
-                        </p>
-                      </div>
-                      <div className="flex flex-1 justify-between sm:justify-end">
-                        <button
-                          onClick={handlePreviousPage}
-                          disabled={currentPage <= 1 || isLoading}
-                          className="relative inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                        >
-                          Anterior
-                        </button>
-                        <button
-                          onClick={handleNextPage}
-                          disabled={currentPage >= totalPages || isLoading}
-                          className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                        >
-                          Próxima
-                        </button>
-                      </div>
-                    </nav>
-                  )}
+                  <PaginationControls
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={totalItems}
+                    pageSize={pageSize}
+                    onPageChange={handlePageChange}
+                    isLoading={isLoading}
+                  />
                 </div>
               </div>
             </div>
@@ -367,18 +464,17 @@ const RisksPageContent = () => {
             riskId={selectedRiskForDecision.id}
             riskTitle={selectedRiskForDecision.title}
             approvalId={pendingApprovalWorkflowId}
-            currentApproverId={selectedRiskForDecision.owner_id} // O backend valida se o user logado é este
+            currentApproverId={selectedRiskForDecision.owner_id}
             onClose={handleCloseDecisionModal}
             onSubmitSuccess={handleDecisionSubmitSuccess}
         />
       )}
-
       <RiskBulkUploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadSuccess={() => {
-          fetchRisks(1, pageSize); // Voltar para a primeira página após upload ou manter a atual? Por ora, primeira.
-          setShowUploadModal(false); // Fechar modal após o upload ser processado no componente filho
+          clearFilters(); // Limpar filtros e ir para a primeira página para ver os novos riscos importados
+          // fetchRisks será chamado pelo useEffect devido à mudança de currentPage/filtros
         }}
       />
     </AdminLayout>
