@@ -3,18 +3,30 @@ import WithAuth from '@/components/auth/WithAuth';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import VulnerabilityForm from '@/components/vulnerabilities/VulnerabilityForm'; // Importar
+import VulnerabilityForm from '@/components/vulnerabilities/VulnerabilityForm';
 import { useEffect, useState } from 'react';
-import apiClient from '@/lib/axios'; // Ajuste o path
-import {
-    Vulnerability,
-    VulnerabilitySeverity, // Embora não usado diretamente, Vulnerability usa
-    VulnerabilityStatus  // Embora não usado diretamente, Vulnerability usa
-} from '@/types';
+import apiClient from '@/lib/axios';
+import { Vulnerability, VulnerabilitySeverity, VulnerabilityStatus } from '@/types';
+import { useTranslation } from 'next-i18next';
+import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
+import type { GetServerSideProps, InferGetServerSidePropsType } from 'next';
 
-// Definições de tipos locais removidas
+type Props = {
+  // Props from getServerSideProps
+}
 
-const EditVulnerabilityPageContent = () => {
+export const getServerSideProps: GetServerSideProps<Props> = async ({ locale, params }) => {
+  // const { vulnId } = params; // vulnId está disponível aqui se necessário para pré-carregar dados
+  // Mas vamos manter a busca de dados no lado do cliente por enquanto para consistência com outras páginas de edição.
+  return {
+    props: {
+      ...(await serverSideTranslations(locale ?? 'pt', ['common', 'vulnerabilities'])),
+    },
+  };
+};
+
+const EditVulnerabilityPageContent = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
+  const { t } = useTranslation(['vulnerabilities', 'common']);
   const router = useRouter();
   const { vulnId } = router.query;
   const [initialData, setInitialData] = useState<Vulnerability | null>(null);
@@ -31,46 +43,48 @@ const EditVulnerabilityPageContent = () => {
         })
         .catch(err => {
           console.error("Erro ao buscar dados da vulnerabilidade:", err);
-          setError(err.response?.data?.error || err.message || "Falha ao buscar dados da vulnerabilidade.");
+          setError(err.response?.data?.error || err.message || t('common:error_loading_data_entity', {entity: t('common:vulnerability_singular')}));
         })
         .finally(() => setIsLoading(false));
-    } else if (vulnId) {
-        setError("ID da Vulnerabilidade inválido.");
+    } else if (router.isReady && !vulnId) { // Checar router.isReady antes de assumir que vulnId está ausente
+        setError(t('common:error_invalid_id', {entity: t('common:vulnerability_singular')}));
         setIsLoading(false);
     }
-  }, [vulnId]);
+  }, [vulnId, router.isReady, t]);
 
   const handleSuccess = () => {
-    // Notificação de sucesso agora é tratada pelo VulnerabilityForm
-    // alert('Vulnerabilidade atualizada com sucesso!'); // Removido
     router.push('/admin/vulnerabilities');
   };
 
-  if (isLoading && !initialData) {
-    return <AdminLayout title="Carregando..."><div className="text-center p-10">Carregando dados da vulnerabilidade...</div></AdminLayout>;
+  const pageTitleBase = t('form.edit_page_title');
+  const appName = t('common:app_name');
+  const dynamicPageTitle = initialData?.title ? `${pageTitleBase}: ${initialData.title} - ${appName}` : `${pageTitleBase} - ${appName}`;
+
+  if (isLoading && !initialData && !error) { // Mostrar loading apenas se não houver erro ainda e não houver dados
+    return <AdminLayout title={t('common:loading_data')}><div className="text-center p-10">{t('common:loading_data_entity', {entity: t('common:vulnerability_singular')})}</div></AdminLayout>;
   }
 
   if (error) {
-    return <AdminLayout title="Erro"><div className="text-center p-10 text-red-500">Erro: {error}</div></AdminLayout>;
+    return <AdminLayout title={t('common:error_page_title')}><div className="text-center p-10 text-red-500">{error}</div></AdminLayout>;
   }
 
-  if (!initialData && !isLoading) {
-     return <AdminLayout title="Vulnerabilidade não encontrada"><div className="text-center p-10">Vulnerabilidade não encontrada.</div></AdminLayout>;
+  if (!initialData && !isLoading) { // Se não está carregando, não houve erro, mas não há dados
+     return <AdminLayout title={t('common:error_not_found_title')}><div className="text-center p-10">{t('common:error_entity_not_found', {entity: t('common:vulnerability_singular')})}</div></AdminLayout>;
   }
 
   return (
-    <AdminLayout title={`Editar Vulnerabilidade - Phoenix GRC`}>
+    <AdminLayout title={dynamicPageTitle}>
       <Head>
-        <title>Editar Vulnerabilidade {initialData?.title || ''} - Phoenix GRC</title>
+        <title>{dynamicPageTitle}</title>
       </Head>
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
-            Editar Vulnerabilidade: <span className="text-indigo-600 dark:text-indigo-400">{initialData?.title}</span>
+            {t('form.edit_page_header_prefix')} <span className="text-indigo-600 dark:text-indigo-400">{initialData?.title}</span>
           </h1>
           <Link href="/admin/vulnerabilities" legacyBehavior>
             <a className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-200">
-              &larr; Voltar para Lista de Vulnerabilidades
+              &larr; {t('form.back_to_list_link')}
             </a>
           </Link>
         </div>
@@ -83,8 +97,8 @@ const EditVulnerabilityPageContent = () => {
                 title: initialData.title,
                 description: initialData.description,
                 cve_id: initialData.cve_id || '',
-                severity: initialData.severity,
-                status: initialData.status,
+                severity: initialData.severity as VulnerabilitySeverity,
+                status: initialData.status as VulnerabilityStatus,
                 asset_affected: initialData.asset_affected,
               }}
               isEditing={true}
