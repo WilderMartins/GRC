@@ -2,18 +2,34 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
-import apiClient from '@/lib/axios'; // Ajuste o path se necessário
-import { useNotifier } from '@/hooks/useNotifier'; // Importar o hook
+import apiClient from '@/lib/axios';
+import { useNotifier } from '@/hooks/useNotifier';
+import { useTranslation } from 'next-i18next';
+import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
+import type { GetStaticProps, InferGetStaticPropsType } from 'next'; // getStaticProps para páginas sem data dinâmica na URL
 
-export default function ResetPasswordPage() {
+type Props = {
+  // Props from getStaticProps
+}
+
+// Usar getStaticProps pois o token é lido no lado do cliente.
+// Se o token precisasse ser validado no servidor antes de renderizar, seria getServerSideProps.
+export const getStaticProps: GetStaticProps<Props> = async ({ locale }) => ({
+  props: {
+    ...(await serverSideTranslations(locale ?? 'pt', ['common', 'auth'])),
+  },
+});
+
+export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof getStaticProps>) {
+  const { t } = useTranslation(['auth', 'common']);
   const router = useRouter();
   const notify = useNotifier();
   const [token, setToken] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null); // Para erros de validação em tela
-  const [isSuccess, setIsSuccess] = useState(false); // Para controlar o estado do formulário após sucesso
+  const [formError, setFormError] = useState<string | null>(null); // Renomeado de 'error'
+  const [isSuccess, setIsSuccess] = useState(false);
 
   useEffect(() => {
     if (router.isReady) {
@@ -21,38 +37,35 @@ export default function ResetPasswordPage() {
       if (typeof queryToken === 'string' && queryToken) {
         setToken(queryToken);
       } else {
-        setError('Token de redefinição inválido ou não fornecido.');
-        notify.error('Token de redefinição inválido ou não fornecido. Por favor, solicite um novo link de redefinição.');
+        const errMsg = t('reset_password.error_token_invalid_or_missing');
+        setFormError(errMsg);
+        notify.error(errMsg);
       }
     }
-  }, [router.isReady, router.query, notify]);
+  }, [router.isReady, router.query, notify, t]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
-    setError(null); // Limpa erros de validação em tela
+    setFormError(null);
 
     if (!newPassword || !confirmPassword) {
-      setError('Por favor, preencha ambos os campos de senha.');
-      // notify.warn('Por favor, preencha ambos os campos de senha.'); // Pode ser toast também
+      setFormError(t('reset_password.error_passwords_required'));
       setIsLoading(false);
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError('As senhas não conferem.');
-      // notify.warn('As senhas não conferem.');
+      setFormError(t('reset_password.error_passwords_do_not_match'));
       setIsLoading(false);
       return;
     }
     if (!token) {
-      setError('Token de redefinição não encontrado. Solicite um novo link.');
-      // notify.error('Token de redefinição não encontrado. Solicite um novo link.');
+      setFormError(t('reset_password.error_token_invalid_or_missing'));
       setIsLoading(false);
       return;
     }
 
-    // TODO: Adicionar validação de força da senha no frontend (opcional, mas bom UX)
-    // Ex: if (!isPasswordStrong(newPassword)) { setError('Senha fraca...'); setIsLoading(false); return; }
+    // TODO: Adicionar validação de força da senha no frontend (opcional, mas bom UX) e traduzir mensagens
 
     try {
       const response = await apiClient.post('/auth/reset-password', {
@@ -60,8 +73,8 @@ export default function ResetPasswordPage() {
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
-      notify.success(response.data?.message || 'Sua senha foi redefinida com sucesso! Você será redirecionado para o login.');
-      setIsSuccess(true); // Marcar sucesso para desabilitar form e mostrar mensagem
+      notify.success(response.data?.message || t('reset_password.success_message'));
+      setIsSuccess(true);
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => {
@@ -69,8 +82,7 @@ export default function ResetPasswordPage() {
       }, 3000);
     } catch (err: any) {
       console.error('Erro ao redefinir senha:', err);
-      notify.error(err.response?.data?.error || 'Ocorreu um erro ao redefinir sua senha. O link pode ter expirado ou ser inválido.');
-      // setError(err.response?.data?.error || 'Ocorreu um erro...'); // Para exibir em tela se necessário
+      notify.error(err.response?.data?.error || t('common:unknown_error'));
     } finally {
       setIsLoading(false);
     }
@@ -79,52 +91,50 @@ export default function ResetPasswordPage() {
   return (
     <>
       <Head>
-        <title>Redefinir Senha - Phoenix GRC</title>
+        <title>{t('reset_password.title')} - {t('common:app_name')}</title>
       </Head>
       <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 dark:bg-gray-900">
         <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-xl dark:bg-gray-800">
           <div className="mb-8 text-center">
-            {/* Placeholder para Logo */}
             <div className="mb-4 inline-block rounded-full bg-indigo-500 p-3 text-white">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-8 w-8">
-                    <path d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm4.28 13.43a.75.75 0 0 1-.976.02l-3.573-2.68a.75.75 0 0 0-.976 0l-3.573 2.68a.75.75 0 0 1-.976-.02l-1.141-.856a.75.75 0 0 1 .02-1.263l2.68-2.01a.75.75 0 0 0 0-1.264l-2.68-2.01a.75.75 0 0 1-.02-1.263l1.141-.856a.75.75 0 0 1 .976.02l3.573 2.68a.75.75 0 0 0 .976 0l3.573 2.68a.75.75 0 0 1 .976.02l1.141.856a.75.75 0 0 1-.02 1.263l-2.68 2.01a.75.75 0 0 0 0 1.264l2.68 2.01a.75.75 0 0 1 .02 1.263l-1.141-.856Z" />
+                    <path d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm4.28 13.43a.75.75 0 0 1-.976.02l-3.573-2.68a.75.75 0 0 0-.976 0l-3.573 2.68a.75.75 0 0 1-.976-.02l-1.141-.856a.75.75 0 0 1 .02-1.263l2.68-2.01a.75.75 0 0 0 0-1.264l-2.68-2.01a.75.75 0 0 1-.02-1.263l1.141-.856a.75.75 0 0 1 .976.02l3.573 2.68a.75.75 0 0 0 .976 0l3.573 2.68a.75.75 0 0 1 .976.02l1.141.856a.75.75 0 0 1-.02 1.263l-2.68 2.01a.75.75 0 0 0 0-1.264l2.68 2.01a.75.75 0 0 1 .02 1.263l-1.141-.856Z" />
                 </svg>
             </div>
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Redefinir Sua Senha</h1>
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-white">{t('reset_password.title')}</h1>
           </div>
 
-          {error && ( // Mostrar erro de validação em tela
+          {formError && !isSuccess && (
             <div className="mb-4 rounded-md bg-red-50 p-3">
-              <p className="text-sm font-medium text-red-700">{error}</p>
-              {error.includes("Token de redefinição inválido ou não fornecido") && (
+              <p className="text-sm font-medium text-red-700">{formError}</p>
+              {formError.includes(t('reset_password.error_token_invalid_or_missing_check', 'Token de redefinição inválido ou não fornecido')) && (
                 <p className="mt-2 text-sm">
                   <Link href="/auth/forgot-password">
                     <span className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300">
-                      Solicitar novo link de redefinição
+                      {t('common:request_new_link', 'Solicitar novo link de redefinição')}
                     </span>
                   </Link>
                 </p>
               )}
             </div>
           )}
-          {/* Mensagem de sucesso será via toast, mas podemos ter uma mensagem em tela se isSuccess for true */}
           {isSuccess && (
             <div className="mb-4 rounded-md bg-green-50 p-3">
-              <p className="text-sm font-medium text-green-700">Senha redefinida! Você será redirecionado para o login.</p>
+              <p className="text-sm font-medium text-green-700">{t('reset_password.success_message')}</p>
             </div>
           )}
 
-          {!token && !error && !isSuccess && (
+          {!token && !formError && !isSuccess && (
              <div className="text-center py-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Verificando token...</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t('reset_password.token_verifying')}</p>
              </div>
           )}
 
-          {token && !isSuccess && ( // Mostrar formulário apenas se token existir e não houver sucesso
+          {token && !isSuccess && (
             <form className="space-y-6" onSubmit={handleSubmit}>
               <div>
                 <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-                  Nova Senha
+                  {t('reset_password.new_password_label')}
                 </label>
                 <input
                   id="newPassword"
@@ -134,13 +144,13 @@ export default function ResetPasswordPage() {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
-                  placeholder="Digite sua nova senha"
+                  placeholder={t('reset_password.new_password_placeholder')}
                   disabled={isLoading}
                 />
               </div>
               <div>
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-                  Confirmar Nova Senha
+                  {t('reset_password.confirm_password_label')}
                 </label>
                 <input
                   id="confirmPassword"
@@ -150,7 +160,7 @@ export default function ResetPasswordPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
-                  placeholder="Confirme sua nova senha"
+                  placeholder={t('reset_password.confirm_password_placeholder')}
                   disabled={isLoading}
                 />
               </div>
@@ -166,7 +176,7 @@ export default function ResetPasswordPage() {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                   ) : (
-                    'Redefinir Senha'
+                    t('reset_password.submit_button')
                   )}
                 </button>
               </div>
@@ -175,7 +185,7 @@ export default function ResetPasswordPage() {
           <div className="mt-6 text-center text-sm">
             <Link href="/auth/login">
               <span className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300">
-                Voltar para Login
+                {t('reset_password.back_to_login_link')}
               </span>
             </Link>
           </div>
