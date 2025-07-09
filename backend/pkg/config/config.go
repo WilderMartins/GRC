@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings" // Adicionado para HasPrefix e TrimPrefix
 	"time"
 
 	"github.com/joho/godotenv"
@@ -27,6 +28,9 @@ type AppConfig struct {
 	AWSRegion           string
 	AWSSESEmailSender   string
 	TOTPIssuerName      string
+	AWSS3Bucket         string // Novo para S3
+	FileStorageProvider string // "gcs" ou "s3"
+	FeatureToggles      map[string]bool
 	// Adicionar outras configurações aqui
 }
 
@@ -64,7 +68,27 @@ func LoadConfig() {
 	Cfg.AWSRegion = getEnv("AWS_REGION", "")
 	Cfg.AWSSESEmailSender = getEnv("AWS_SES_EMAIL_SENDER", "")
 	Cfg.TOTPIssuerName = getEnv("TOTP_ISSUER_NAME", "PhoenixGRC")
+	Cfg.AWSS3Bucket = getEnv("AWS_S3_BUCKET", "")
+	Cfg.FileStorageProvider = strings.ToLower(getEnv("FILE_STORAGE_PROVIDER", "gcs")) // Default para GCS
 
+	// Carregar Feature Toggles
+	Cfg.FeatureToggles = make(map[string]bool)
+	const featurePrefix = "FEATURE_"
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, featurePrefix) {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				featureName := strings.TrimPrefix(parts[0], featurePrefix)
+				featureValue, err := strconv.ParseBool(parts[1])
+				if err == nil {
+					Cfg.FeatureToggles[featureName] = featureValue
+					log.Printf("Feature Toggle carregado: %s = %t", featureName, featureValue)
+				} else {
+					log.Printf("Aviso: Valor inválido para Feature Toggle %s: %s (esperado true/false)", featureName, parts[1])
+				}
+			}
+		}
+	}
 
 	log.Printf("Configuração carregada para o ambiente: %s", Cfg.Environment)
 }

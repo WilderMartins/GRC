@@ -6,6 +6,7 @@ import (
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	"phoenixgrc/backend/internal/riskutils" // Import riskutils package
+	"phoenixgrc/backend/pkg/features"       // Import features package
 
 	"phoenixgrc/backend/internal/notifications" // Import notifications package
 	"strings"                                   // Para CSV
@@ -126,6 +127,10 @@ func GetRiskHandler(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()})
 		return
+	}
+
+	if features.IsEnabled("LOG_DETALHADO_RISCO") {
+		log.Printf("FEATURE_LOG_DETALHADO_RISCO: Detalhes do risco %s solicitados: %+v", riskID, risk)
 	}
 
 	c.JSON(http.StatusOK, risk)
@@ -811,11 +816,10 @@ func ListRiskStakeholdersHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, stakeholders) // stakeholders will only contain the selected fields
 }
 
+// --- Bulk Upload Handler ---
 
-// GetRiskApprovalHistoryHandler lists all approval workflows for a specific risk.
-func GetRiskApprovalHistoryHandler(c *gin.Context) {
-	riskIDStr := c.Param("riskId")
-	riskID, err := uuid.Parse(riskIDStr)
+// BulkUploadErrorDetail provides details about an error in a specific row during bulk upload.
+type BulkUploadErrorDetail struct {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid risk ID format"})
 		return

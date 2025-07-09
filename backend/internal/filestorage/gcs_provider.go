@@ -16,15 +16,8 @@ import (
 var (
 	gcsClient     *storage.Client
 	gcsBucketName string
-	gcsProjectID  string
+	// gcsProjectID  string // gcsProjectID não é usado diretamente pelo GCSStorageProvider struct, mas sim na inicialização.
 )
-
-// FileStorageProvider defines an interface for file storage operations.
-// This allows for easier testing and potential swapping of storage providers.
-type FileStorageProvider interface {
-	UploadFile(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (fileURL string, err error)
-	// DeleteFile(ctx context.Context, fileURL string) error // Opcional
-}
 
 // GCSStorageProvider implements FileStorageProvider using Google Cloud Storage.
 type GCSStorageProvider struct {
@@ -115,27 +108,4 @@ func (g *GCSStorageProvider) DeleteFile(ctx context.Context, fileURL string) err
 	return fmt.Errorf("GCS DeleteFile not yet implemented")
 }
 
-// Global instance of the file storage provider
-var DefaultFileStorageProvider FileStorageProvider
-
-// InitFileStorage initializes the default file storage provider based on configuration.
-// Por enquanto, apenas GCS. No futuro, poderia ler uma config para escolher entre GCS, S3, local, etc.
-func InitFileStorage() error {
-	// Tentar inicializar GCS
-	gcsProvider, err := InitializeGCSProvider()
-	if err != nil {
-		// Se a inicialização do GCS falhar mas não for fatal (ex: credenciais não configuradas mas não queremos que a app pare)
-		// podemos logar o erro e continuar sem um provedor de arquivos funcional.
-		log.Printf("Could not initialize GCS provider: %v. File uploads will not work.", err)
-		// DefaultFileStorageProvider permanecerá nil. Os handlers precisarão verificar isso.
-		return nil // Não retornar erro aqui para permitir que a app inicie mesmo sem GCS configurado.
-	}
-
-	if gcsProvider != nil {
-		DefaultFileStorageProvider = gcsProvider
-		log.Println("Default file storage provider set to GCS.")
-	} else {
-		log.Println("No file storage provider initialized (GCS config missing or invalid). File uploads will be disabled.")
-	}
-	return nil
-}
+// Note: DefaultFileStorageProvider and InitFileStorage are now in filestorage.go
