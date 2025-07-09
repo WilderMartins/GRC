@@ -6,23 +6,9 @@ import apiClient from '@/lib/axios';
 import Link from 'next/link';
 import { useNotifier } from '@/hooks/useNotifier';
 import StatCard from '@/components/common/StatCard'; // Importar o StatCard comum
+import { AdminStatistics, ActivityLog } from '@/types';
 
-interface AdminStatistics {
-  active_users_count?: number;
-  total_risks_count?: number;
-  active_frameworks_count?: number;
-  open_vulnerabilities_count?: number;
-}
-
-interface ActivityLog {
-  id: string;
-  timestamp: string;
-  actor_name: string;
-  action_description: string;
-  target_link?: string;
-}
-
-// Definição local do StatCard removida
+// Definições de tipos locais removidas
 
 const AdminDashboardContent = () => {
   const { user } = useAuth();

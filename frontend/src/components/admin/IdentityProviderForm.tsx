@@ -1,31 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import apiClient from '@/lib/axios'; // Ajuste o path
 import { useAuth } from '@/contexts/AuthContext'; // Para obter organization_id
+import {
+    IdentityProvider,
+    IdentityProviderType,
+    // AttributeMapping, // Não usado diretamente, mas IdentityProvider pode conter
+    // IdentityProviderConfig // Não usado diretamente
+} from '@/types';
 
-// Tipos (devem ser consistentes com os usados na página de listagem e no backend)
-type IdentityProviderType = 'saml' | 'oauth2_google' | 'oauth2_github' | '';
+// Definições de tipos locais (IdentityProviderType, IdentityProviderForForm) removidas
 
+// Mantendo IdentityProviderFormData para o estado interno do formulário,
+// pois ele lida com os JSONs como strings para os textareas.
 interface IdentityProviderFormData {
   name: string;
-  provider_type: IdentityProviderType;
+  provider_type: IdentityProviderType; // Usar o tipo importado
   is_active: boolean;
-  config_json_string: string; // Para o textarea, será parseado/stringificado
-  attribute_mapping_json_string: string; // Para o textarea
+  config_json_string: string;
+  attribute_mapping_json_string: string;
 }
-
-// Tipo para o IdP como ele é no estado da página de listagem (com JSONs parseados)
-interface IdentityProviderForForm {
-    id?: string;
-    name: string;
-    provider_type: IdentityProviderType;
-    is_active: boolean;
-    config_json_parsed: Record<string, any>;
-    attribute_mapping_json_parsed?: Record<string, any>;
-}
-
 
 interface IdentityProviderFormProps {
-  initialData?: IdentityProviderForForm;
+  initialData?: IdentityProvider; // Agora espera o tipo IdentityProvider completo de @/types
   isEditing?: boolean;
   onClose: () => void;
   onSubmitSuccess: (idpData: any) => void;

@@ -7,29 +7,13 @@ import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/axios';
 import Link from 'next/link'; // Para futuros botões de "Convidar Usuário"
 import PaginationControls from '@/components/common/PaginationControls'; // Importar o componente
+import { User, UserRole, PaginatedResponse } from '@/types';
 
-// Tipos (idealmente de um arquivo compartilhado/gerado)
-type UserRole = "admin" | "manager" | "user";
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-interface PaginatedUsersResponse {
-  items: User[];
-  total_items: number;
-  total_pages: number;
-  page: number;
-  page_size: number;
-}
+// Definições de tipos locais removidas
 
 // --- Componente para o Modal de Edição de Role ---
 interface EditRoleModalProps {
-  userToEdit: User | null;
+  userToEdit: User | null; // Usar User de @/types
   onClose: () => void;
   onSuccess: () => void; // Para re-fetch da lista
   organizationId: string;

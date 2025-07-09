@@ -7,30 +7,15 @@ import apiClient from '@/lib/axios';
 import PaginationControls from '@/components/common/PaginationControls';
 import { useNotifier } from '@/hooks/useNotifier';
 import { useDebounce } from '@/hooks/useDebounce'; // Suposição: um hook de debounce existe ou será criado
+import {
+    Vulnerability,
+    VulnerabilitySeverity,
+    VulnerabilityStatus,
+    PaginatedResponse,
+    SortOrder
+} from '@/types';
 
-// Tipos
-type VulnerabilitySeverity = "Baixo" | "Médio" | "Alto" | "Crítico" | "";
-type VulnerabilityStatus = "descoberta" | "em_correcao" | "corrigida" | "";
-type SortOrder = "asc" | "desc";
-
-interface Vulnerability {
-  id: string;
-  title: string;
-  cve_id?: string;
-  severity: VulnerabilitySeverity | string; // string para acomodar "" do filtro
-  status: VulnerabilityStatus | string; // string para acomodar "" do filtro
-  asset_affected: string;
-  created_at: string;
-  // Adicionar updated_at se quisermos ordenar por ele
-}
-
-interface PaginatedVulnerabilitiesResponse {
-  items: Vulnerability[];
-  total_items: number;
-  total_pages: number;
-  page: number;
-  page_size: number;
-}
+// Definições de tipos locais removidas
 
 const VulnerabilitiesPageContent = () => {
   const notify = useNotifier();

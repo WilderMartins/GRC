@@ -4,35 +4,19 @@ import { useState, useEffect, useCallback } from 'react';
 import apiClient from '@/lib/axios';
 import { useAuth } from '@/contexts/AuthContext';
 import IdentityProviderForm from '@/components/admin/IdentityProviderForm'; // Importar o formulário
+import {
+    IdentityProvider,
+    // IdentityProviderType // IdentityProvider já inclui provider_type, então IdentityProviderType não é diretamente usado aqui.
+                           // Mas o tipo IdentityProvider de @/types usa o enum IdentityProviderType.
+} from '@/types';
 
-// Tipos (idealmente de um arquivo compartilhado ou gerado a partir do backend)
-// Nota: No backend, config_json e attribute_mapping_json são strings.
-// No frontend, podemos querer parseá-los para objetos para uso no formulário ou exibição.
-type IdentityProviderType = 'saml' | 'oauth2_google' | 'oauth2_github';
-
-interface IdentityProviderAPIResponse {
-  id: string; // UUID
-  organization_id: string; // UUID
-  provider_type: IdentityProviderType;
-  name: string;
-  is_active: boolean;
-  config_json: string; // JSON string from backend
-  attribute_mapping_json: string; // JSON string from backend
-  created_at: string;
-  updated_at: string;
-}
-
-// Tipo para uso no estado do frontend, com JSONs parseados
-interface IdentityProvider extends Omit<IdentityProviderAPIResponse, 'config_json' | 'attribute_mapping_json'> {
-    config_json_parsed: Record<string, any>;
-    attribute_mapping_json_parsed?: Record<string, any>;
-}
+// Definições de tipos locais (IdentityProviderType, IdentityProviderAPIResponse, IdentityProvider) removidas
 
 
 // Anteriormente 'IdentityProvidersPage', agora 'IdentityProvidersPageContent' para o HOC
 const IdentityProvidersPageContent = () => {
-  const { user, isLoading: authIsLoading } = useAuth(); // Obter usuário para pegar organization_id e estado de loading do auth
-  const [identityProviders, setIdentityProviders] = useState<IdentityProvider[]>([]);
+  const { user, isLoading: authIsLoading } = useAuth();
+  const [identityProviders, setIdentityProviders] = useState<IdentityProvider[]>([]); // Usa IdentityProvider de @/types
   const [isLoading, setIsLoading] = useState(true); // Loading da lista de IdPs
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);

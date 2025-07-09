@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import apiClient from '@/lib/axios'; // Ajuste o path
 import { useAuth } from '@/contexts/AuthContext'; // Para organization_id
+import { AuditAssessmentStatus } from '@/types'; // Importar o enum
 
-type AuditControlStatus = "conforme" | "nao_conforme" | "parcialmente_conforme" | "";
+// Definição local de AuditControlStatus removida
 
 interface AssessmentFormData {
-  audit_control_id: string; // UUID do AuditControl - virá das props
-  status: AuditControlStatus;
+  audit_control_id: string;
+  status: AuditAssessmentStatus; // Usar o tipo importado
   score?: number | string; // string para input, number para API
   assessment_date: string; // Formato YYYY-MM-DD
   evidence_url: string; // Para links externos

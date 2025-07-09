@@ -6,14 +6,9 @@ import Link from 'next/link';
 import apiClient from '@/lib/axios';
 import { useNotifier } from '@/hooks/useNotifier';
 import StatCard from '@/components/common/StatCard'; // Importar o StatCard comum
+import { UserDashboardSummary } from '@/types';
 
-interface UserDashboardSummary {
-  assigned_risks_open_count?: number;
-  assigned_vulnerabilities_open_count?: number;
-  pending_approval_tasks_count?: number;
-}
-
-// Definição local do StatCard removida
+// Definição local de UserDashboardSummary removida
 
 const DashboardPageContent = () => {
   const { user, logout } = useAuth();

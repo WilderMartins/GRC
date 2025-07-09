@@ -3,30 +3,30 @@ import { useRouter } from 'next/router';
 import apiClient from '@/lib/axios'; // Ajuste o path
 import { useAuth } from '@/contexts/AuthContext'; // Ajuste o path
 import { useNotifier } from '@/hooks/useNotifier'; // Para feedback
+import {
+    RiskStatus,
+    RiskImpact,
+    RiskProbability,
+    RiskCategory,
+    UserLookup
+} from '@/types';
 
-// Tipos
-type RiskStatus = "aberto" | "em_andamento" | "mitigado" | "aceito";
-type RiskImpact = "Baixo" | "Médio" | "Alto" | "Crítico";
-type RiskProbability = "Baixo" | "Médio" | "Alto" | "Crítico";
-type RiskCategory = "tecnologico" | "operacional" | "legal" | "";
+// Definições de tipos locais removidas
 
 interface RiskFormData {
   title: string;
   description: string;
-  category: RiskCategory;
-  impact: RiskImpact | "";
-  probability: RiskProbability | "";
-  status: RiskStatus;
-  owner_id: string; // UUID do proprietário
+  category: RiskCategory; // Usar o tipo importado
+  impact: RiskImpact | "";   // Usar o tipo importado
+  probability: RiskProbability | ""; // Usar o tipo importado
+  status: RiskStatus;     // Usar o tipo importado
+  owner_id: string;
 }
 
-interface UserLookup { // Tipo para a lista de usuários do lookup
-    id: string;
-    name: string;
-}
+// UserLookup já foi importado de @/types
 
 interface RiskFormProps {
-  initialData?: RiskFormData & { id?: string };
+  initialData?: RiskFormData & { id?: string }; // RiskFormData agora usa os tipos importados
   isEditing?: boolean;
   onSubmitSuccess?: () => void;
 }

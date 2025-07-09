@@ -10,53 +10,20 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/axios';
 import { useDebounce } from '@/hooks/useDebounce'; // Supondo que este hook exista
+import {
+    Risk,
+    RiskOwner, // RiskOwner é específico aqui, mas poderia ser UserLookup se os campos baterem
+    ApprovalWorkflow,
+    UserLookup,
+    PaginatedResponse,
+    RiskStatus,      // Usado para filterStatus
+    RiskImpact,      // Usado para filterImpact
+    RiskProbability, // Usado para filterProbability
+    RiskCategory,    // Usado para filterCategory
+    SortOrder
+} from '@/types';
 
-// Tipos
-type RiskStatusFilter = "aberto" | "em_andamento" | "mitigado" | "aceito" | "";
-type RiskImpactFilter = "Baixo" | "Médio" | "Alto" | "Crítico" | "";
-type RiskProbabilityFilter = "Baixo" | "Médio" | "Alto" | "Crítico" | "";
-type RiskCategoryFilter = "tecnologico" | "operacional" | "legal" | "";
-type SortOrder = "asc" | "desc";
-
-interface UserLookup {
-    id: string;
-    name: string;
-}
-
-interface RiskOwner {
-    id: string;
-    name: string;
-    email: string;
-}
-interface Risk {
-  id: string;
-  organization_id: string;
-  title: string;
-  description: string;
-  category: string;
-  impact: RiskImpactFilter | string;
-  probability: RiskProbabilityFilter | string;
-  status: RiskStatusFilter | string;
-  owner_id: string;
-  owner?: RiskOwner;
-  created_at: string;
-  updated_at: string;
-  hasPendingApproval?: boolean;
-}
-
-interface ApprovalWorkflow {
-  id: string;
-  risk_id: string;
-  status: string;
-}
-
-interface PaginatedRisksResponse {
-  items: Risk[];
-  total_items: number;
-  total_pages: number;
-  page: number;
-  page_size: number;
-}
+// Definições locais de tipos e interfaces removidas
 
 const RisksPageContent = () => {
   const notify = useNotifier();

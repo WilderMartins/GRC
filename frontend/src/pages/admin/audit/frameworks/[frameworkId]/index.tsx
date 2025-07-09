@@ -8,51 +8,22 @@ import apiClient from '@/lib/axios';
 import { useAuth } from '@/contexts/AuthContext';
 import AssessmentForm from '@/components/audit/AssessmentForm';
 import PaginationControls from '@/components/common/PaginationControls';
+import {
+    AuditFramework, // Usar no lugar de AuditFrameworkInfo
+    AuditControl,
+    AuditAssessment,
+    ControlWithAssessment,
+    PaginatedResponse, // Usar no lugar de PaginatedControlsResponse e PaginatedAssessmentsResponse
+    AuditAssessmentStatusFilter, // Importar o enum/type para o filtro de status
+    // ControlFamiliesResponse pode ser mantido local ou tipado se for simples como { families: string[] }
+} from '@/types';
 
-// Tipos
-interface AuditFrameworkInfo {
-    id: string;
-    name: string;
-}
-interface AuditControl {
-  id: string;
-  control_id: string;
-  description: string;
-  family: string;
-}
-interface PaginatedControlsResponse {
-    items: AuditControl[];
-    total_items: number;
-    total_pages: number;
-    page: number;
-    page_size: number;
-}
+// Tipos locais removidos ou substituídos pelos importados
+
+// Interface para a resposta da API de famílias de controle (pode ser mantida ou movida para api.ts se for mais complexa)
 interface ControlFamiliesResponse {
     families: string[];
 }
-interface AuditAssessment {
-  id: string;
-  organization_id: string;
-  audit_control_id: string;
-  status: string;
-  score?: number;
-  evidence_url?: string;
-  assessment_date?: string;
-  created_at: string;
-  updated_at: string;
-  AuditControl?: AuditControl;
-}
-interface ControlWithAssessment extends AuditControl {
-  assessment?: AuditAssessment;
-}
-interface PaginatedAssessmentsResponse {
-    items: AuditAssessment[];
-    total_items: number;
-    total_pages: number;
-    page: number;
-    page_size: number;
-}
-type AssessmentStatusFilter = "" | "conforme" | "nao_conforme" | "parcialmente_conforme" | "nao_avaliado";
 
 
 const FrameworkDetailPageContent = () => {
@@ -60,7 +31,7 @@ const FrameworkDetailPageContent = () => {
   const { frameworkId } = router.query;
   const { user, isLoading: authIsLoading } = useAuth();
 
-  const [frameworkInfo, setFrameworkInfo] = useState<AuditFrameworkInfo | null>(null);
+  const [frameworkInfo, setFrameworkInfo] = useState<Partial<AuditFramework> | null>(null); // Usar Partial<AuditFramework>
   const [controlsWithAssessments, setControlsWithAssessments] = useState<ControlWithAssessment[]>([]);
 
   const [isLoadingData, setIsLoadingData] = useState(true);

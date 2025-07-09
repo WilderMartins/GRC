@@ -6,23 +6,13 @@ import { useRouter } from 'next/router';
 import VulnerabilityForm from '@/components/vulnerabilities/VulnerabilityForm'; // Importar
 import { useEffect, useState } from 'react';
 import apiClient from '@/lib/axios'; // Ajuste o path
+import {
+    Vulnerability,
+    VulnerabilitySeverity, // Embora não usado diretamente, Vulnerability usa
+    VulnerabilityStatus  // Embora não usado diretamente, Vulnerability usa
+} from '@/types';
 
-// Tipos (copiados de index.tsx para simplificar, idealmente seriam compartilhados)
-type VulnerabilitySeverity = "Baixo" | "Médio" | "Alto" | "Crítico";
-type VulnerabilityStatus = "descoberta" | "em_correcao" | "corrigida";
-interface Vulnerability {
-  id: string;
-  organization_id: string;
-  title: string;
-  description: string;
-  cve_id?: string;
-  severity: VulnerabilitySeverity;
-  status: VulnerabilityStatus;
-  asset_affected: string;
-  created_at: string;
-  updated_at: string;
-}
-
+// Definições de tipos locais removidas
 
 const EditVulnerabilityPageContent = () => {
   const router = useRouter();

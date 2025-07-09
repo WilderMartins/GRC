@@ -4,17 +4,12 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import apiClient from '@/lib/axios'; // Ajuste o path se necessário
+import { AuditFramework } from '@/types';
 
-interface AuditFramework {
-  id: string; // UUID
-  name: string;
-  created_at: string;
-  updated_at: string;
-  // AuditControls []AuditControl `gorm:"foreignKey:FrameworkID"` // Não precisamos disso na listagem de frameworks
-}
+// Definição local de AuditFramework removida
 
 const AuditFrameworksPageContent = () => {
-  const [frameworks, setFrameworks] = useState<AuditFramework[]>([]);
+  const [frameworks, setFrameworks] = useState<AuditFramework[]>([]); // Usar o tipo importado
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

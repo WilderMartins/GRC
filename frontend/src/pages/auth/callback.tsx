@@ -3,14 +3,9 @@ import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext'; // Ajuste o path se necessário
 import apiClient from '@/lib/axios'; // Ajuste o path se necessário
 import Head from 'next/head';
+import { User } from '@/types'; // Importar User de @/types
 
-interface User { // Repetido de AuthContext, idealmente tipo compartilhado
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  organization_id: string;
-}
+// Definição local de User removida
 
 const AuthCallbackPage = () => {
   const router = useRouter();

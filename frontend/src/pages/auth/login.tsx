@@ -3,21 +3,16 @@ import Link from 'next/link';
 import { useAuth } from '../../contexts/AuthContext'; // Ajuste o path se necessário
 import apiClient from '../../lib/axios'; // Ajuste o path se necessário
 import { useState, useEffect } from 'react'; // Adicionado useEffect
+import { LoginIdentityProvider } from '@/types'; // Importar LoginIdentityProvider
 
-// Tipos para provedores de identidade (vindo da API)
-interface LoadedIdentityProvider {
-  id: string;
-  name: string;
-  type: 'saml' | 'oauth2_google' | 'oauth2_github'; // Tipos esperados da API
-  login_url: string; // URL completa fornecida pelo backend
-}
+// Definição local de LoadedIdentityProvider removida
 
 export default function LoginPage() {
   const auth = useAuth();
   const [error, setError] = useState<string | null>(null); // Erro para login tradicional
   const [isLoadingState, setIsLoadingState] = useState(false); // Loading para login tradicional
 
-  const [loadedIdentityProviders, setLoadedIdentityProviders] = useState<LoadedIdentityProvider[]>([]);
+  const [loadedIdentityProviders, setLoadedIdentityProviders] = useState<LoginIdentityProvider[]>([]); // Usar o tipo importado
   const [isLoadingIdps, setIsLoadingIdps] = useState(true);
   const [idpError, setIdpError] = useState<string | null>(null);
 

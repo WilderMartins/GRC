@@ -3,18 +3,13 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/router'; // Para Next.js Pages Router
 // import { useRouter } from 'next/navigation'; // Para Next.js App Router
+import { User } from '@/types'; // Importar User de @/types
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  organization_id: string;
-}
+// Definição local de User removida
 
 interface AuthContextType {
   isAuthenticated: boolean;
-  user: User | null;
+  user: User | null; // Usar o User importado
   token: string | null;
   isLoading: boolean; // Para verificar se o estado inicial já foi carregado do localStorage
   login: (userData: User, token: string) => void;
