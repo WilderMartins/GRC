@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/axios';
 import Link from 'next/link'; // Para futuros botões de "Convidar Usuário"
+import PaginationControls from '@/components/common/PaginationControls'; // Importar o componente
 
 // Tipos (idealmente de um arquivo compartilhado/gerado)
 type UserRole = "admin" | "manager" | "user";
@@ -96,11 +97,11 @@ const OrgUsersPageContent = () => {
   const [pageError, setPageError] = useState<string | null>(null);
 
   const [users, setUsers] = useState<User[]>([]);
-  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true); // Inicia como true para o primeiro carregamento
   const [dataError, setDataError] = useState<string | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(10); // Default page size
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
 
@@ -109,7 +110,11 @@ const OrgUsersPageContent = () => {
 
 
   const fetchUsers = useCallback(async (page: number, size: number) => {
-    if (!canAccess || !orgId || typeof orgId !== 'string') return;
+    if (!canAccess || !orgId || typeof orgId !== 'string') {
+        // Se não pode acessar ou não tem orgId, não tenta buscar e para o loading
+        setIsLoadingData(false);
+        return;
+    }
     setIsLoadingData(true);
     setDataError(null);
     try {
@@ -120,41 +125,65 @@ const OrgUsersPageContent = () => {
       setTotalItems(response.data.total_items);
       setTotalPages(response.data.total_pages);
       setCurrentPage(response.data.page);
-      // setPageSize(response.data.page_size); // PageSize é controlado pelo estado local
+      // A API também retorna page_size, mas vamos manter o controle do pageSize no frontend por enquanto
     } catch (err: any) {
       setDataError(err.response?.data?.error || "Falha ao buscar usuários.");
-      setUsers([]);
+      setUsers([]); // Limpar usuários em caso de erro para não mostrar dados antigos
     } finally {
       setIsLoadingData(false);
     }
-  }, [orgId, canAccess, pageSize]); // pageSize é dependência para re-fetch se ele mudar
+  }, [orgId, canAccess]); // Removido pageSize das dependências de fetchUsers, pois ele é um parâmetro da função
 
   useEffect(() => {
-    if (authIsLoading) return;
-    if (!actingUser) { setPageError("Usuário não autenticado."); setCanAccess(false); return; }
-    if (actingUser.organization_id !== orgId) {
-      setPageError("Você não tem permissão para gerenciar usuários desta organização.");
-      setCanAccess(false); return;
+    if (authIsLoading) return; // Aguardar autenticação carregar
+    if (!actingUser) {
+      setPageError("Usuário não autenticado.");
+      setCanAccess(false);
+      setIsLoadingData(false);
+      return;
     }
-    if (actingUser.role !== 'admin' && actingUser.role !== 'manager') {
-      setPageError("Você não tem privilégios suficientes (requer Admin ou Manager).");
-      setCanAccess(false); return;
+    if (router.isReady && typeof orgId === 'string') { // Garante que orgId está disponível
+        if (actingUser.organization_id !== orgId) {
+            setPageError("Você não tem permissão para gerenciar usuários desta organização.");
+            setCanAccess(false);
+            setIsLoadingData(false);
+            return;
+        }
+        if (actingUser.role !== 'admin' && actingUser.role !== 'manager') {
+            setPageError("Você não tem privilégios suficientes (requer Admin ou Manager).");
+            setCanAccess(false);
+            setIsLoadingData(false);
+            return;
+        }
+        setCanAccess(true);
+        setPageError(null);
     }
-    setCanAccess(true);
-    setPageError(null);
-    fetchUsers(currentPage, pageSize);
-  }, [orgId, actingUser, authIsLoading, fetchUsers, currentPage, pageSize]);
+  }, [orgId, actingUser, authIsLoading, router.isReady]);
+
+  // useEffect separado para buscar dados quando currentPage ou pageSize mudam, E canAccess é true
+  useEffect(() => {
+    if (canAccess && typeof orgId === 'string') { // Adicionado typeof orgId para segurança
+      fetchUsers(currentPage, pageSize);
+    } else if (!authIsLoading && !actingUser) { // Se o auth carregou e não há usuário
+        setIsLoadingData(false); // Garante que o loading pare se não houver usuário
+    }
+  }, [canAccess, currentPage, pageSize, fetchUsers, orgId, authIsLoading, actingUser]);
 
 
   const handleToggleUserStatus = async (userToToggle: User) => {
     if (!orgId || typeof orgId !== 'string') return;
     const newStatus = !userToToggle.is_active;
     if (window.confirm(`Tem certeza que deseja ${newStatus ? "ativar" : "desativar"} o usuário ${userToToggle.name}?`)) {
+      // Idealmente, usar um estado de loading específico para esta ação ou para a linha
+      // Para simplificar, vamos reusar isLoadingData, mas isso pode fazer a tabela inteira piscar
+      // setIsLoadingData(true); // Pode ser muito agressivo
       try {
         await apiClient.put(`/organizations/${orgId}/users/${userToToggle.id}/status`, { is_active: newStatus });
-        fetchUsers(currentPage, pageSize); // Re-fetch
+        // Re-fetch da página atual para refletir a mudança
+        fetchUsers(currentPage, pageSize);
       } catch (err: any) {
-        alert(`Falha ao atualizar status: ${err.response?.data?.error || err.message}`);
+        alert(`Falha ao atualizar status: ${err.response?.data?.error || err.message}`); // TODO: Usar notifier
+        // setIsLoadingData(false);
       }
     }
   };
@@ -164,13 +193,24 @@ const OrgUsersPageContent = () => {
     setShowEditRoleModal(true);
   };
 
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
+      setCurrentPage(newPage);
+    }
+  };
 
-  if (authIsLoading || (!canAccess && !pageError) ) { // Adicionado !pageError para estado inicial antes do useEffect de acesso rodar
+
+  if (authIsLoading || (!router.isReady && !pageError)) {
     return <AdminLayout title="Carregando..."><div className="p-6 text-center">Verificando permissões...</div></AdminLayout>;
   }
   if (!canAccess && pageError) {
     return <AdminLayout title="Acesso Negado"><div className="p-6 text-center text-red-500">{pageError}</div></AdminLayout>;
   }
+  // Se não pode acessar mas ainda não há pageError (ex: orgId ainda não está pronto), mostre carregando.
+  if (!canAccess && !pageError && !authIsLoading) {
+      return <AdminLayout title="Carregando..."><div className="p-6 text-center">Carregando dados da organização...</div></AdminLayout>;
+  }
+
 
   return (
     <AdminLayout title={`Gerenciar Usuários - Organização`}>
@@ -181,9 +221,18 @@ const OrgUsersPageContent = () => {
           {/* TODO: Botão Convidar Usuário */}
         </div>
 
-        {isLoadingData && <p className="text-center">Carregando usuários...</p>}
-        {dataError && <p className="text-center text-red-500">Erro: {dataError}</p>}
-        {!isLoadingData && !dataError && (
+        {/* Feedback de Carregamento/Erro para a lista de usuários */}
+        {isLoadingData && users.length === 0 && <p className="text-center py-4">Carregando usuários...</p>}
+        {dataError && <p className="text-center text-red-500 py-4">Erro ao carregar usuários: {dataError}</p>}
+
+        {!isLoadingData && users.length === 0 && !dataError && (
+            <div className="text-center py-10">
+                <p className="text-gray-500 dark:text-gray-400">Nenhum usuário encontrado nesta organização.</p>
+                {/* TODO: Adicionar botão "Convidar primeiro usuário" se apropriado */}
+            </div>
+        )}
+
+        {users.length > 0 && !dataError && ( // Mostrar tabela e paginação apenas se houver usuários e sem erro de dados
           <>
             <div className="mt-8 flow-root">
               <div className="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
@@ -214,19 +263,29 @@ const OrgUsersPageContent = () => {
                                 </td>
                                 <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6 space-x-2">
                                     <button onClick={() => openEditRoleModal(userItem)} className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200">Alterar Role</button>
-                                    <button onClick={() => handleToggleUserStatus(userItem)} className={`font-medium ${userItem.is_active ? 'text-yellow-600 hover:text-yellow-900 dark:text-yellow-400 dark:hover:text-yellow-200' : 'text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-200'}`}>
+                                    <button
+                                        onClick={() => handleToggleUserStatus(userItem)}
+                                        className={`font-medium ${userItem.is_active ?
+                                            'text-yellow-600 hover:text-yellow-900 dark:text-yellow-400 dark:hover:text-yellow-200'
+                                            : 'text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-200'}`}
+                                        disabled={isLoadingData && users.length > 0} // Desabilitar apenas se estiver carregando uma nova página de dados existentes
+                                    >
                                         {userItem.is_active ? 'Desativar' : 'Ativar'}
                                     </button>
                                 </td>
                             </tr>
                         ))}
-                        {users.length === 0 && (
-                             <tr><td colSpan={5} className="text-center py-4 px-6 text-sm text-gray-500 dark:text-gray-400">Nenhum usuário encontrado nesta organização.</td></tr>
-                        )}
                     </tbody>
                     </table>
                   </div>
-                  {/* TODO: Controles de Paginação */}
+                  <PaginationControls
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={totalItems}
+                    pageSize={pageSize}
+                    onPageChange={handlePageChange}
+                    isLoading={isLoadingData && users.length > 0} // Passar isLoading para desabilitar controles durante a carga de uma nova página
+                  />
                 </div>
               </div>
             </div>
