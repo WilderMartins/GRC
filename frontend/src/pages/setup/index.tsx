@@ -6,7 +6,8 @@ import apiClient from '@/lib/axios';
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import type { GetStaticProps, InferGetStaticPropsType } from 'next';
-import WelcomeStep from '@/components/setup/WelcomeStep'; // Importar WelcomeStep
+import WelcomeStep from '@/components/setup/WelcomeStep';
+import DatabaseStep from '@/components/setup/DatabaseStep'; // Importar DatabaseStep
 
 // Definir os tipos para as etapas do wizard e status da API
 type SetupStep =
@@ -151,8 +152,7 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
       case 'welcome':
         return <WelcomeStep onNext={goToNextStep} />;
       case 'db_config_check':
-        // return <DatabaseStep onNext={() => goToNextStep('migrations')} onVerify={goToNextStep} />;
-         return <div><h3 className="text-xl font-semibold mb-4">{t('steps.db_config.title')}</h3><p className="text-sm mb-4">{t('steps.db_config.instructions_env')}</p><p className="text-xs mb-4">{t('steps.db_config.instructions_env_detail')}</p><button onClick={() => goToNextStep()} className="mt-4 px-4 py-2 bg-brand-primary text-white rounded hover:bg-brand-primary/90">{t('steps.db_config.verify_button')}</button></div>;
+        return <DatabaseStep onVerifyAndContinue={goToNextStep} errorMessage={apiError} />;
       case 'migrations':
         // return <MigrationsStep onNext={() => goToNextStep('admin_creation')} />;
         return <div><h3 className="text-xl font-semibold mb-4">{t('steps.migrations.title')}</h3><p>{t('steps.migrations.description')}</p><button onClick={() => { /* TODO: apiClient.post('/setup/run-migrations').then(goToNextStep) */ console.log("TODO: Run migrations"); goToNextStep();}} className="mt-4 px-4 py-2 bg-brand-primary text-white rounded hover:bg-brand-primary/90">{t('steps.migrations.run_button')}</button></div>;
