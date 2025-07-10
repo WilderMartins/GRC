@@ -25,6 +25,7 @@ import (
 var testWebhookID = uuid.New()
 
 func TestCreateWebhookHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.POST("/orgs/:orgId/webhooks", CreateWebhookHandler)
@@ -86,6 +87,7 @@ func TestCreateWebhookHandler(t *testing.T) {
 }
 
 func TestListWebhooksHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
     // Listar pode ser permitido para qualquer usuário da organização
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleUser)
@@ -133,6 +135,7 @@ func TestListWebhooksHandler(t *testing.T) {
 }
 
 func TestGetWebhookHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleUser)
 	router.GET("/orgs/:orgId/webhooks/:webhookId", GetWebhookHandler)
@@ -179,6 +182,7 @@ func TestGetWebhookHandler(t *testing.T) {
 }
 
 func TestUpdateWebhookHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.PUT("/orgs/:orgId/webhooks/:webhookId", UpdateWebhookHandler)
@@ -248,6 +252,7 @@ func TestUpdateWebhookHandler(t *testing.T) {
 }
 
 func TestDeleteWebhookHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.DELETE("/orgs/:orgId/webhooks/:webhookId", DeleteWebhookHandler)

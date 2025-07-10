@@ -3,14 +3,16 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io" // Mantido para io.EOF na leitura do buffer do arquivo
 	"log"
-	"mime/multipart"
+	// "mime/multipart" // Removido - não usado diretamente aqui, o Gin lida com isso
 	"net/http"
 	"path/filepath"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/filestorage"
 	"phoenixgrc/backend/internal/models"
 	"regexp" // Para validar cores HEX
+	"time"   // Adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -167,14 +169,17 @@ func GetOrganizationBrandingHandler(c *gin.Context) {
 		return
 	}
 
-    // Se for para ser público para a tela de login, esta verificação de token não se aplica.
-    // Mas se for para o painel admin, ela é útil.
-    tokenOrgID, orgOk := c.Get("organizationID")
-	if !orgOk || tokenOrgID.(uuid.UUID) != targetOrgID {
-        // Para um endpoint verdadeiramente público, removeríamos esta checagem de token
-        // e buscaríamos a organização diretamente pelo orgId da URL.
-		// c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado"})
-		// return
+    // Autorização: Usuário autenticado deve pertencer à organização para ver seu branding.
+    tokenAuthOrgID, orgOk := c.Get("organizationID")
+    _, userOk := c.Get("userID") // Apenas para garantir que há um usuário autenticado
+
+	if !orgOk || !userOk {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado: Informações do token ausentes"})
+		return
+	}
+	if tokenAuthOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado: Você não pode visualizar o branding desta organização."})
+		return
 	}
 
     db := database.GetDB()

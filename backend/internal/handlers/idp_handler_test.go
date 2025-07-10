@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm" // Adicionado
 )
 
 // testOrgAdminID e testUserAdminID são definidos em main_test_handler.go (ou deveriam ser)
@@ -36,6 +37,7 @@ func getRouterWithOrgAdminContext(userID uuid.UUID, orgID uuid.UUID, userRole mo
 
 
 func TestCreateIdentityProviderHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	// Assuming testUserID has RoleAdmin for testOrgID
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
@@ -126,6 +128,7 @@ func TestCreateIdentityProviderHandler(t *testing.T) {
 }
 
 func TestListIdentityProvidersHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.GET("/orgs/:orgId/identity-providers", ListIdentityProvidersHandler)
@@ -170,6 +173,7 @@ func TestListIdentityProvidersHandler(t *testing.T) {
 var testIdpID = uuid.New() // For Get, Update, Delete tests
 
 func TestGetIdentityProviderHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.GET("/orgs/:orgId/identity-providers/:idpId", GetIdentityProviderHandler)
@@ -224,6 +228,7 @@ func TestGetIdentityProviderHandler(t *testing.T) {
 }
 
 func TestUpdateIdentityProviderHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.PUT("/orgs/:orgId/identity-providers/:idpId", UpdateIdentityProviderHandler)
@@ -271,15 +276,15 @@ func TestUpdateIdentityProviderHandler(t *testing.T) {
 
 	t.Run("UpdateIdentityProviderHandler - IdP not found", func(t *testing.T) {
 		isActive := true
-		payload := IdentityProviderPayload{Name: "Update NonExistent", ProviderType: models.IDPTypeSAML, IsActive: &isActive, ConfigJSON: json.RawMessage(`{}`)}
-		body, _ := json.Marshal(payload)
+		localPayload := IdentityProviderPayload{Name: "Update NonExistent", ProviderType: models.IDPTypeSAML, IsActive: &isActive, ConfigJSON: json.RawMessage(`{}`)}
+		localBody, _ := json.Marshal(localPayload)
 		nonExistentIdpID := uuid.New()
 
 		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2`)).
 			WithArgs(nonExistentIdpID, testOrgID).
 			WillReturnError(gorm.ErrRecordNotFound)
 
-		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), nonExistentIdpID.String()), bytes.NewBuffer(body))
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), nonExistentIdpID.String()), bytes.NewBuffer(localBody))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
@@ -288,10 +293,10 @@ func TestUpdateIdentityProviderHandler(t *testing.T) {
 	})
 
 	t.Run("UpdateIdentityProviderHandler - Invalid ConfigJSON", func(t *testing.T) {
-		isActive := true
+		// isActive := true // Não usado diretamente para este teste de payload malformado
 		// Payload com JSON inválido em ConfigJSON
-		payload := IdentityProviderPayload{Name: "Update Invalid JSON", ProviderType: models.IDPTypeSAML, IsActive: &isActive, ConfigJSON: json.RawMessage(`{"key": "value`)} // JSON incompleto
-		body, _ := json.Marshal(payload) // Isso vai falhar ao tentar fazer marshal do json.RawMessage se ele não for um JSON válido.
+		// payload := IdentityProviderPayload{Name: "Update Invalid JSON", ProviderType: models.IDPTypeSAML, IsActive: &isActive, ConfigJSON: json.RawMessage(`{"key": "value`)} // JSON incompleto
+		// body, _ := json.Marshal(payload) // Removido - requestBodyJSON é usado diretamente
                                         // O teste deve ser sobre o backend recebendo um JSON string malformado.
                                         // Então, o payload JSON string enviado na requisição é o que importa.
 
@@ -319,9 +324,9 @@ func TestUpdateIdentityProviderHandler(t *testing.T) {
 
     t.Run("UpdateIdentityProviderHandler - Invalid provider_type in payload", func(t *testing.T) {
 		requestBodyJSON := `{"name": "Update Invalid Type", "provider_type": "invalid_type", "is_active": true, "config_json": "{}"}`
-		body := bytes.NewBuffer([]byte(requestBodyJSON))
+		requestBuffer := bytes.NewBuffer([]byte(requestBodyJSON))
 
-		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), body)
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), requestBuffer) // Corrigido para usar requestBuffer
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
@@ -332,6 +337,7 @@ func TestUpdateIdentityProviderHandler(t *testing.T) {
 }
 
 func TestDeleteIdentityProviderHandler(t *testing.T) {
+	setupMockDB(t) // Adicionado
 	gin.SetMode(gin.TestMode)
 	router := getRouterWithOrgAdminContext(testUserID, testOrgID, models.RoleAdmin)
 	router.DELETE("/orgs/:orgId/identity-providers/:idpId", DeleteIdentityProviderHandler)
