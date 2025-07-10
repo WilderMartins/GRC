@@ -152,7 +152,7 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
             {t('list.header')}
           </h1>
           <Link href="/admin/vulnerabilities/new" legacyBehavior>
-            <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+            <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-brand-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition-colors">
               {t('list.add_new_button')}
             </a>
           </Link>
@@ -240,10 +240,10 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
                             </td>
                             <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{vuln.asset_affected}</td>
                             <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6 space-x-2">
-                              <Link href={`/admin/vulnerabilities/edit/${vuln.id}`} legacyBehavior><a className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200">{t('list.action_edit')}</a></Link>
+                              <Link href={`/admin/vulnerabilities/edit/${vuln.id}`} legacyBehavior><a className="text-brand-primary hover:text-brand-primary/80 dark:text-brand-primary dark:hover:text-brand-primary/80 transition-colors">{t('list.action_edit')}</a></Link>
                               <button
                                 onClick={() => handleDeleteVulnerability(vuln.id, vuln.title)}
-                                className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-200"
+                                className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-200 transition-colors"
                                 disabled={isLoading}
                               >
                                 {t('list.action_delete')}

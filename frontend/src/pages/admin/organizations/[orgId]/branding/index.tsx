@@ -16,7 +16,7 @@ interface OrganizationBranding {
 const OrgBrandingPageContent = () => {
   const router = useRouter();
   const { orgId } = router.query;
-  const { user, isLoading: authIsLoading } = useAuth();
+  const { user, isLoading: authIsLoading, refreshBranding } = useAuth(); // Adicionar refreshBranding
 
   const [canAccess, setCanAccess] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -142,6 +142,7 @@ const OrgBrandingPageContent = () => {
       setLogoFile(null); // Resetar o input do arquivo
       (document.getElementById('logo_file_input') as HTMLInputElement).value = ''; // Limpar o input file visualmente
       setSubmitSuccess('Configurações de branding atualizadas com sucesso!');
+      await refreshBranding(); // Chamar refreshBranding para atualizar o contexto global
     } catch (err: any) {
       setDataError(err.response?.data?.error || "Falha ao atualizar branding.");
     } finally {
@@ -241,11 +242,11 @@ const OrgBrandingPageContent = () => {
 
           <div className="pt-6 flex items-center justify-end gap-x-6 border-t border-gray-200 dark:border-gray-700">
             <button type="button" onClick={() => fetchBranding()} disabled={isSubmitting || isLoadingData}
-                    className="text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 disabled:opacity-50">
+                    className="text-sm font-semibold leading-6 text-gray-900 dark:text-gray-100 disabled:opacity-50 transition-colors">
               Resetar (Recarregar do Servidor)
             </button>
             <button type="submit" disabled={isSubmitting || isLoadingData}
-                    className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50">
+                    className="rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-primary/90 focus:ring-brand-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-primary disabled:opacity-50 transition-colors">
               {isSubmitting ? 'Salvando...' : 'Salvar Configurações'}
             </button>
           </div>
