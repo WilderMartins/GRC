@@ -146,7 +146,10 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
       };
       await apiClient.post('/setup/create-admin', payload); // API Hipotética
       notify.success(t('steps.admin_creation.success_message'));
-      goToNextStep(); // Deverá levar a 'completed_redirect' e depois /auth/login
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('phoenixSetupCompleted', 'true');
+      }
+      goToNextStep(); // Deverá levar a 'completed_redirect' (e então o CompletionStep lida com o link para login)
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || err.message || t('steps.admin_creation.error_creating');
       setApiError(errorMsg); // Erro será exibido pelo AdminCreationStep
