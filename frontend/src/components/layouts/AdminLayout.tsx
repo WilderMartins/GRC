@@ -3,7 +3,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import ThemeSwitcher from '@/components/common/ThemeSwitcher'; // Importar ThemeSwitcher
+import ThemeSwitcher from '@/components/common/ThemeSwitcher';
+import { useFeatureToggles } from '@/contexts/FeatureToggleContext'; // Importar hook de feature toggles
 
 type AdminLayoutProps = {
   children: ReactNode;
@@ -128,8 +129,8 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
               <h1 className="text-xl font-semibold text-gray-800 dark:text-white">
                 {title}
               </h1>
-              <div className="flex items-center space-x-4"> {/* Aumentado o space-x para acomodar o switcher */}
-                <ThemeSwitcher /> {/* Adicionar o ThemeSwitcher aqui */}
+              <div className="flex items-center space-x-4">
+                <ThemeSwitcher />
                 <span className="text-gray-600 dark:text-gray-400 hidden sm:inline">{user?.name || user?.email}</span>
                 <button
                   onClick={logout}
@@ -145,6 +146,13 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
 
           {/* Page Content */}
           <main className="flex-1 overflow-y-auto p-6">
+            {/* Exemplo de uso do Feature Toggle */}
+            {isFeatureEnabled('displayExperimentalBanner') && !isLoadingToggles && (
+              <div className="mb-4 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 dark:bg-yellow-700/30 dark:text-yellow-300 dark:border-yellow-600 rounded">
+                <p className="font-bold">Modo Experimental Ativo!</p>
+                <p>Você está vendo funcionalidades experimentais.</p>
+              </div>
+            )}
             {children}
           </main>
         </div>

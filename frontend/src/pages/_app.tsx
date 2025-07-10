@@ -2,7 +2,8 @@ import '@/styles/globals.css';
 import 'react-toastify/dist/ReactToastify.css';
 import type { AppProps } from 'next/app';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
-import { ThemeProvider } from '../contexts/ThemeContext'; // Importar ThemeProvider
+import { ThemeProvider } from '../contexts/ThemeContext';
+import { FeatureToggleProvider } from '../contexts/FeatureToggleContext'; // Importar FeatureToggleProvider
 import { ToastContainer } from 'react-toastify';
 import { appWithTranslation } from 'next-i18next';
 import { useEffect } from 'react';
@@ -27,11 +28,12 @@ const DynamicBrandingStyles = () => {
 function MyApp({ Component, pageProps }: AppProps) {
   return (
     <AuthProvider>
-      <ThemeProvider> {/* Envolver com ThemeProvider */}
-        <DynamicBrandingStyles />
-        <Component {...pageProps} />
-        <ToastContainer
-          position="top-right"
+      <ThemeProvider>
+        <FeatureToggleProvider> {/* Envolver com FeatureToggleProvider */}
+          <DynamicBrandingStyles />
+          <Component {...pageProps} />
+          <ToastContainer
+            position="top-right"
         autoClose={5000}
         hideProgressBar={false}
         newestOnTop={false}
@@ -42,6 +44,8 @@ function MyApp({ Component, pageProps }: AppProps) {
         pauseOnHover
         theme="light"
       />
+        </FeatureToggleProvider>
+      </ThemeProvider>
     </AuthProvider>
   );
 }
