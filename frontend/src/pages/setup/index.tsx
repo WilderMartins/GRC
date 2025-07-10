@@ -8,8 +8,9 @@ import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import type { GetStaticProps, InferGetStaticPropsType } from 'next';
 import WelcomeStep from '@/components/setup/WelcomeStep';
 import DatabaseStep from '@/components/setup/DatabaseStep';
-import MigrationsStep from '@/components/setup/MigrationsStep'; // Importar MigrationsStep
-import { useNotifier } from '@/hooks/useNotifier'; // Importar useNotifier
+import MigrationsStep from '@/components/setup/MigrationsStep';
+import AdminCreationStep, { AdminCreationFormData } from '@/components/setup/AdminCreationStep'; // Importar AdminCreationStep e FormData
+import { useNotifier } from '@/hooks/useNotifier';
 
 // Definir os tipos para as etapas do wizard e status da API
 type SetupStep =
@@ -39,9 +40,10 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
   const router = useRouter();
   const notify = useNotifier(); // Adicionar notifier
 
-  const [currentStep, setCurrentStep] = useState<SetupStep>('loading_status'); // Iniciar em loading
+  const [currentStep, setCurrentStep] = useState<SetupStep>('loading_status');
   const [apiError, setApiError] = useState<string | null>(null);
   const [isProcessingMigrations, setIsProcessingMigrations] = useState(false);
+  const [isCreatingAdmin, setIsCreatingAdmin] = useState(false); // Novo estado
 
   const determineNextStep = useCallback((apiStatus: string) => {
     switch (apiStatus) {
@@ -59,12 +61,10 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
         router.push('/auth/login');
         break;
       default:
-        // Se status não é conhecido e não é 'completed', consideramos um estado inicial válido para 'welcome'.
-        // Se a API de status falhar, o catch em fetchSetupStatus definirá 'server_error'.
         setCurrentStep('welcome');
         break;
     }
-  }, [router, t]);
+  }, [router]); // Removido t da dependência, se não usado diretamente aqui
 
   const fetchSetupStatus = useCallback(async () => {
     // Não resetar currentStep para 'loading_status' aqui,
@@ -126,9 +126,33 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
       setApiError(errorMsg); // Erro será exibido pelo MigrationsStep
       notify.error(errorMsg);
       // Permanece na etapa de migrações para o usuário tentar novamente ou ver o erro
-      setCurrentStep('migrations'); // Garante que fica na etapa de migração se houve erro
+      setCurrentStep('migrations');
     } finally {
       setIsProcessingMigrations(false);
+    }
+  };
+
+  const handleAdminCreationSubmit = async (data: AdminCreationFormData) => {
+    setIsCreatingAdmin(true);
+    setApiError(null);
+    try {
+      const payload = {
+        organization_name: data.organizationName,
+        admin_name: data.adminName,
+        admin_email: data.adminEmail,
+        admin_password: data.adminPassword,
+        // admin_password_confirm não é enviado para a API
+      };
+      await apiClient.post('/setup/create-admin', payload); // API Hipotética
+      notify.success(t('steps.admin_creation.success_message'));
+      goToNextStep(); // Deverá levar a 'completed_redirect' e depois /auth/login
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.message || err.message || t('steps.admin_creation.error_creating');
+      setApiError(errorMsg); // Erro será exibido pelo AdminCreationStep
+      notify.error(errorMsg);
+      setCurrentStep('admin_creation'); // Garante que fica na etapa de criação de admin
+    } finally {
+      setIsCreatingAdmin(false);
     }
   };
 
@@ -152,12 +176,13 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
                   errorMessage={apiError}
                 />;
       case 'admin_creation':
-        // return <AdminCreationStep onNext={() => goToNextStep('completed_redirect')} />;
-        return <div><h3 className="text-xl font-semibold mb-4">{t('steps.admin_creation.title')}</h3><p>{t('steps.admin_creation.description')}</p><button onClick={() => { /* TODO: Submit admin form, then goToNextStep */ console.log("TODO: Create admin"); goToNextStep(); }} className="mt-4 px-4 py-2 bg-brand-primary text-white rounded hover:bg-brand-primary/90">{t('steps.admin_creation.create_button')}</button></div>;
+        return <AdminCreationStep
+                  onSubmitAdminForm={handleAdminCreationSubmit}
+                  isLoading={isCreatingAdmin}
+                  errorMessage={apiError}
+                />;
       case 'completed_redirect':
         return <div className="text-center"><p>{t('steps.completed.redirecting')}</p></div>;
-      case 'server_error':
-        return <div className="text-center text-red-500 dark:text-red-300"><h3 className="text-xl font-semibold mb-2">{t('steps.error.title')}</h3><p>{apiError || t('steps.error.generic')}</p></div>;
       default:
         return <div className="text-center"><p>{t('steps.unknown_step')}: {currentStep}</p></div>;
     }
