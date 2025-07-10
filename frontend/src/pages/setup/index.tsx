@@ -6,6 +6,7 @@ import apiClient from '@/lib/axios';
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import type { GetStaticProps, InferGetStaticPropsType } from 'next';
+import WelcomeStep from '@/components/setup/WelcomeStep'; // Importar WelcomeStep
 
 // Definir os tipos para as etapas do wizard e status da API
 type SetupStep =
@@ -56,14 +57,31 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
         setCurrentStep('completed_redirect');
         router.push('/auth/login'); // Redireciona se já completou
         break;
+      // Adicionar um caso para um status inicial "not_started" ou similar se o backend o fornecer.
+      // case 'not_started':
+      //   setCurrentStep('welcome');
+      //   break;
       default:
-        // Se um status desconhecido vier, ou se quisermos começar pelo 'welcome'
-        // se o DB estiver configurado mas outras etapas não claras.
-        // Por segurança, se o status não for reconhecido como incompleto, pode indicar erro ou já completo.
-        // Para este exemplo, vamos assumir que qualquer status não listado explicitamente como incompleto
-        // ou é um erro (tratado no catch) ou deve levar ao login se não for um erro de API.
-        // No entanto, a API /setup/status deve ser clara.
-        // Se a API está ok, mas status é inesperado, tratar como erro de lógica.
+        // Se o status não for nenhum dos conhecidos de progresso ou 'completed',
+        // e não for um erro pego pelo catch de fetchSetupStatus,
+        // podemos assumir que é um estado inicial ou um novo estado não mapeado.
+        // Para MVP, se não for um estado de erro já tratado, e não for um passo conhecido,
+        // mostrar 'welcome' é uma opção segura se o sistema não estiver 'completed'.
+        // No entanto, a API deveria idealmente retornar 'database_not_configured' como o primeiro estado "ativo".
+        // Se a API retornar um status desconhecido, é mais seguro tratar como erro ou um estado específico.
+        // Por agora, se a API retornar algo que não seja os estados de progresso ou 'completed',
+        // e não for um erro de HTTP, pode ser um estado que deveria levar ao 'welcome'.
+        // Mas para segurança, vamos manter o default como erro se o status da API for inesperado.
+        // A lógica para mostrar 'welcome' será que se nenhuma outra condição for atendida E NÃO HOUVER ERRO,
+        // o estado inicial (que será 'welcome' após ajuste) persistirá.
+
+        // Ajuste: Se nenhum dos casos anteriores corresponder, mas não houve erro de API,
+        // e o status não é 'completed', consideramos que é um estado inicial.
+        // Isso é um pouco implícito. Idealmente, o backend teria um status "not_started".
+        // Para o propósito deste ajuste, se a API respondeu com sucesso mas com um status
+        // não mapeado para um passo de progresso, e não é 'completed', mostramos 'welcome'.
+        // Essa lógica será mais bem tratada no useEffect que chama determineNextStep.
+        // Aqui, o default ainda será um erro para status inesperados da API.
         setApiError(t('steps.error_unexpected_status', { status: apiStatus }));
         setCurrentStep('server_error');
         break;
@@ -72,12 +90,20 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
 
   useEffect(() => {
     const fetchSetupStatus = async () => {
-      setCurrentStep('loading_status'); // Garante que estamos em loading ao re-verificar
+      // setCurrentStep('loading_status'); // Não mais necessário se o estado inicial for 'welcome'
       setApiError(null);
       try {
         const response = await apiClient.get<SetupStatusResponse>('/setup/status'); // API Hipotética
         if (response.data && response.data.status) {
-          determineNextStep(response.data.status);
+          if (response.data.status === 'completed') {
+            setCurrentStep('completed_redirect');
+            router.push('/auth/login');
+          } else {
+            // Se não estiver completo, determine a etapa ou mantenha 'welcome' se for o caso inicial
+            // A função determineNextStep lidará com os estados de progresso conhecidos.
+            // Se determineNextStep não mudar o currentStep de 'welcome' (estado inicial), ele permanecerá.
+            determineNextStep(response.data.status);
+          }
         } else {
           throw new Error('Invalid response from /setup/status');
         }
@@ -87,8 +113,14 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
         setCurrentStep('server_error');
       }
     };
-    fetchSetupStatus();
-  }, [determineNextStep, t]); // Adicionado t
+
+    // Se o estado inicial de currentStep for 'welcome', esta chamada irá potencialmente
+    // movê-lo para uma etapa mais avançada, 'completed_redirect', ou 'server_error'.
+    // Se nenhum desses ocorrer, ele permanecerá 'welcome'.
+    if (currentStep === 'loading_status' || currentStep === 'welcome') { // Chamar apenas na carga inicial ou se estiver em welcome (após onNext)
+        fetchSetupStatus();
+    }
+  }, [currentStep, determineNextStep, router, t]); // Adicionado currentStep para re-trigger se onNext o resetar para 'welcome'
 
   // Funções de navegação (serão usadas pelos componentes de etapa)
   const goToNextStep = (nextLogicalStep?: SetupStep) => {
@@ -117,10 +149,9 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
       case 'loading_status':
         return <div className="text-center"><p>{t('common:loading_ellipsis')}</p></div>;
       case 'welcome':
-        // return <WelcomeStep onNext={() => goToNextStep('db_config_check')} />;
-        return <div><h3 className="text-xl font-semibold mb-4">{t('steps.welcome.title')}</h3><p>{t('steps.welcome.description')}</p><button onClick={() => goToNextStep()} className="mt-4 px-4 py-2 bg-brand-primary text-white rounded hover:bg-brand-primary/90">{t('steps.welcome.start_button')}</button></div>;
+        return <WelcomeStep onNext={goToNextStep} />;
       case 'db_config_check':
-        // return <DatabaseStep onNext={() => goToNextStep('migrations')} onVerify={goToNextStep} />; // onVerify pode chamar goToNextStep para refazer o status check
+        // return <DatabaseStep onNext={() => goToNextStep('migrations')} onVerify={goToNextStep} />;
          return <div><h3 className="text-xl font-semibold mb-4">{t('steps.db_config.title')}</h3><p className="text-sm mb-4">{t('steps.db_config.instructions_env')}</p><p className="text-xs mb-4">{t('steps.db_config.instructions_env_detail')}</p><button onClick={() => goToNextStep()} className="mt-4 px-4 py-2 bg-brand-primary text-white rounded hover:bg-brand-primary/90">{t('steps.db_config.verify_button')}</button></div>;
       case 'migrations':
         // return <MigrationsStep onNext={() => goToNextStep('admin_creation')} />;
