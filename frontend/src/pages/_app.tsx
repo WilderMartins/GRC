@@ -1,10 +1,11 @@
 import '@/styles/globals.css';
 import 'react-toastify/dist/ReactToastify.css';
 import type { AppProps } from 'next/app';
-import { AuthProvider, useAuth } from '../contexts/AuthContext'; // Importar useAuth também
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { ThemeProvider } from '../contexts/ThemeContext'; // Importar ThemeProvider
 import { ToastContainer } from 'react-toastify';
 import { appWithTranslation } from 'next-i18next';
-import { useEffect } from 'react'; // Importar useEffect
+import { useEffect } from 'react';
 
 // Componente interno para aplicar as variáveis CSS, pois useAuth só funciona dentro do AuthProvider
 const DynamicBrandingStyles = () => {
@@ -26,10 +27,11 @@ const DynamicBrandingStyles = () => {
 function MyApp({ Component, pageProps }: AppProps) {
   return (
     <AuthProvider>
-      <DynamicBrandingStyles /> {/* Adicionar o componente aqui */}
-      <Component {...pageProps} />
-      <ToastContainer
-        position="top-right"
+      <ThemeProvider> {/* Envolver com ThemeProvider */}
+        <DynamicBrandingStyles />
+        <Component {...pageProps} />
+        <ToastContainer
+          position="top-right"
         autoClose={5000}
         hideProgressBar={false}
         newestOnTop={false}

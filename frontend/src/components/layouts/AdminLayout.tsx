@@ -1,8 +1,9 @@
 import Head from 'next/head';
 import Link from 'next/link';
-import Image from 'next/image'; // Importar Image do Next.js
+import Image from 'next/image';
 import { ReactNode } from 'react';
-import { useAuth } from '@/contexts/AuthContext'; // Importar useAuth
+import { useAuth } from '@/contexts/AuthContext';
+import ThemeSwitcher from '@/components/common/ThemeSwitcher'; // Importar ThemeSwitcher
 
 type AdminLayoutProps = {
   children: ReactNode;
@@ -127,8 +128,9 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
               <h1 className="text-xl font-semibold text-gray-800 dark:text-white">
                 {title}
               </h1>
-              <div className="flex items-center space-x-3">
-                <span className="text-gray-600 dark:text-gray-400">{user?.name || user?.email}</span>
+              <div className="flex items-center space-x-4"> {/* Aumentado o space-x para acomodar o switcher */}
+                <ThemeSwitcher /> {/* Adicionar o ThemeSwitcher aqui */}
+                <span className="text-gray-600 dark:text-gray-400 hidden sm:inline">{user?.name || user?.email}</span>
                 <button
                   onClick={logout}
                   title="Logout"
