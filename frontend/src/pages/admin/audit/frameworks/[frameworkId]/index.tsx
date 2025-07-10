@@ -15,6 +15,7 @@ import {
     ControlWithAssessment,
     PaginatedResponse,
     AuditAssessmentStatusFilter,
+    ComplianceScoreResponse, // Adicionar tipo para a resposta do score
 } from '@/types';
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
@@ -46,9 +47,12 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
 
   const [frameworkInfo, setFrameworkInfo] = useState<Partial<AuditFramework> | null>(null);
   const [controlsWithAssessments, setControlsWithAssessments] = useState<ControlWithAssessment[]>([]);
+  const [complianceScoreData, setComplianceScoreData] = useState<ComplianceScoreResponse | null>(null); // Estado para o score
 
-  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true); // Loading para controles/avaliações
+  const [isLoadingScore, setIsLoadingScore] = useState(true); // Loading para o score
   const [error, setError] = useState<string | null>(null);
+  const [scoreError, setScoreError] = useState<string | null>(null); // Erro específico para o score
 
   const [controlsCurrentPage, setControlsCurrentPage] = useState(1);
   const [controlsPageSize, setControlsPageSize] = useState(10);
@@ -64,7 +68,8 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
 
   useEffect(() => {
     if (frameworkId && typeof frameworkId === 'string' && !authIsLoading && user) {
-      setIsLoadingData(true);
+      // Fetch Framework Info (Name)
+      setIsLoadingData(true); // Pode ser combinado com isLoadingScore ou mantido separado
       apiClient.get<AuditFramework[]>('/audit/frameworks')
         .then(response => {
           const currentFramework = response.data.find(f => f.id === frameworkId);
@@ -75,6 +80,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
           setError(prev => prev ? prev + `; ${t('framework_detail.error_loading_framework_info')}` : t('framework_detail.error_loading_framework_info'));
         });
 
+      // Fetch Control Families
       apiClient.get<ControlFamiliesResponse>(`/audit/frameworks/${frameworkId}/control-families`)
         .then(response => {
           setAvailableControlFamilies(response.data?.families?.sort() || []);
@@ -97,6 +103,26 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
                 setError(prev => prev ? prev + `; ${t('framework_detail.error_loading_family_filters')}` : t('framework_detail.error_loading_family_filters'));
             });
         });
+
+      // Fetch Compliance Score
+      if (user.organization_id) {
+        setIsLoadingScore(true);
+        setScoreError(null);
+        apiClient.get<ComplianceScoreResponse>(`/audit/organizations/${user.organization_id}/frameworks/${frameworkId}/compliance-score`)
+          .then(response => {
+            setComplianceScoreData(response.data);
+          })
+          .catch(err => {
+            console.error(t('framework_detail.error_fetching_score_console'), err);
+            setScoreError(err.response?.data?.error || t('framework_detail.error_loading_score'));
+          })
+          .finally(() => {
+            setIsLoadingScore(false);
+          });
+      } else {
+        setIsLoadingScore(false);
+        setScoreError(t('common:error_org_id_missing_for_score'));
+      }
     }
   }, [frameworkId, authIsLoading, user, t]);
 
@@ -108,6 +134,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
       return;
     }
     setIsLoadingData(true);
+    // setError(null); // Reset error for this specific fetch, or manage errors more granularly
 
     try {
       const controlsParams: { page: number; page_size: number; family?: string } = {
