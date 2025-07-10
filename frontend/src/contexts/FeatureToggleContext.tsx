@@ -21,23 +21,26 @@ export const FeatureToggleProvider = ({ children }: { children: ReactNode }) => 
   const [isLoadingToggles, setIsLoadingToggles] = useState(true);
 
   const fetchAndSetToggles = useCallback(async (isInitialLoad = false) => {
-    if (!isInitialLoad) setIsLoadingToggles(true); // Mostrar loading apenas em refresh manual
-
-    try {
-      // Tentar carregar do localStorage primeiro na carga inicial
-      if (isInitialLoad) {
+    if (!isInitialLoad) {
+        setIsLoadingToggles(true); // Mostrar loading em refresh manual
+    } else {
+        // Na carga inicial, tentar carregar do localStorage primeiro
         const storedTogglesRaw = localStorage.getItem(FEATURE_TOGGLES_STORAGE_KEY);
         if (storedTogglesRaw) {
-          const storedToggles = JSON.parse(storedTogglesRaw) as Record<string, FeatureToggle>;
-          setToggles(storedToggles);
-          // Mesmo que carregue do localStorage, buscar da API para atualizar em segundo plano
-          // mas não setar isLoadingToggles para true para evitar piscar, a menos que seja um refresh.
-          if (Object.keys(storedToggles).length > 0) {
-             setIsLoadingToggles(false); // Considera carregado se tinha algo no storage
-          }
+            try {
+                const storedToggles = JSON.parse(storedTogglesRaw) as Record<string, FeatureToggle>;
+                setToggles(storedToggles);
+                if (Object.keys(storedToggles).length > 0) {
+                    setIsLoadingToggles(false); // Considera carregado se tinha algo no storage
+                }
+            } catch (e) {
+                console.error("Failed to parse stored feature toggles:", e);
+                localStorage.removeItem(FEATURE_TOGGLES_STORAGE_KEY); // Limpar se estiver corrompido
+            }
         }
-      }
+    }
 
+    try {
       const response = await apiClient.get<FeatureToggle[]>('/feature-toggles'); // API Hipotética
       const fetchedTogglesArray = response.data || [];
       const togglesMap: Record<string, FeatureToggle> = {};
@@ -47,23 +50,18 @@ export const FeatureToggleProvider = ({ children }: { children: ReactNode }) => 
       setToggles(togglesMap);
       localStorage.setItem(FEATURE_TOGGLES_STORAGE_KEY, JSON.stringify(togglesMap));
     } catch (error) {
-      console.error("Failed to fetch feature toggles:", error);
-      // Em caso de erro, pode-se manter os toggles do localStorage (se houver) ou limpar.
-      // Por simplicidade, vamos manter o que estava no localStorage ou vazio.
-      // Se for a carga inicial e o localStorage estiver vazio, o estado 'toggles' permanecerá vazio.
-      if (isInitialLoad && Object.keys(toggles).length === 0) { // Apenas setar erro se não conseguiu carregar nada
-          // Poderia ter um estado de erro específico aqui.
-      }
+      console.error("Failed to fetch feature toggles from API:", error);
+      // Mantém os toggles do localStorage em caso de erro na API,
+      // ou vazio se o localStorage também estava vazio/corrompido.
+      // Se isInitialLoad era true e o localStorage estava vazio, isLoadingToggles já é true e será setado para false no finally.
     } finally {
-      // Garantir que o loading seja false após a tentativa da API,
-      // especialmente se o localStorage estava vazio.
-      setIsLoadingToggles(false);
+      setIsLoadingToggles(false); // Garantir que o loading termine
     }
-  }, [toggles]); // Adicionado 'toggles' para que, se ele estiver vazio e a chamada falhar, não entre em loop de re-fetch
+  }, []); // Removido 'toggles' da lista de dependências
 
   useEffect(() => {
     fetchAndSetToggles(true); // Carga inicial
-  }, [fetchAndSetToggles]); // fetchAndSetToggles é useCallback
+  }, [fetchAndSetToggles]);
 
   const isFeatureEnabled = (key: string): boolean => {
     return !!toggles[key]?.is_active;
