@@ -16,13 +16,14 @@ interface BrandingSettings {
 }
 interface AuthContextType {
   isAuthenticated: boolean;
-  user: User | null; // Usar o User importado
+  user: User | null; // Usar o User importado (que deve incluir is_totp_enabled)
   token: string | null;
   branding: BrandingSettings; // Adicionar configurações de branding
   isLoading: boolean; // Para verificar se o estado inicial já foi carregado do localStorage
-  login: (userData: User, token: string) => Promise<void>; // Modificado para async
+  login: (userData: any, token: string) => Promise<void>; // Modificado para async, userData: any para flexibilidade da API
   logout: () => void;
   refreshBranding: () => Promise<void>; // Função para recarregar branding
+  refreshUser: () => Promise<void>; // Função para recarregar dados do usuário (incluindo status MFA)
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -95,29 +96,77 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     loadStoredData();
   }, []);
 
-  const login = async (userData: User, newToken: string) => {
-    setIsLoading(true); // Indicar carregamento durante o login e busca de branding
+  const login = async (apiUserData: any, newToken: string) => { // apiUserData da API pode não ter todos os campos de User type
+    setIsLoading(true);
+
+    // Mapear apiUserData para o tipo User, incluindo is_totp_enabled se vier da API de login
+    // Se a API de login não retornar is_totp_enabled, será buscado por refreshUser ou /me
+    const appUser: User = {
+      id: apiUserData.user_id || apiUserData.id, // Ajustar conforme a resposta real da API de login
+      name: apiUserData.name,
+      email: apiUserData.email,
+      role: apiUserData.role,
+      organization_id: apiUserData.organization_id,
+      is_totp_enabled: apiUserData.is_totp_enabled || false, // Assumir que pode vir da API de login
+      // organization: apiUserData.organization, // Se vier da API
+    };
+
     localStorage.setItem('authToken', newToken);
-    localStorage.setItem('authUser', JSON.stringify(userData));
-    setUser(userData);
+    localStorage.setItem('authUser', JSON.stringify(appUser));
+    setUser(appUser);
     setToken(newToken);
 
-    if (userData.organization_id) {
-      const fetchedBranding = await fetchBrandingSettings(userData.organization_id);
+    if (appUser.organization_id) {
+      const fetchedBranding = await fetchBrandingSettings(appUser.organization_id);
       setBranding(fetchedBranding);
       localStorage.setItem('authBranding', JSON.stringify(fetchedBranding));
     } else {
-      // Caso raro: usuário sem organization_id? Usar default.
       setBranding(defaultBranding);
       localStorage.removeItem('authBranding');
     }
 
+    // Se a API de login não retornou is_totp_enabled, e precisamos dele imediatamente,
+    // poderíamos chamar refreshUser aqui. Mas loadStoredData também tenta buscar.
+    // Para simplificar, a primeira carga de is_totp_enabled virá do localStorage ou de uma chamada /me em refreshUser.
+
     setIsLoading(false);
 
-    if (userData.role === 'admin' || userData.role === 'manager') {
+    if (appUser.role === 'admin' || appUser.role === 'manager') {
       router.push('/admin/dashboard');
     } else {
       router.push('/dashboard');
+    }
+  };
+
+  const refreshUser = async () => {
+    if (!token) return; // Não pode recarregar usuário sem token
+    setIsLoading(true);
+    try {
+      const response = await apiClient.get('/me'); // Assumindo que /me retorna o objeto User completo, incluindo is_totp_enabled
+      const updatedUser: User = {
+        id: response.data.user_id || response.data.id,
+        name: response.data.name,
+        email: response.data.email,
+        role: response.data.role,
+        organization_id: response.data.organization_id,
+        is_totp_enabled: response.data.is_totp_enabled || false,
+        // organization: response.data.organization, // Se /me retornar isso
+      };
+      setUser(updatedUser);
+      localStorage.setItem('authUser', JSON.stringify(updatedUser));
+
+      // Se organization_id mudou (improvável) ou se branding não estava carregado, recarregar branding
+      if (updatedUser.organization_id && (!branding || branding === defaultBranding)) {
+        const fetchedBranding = await fetchBrandingSettings(updatedUser.organization_id);
+        setBranding(fetchedBranding);
+        localStorage.setItem('authBranding', JSON.stringify(fetchedBranding));
+      }
+    } catch (error) {
+      console.error("Failed to refresh user data:", error);
+      // Potencialmente fazer logout se /me falhar (token inválido)
+      // logout();
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -142,7 +191,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!token, user, token, branding, isLoading, login, logout, refreshBranding }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!token, user, token, branding, isLoading, login, logout, refreshBranding, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
