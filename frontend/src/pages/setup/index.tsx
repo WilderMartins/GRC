@@ -9,7 +9,8 @@ import type { GetStaticProps, InferGetStaticPropsType } from 'next';
 import WelcomeStep from '@/components/setup/WelcomeStep';
 import DatabaseStep from '@/components/setup/DatabaseStep';
 import MigrationsStep from '@/components/setup/MigrationsStep';
-import AdminCreationStep, { AdminCreationFormData } from '@/components/setup/AdminCreationStep'; // Importar AdminCreationStep e FormData
+import AdminCreationStep, { AdminCreationFormData } from '@/components/setup/AdminCreationStep';
+import CompletionStep from '@/components/setup/CompletionStep'; // Importar CompletionStep
 import { useNotifier } from '@/hooks/useNotifier';
 
 // Definir os tipos para as etapas do wizard e status da API
@@ -57,8 +58,8 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
         setCurrentStep('admin_creation');
         break;
       case 'completed':
-        setCurrentStep('completed_redirect');
-        router.push('/auth/login');
+        setCurrentStep('completed_redirect'); // Apenas define o passo
+        // router.push('/auth/login'); // REMOVIDO - CompletionStep fará a navegação
         break;
       default:
         setCurrentStep('welcome');
@@ -182,9 +183,9 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
                   errorMessage={apiError}
                 />;
       case 'completed_redirect':
-        return <div className="text-center"><p>{t('steps.completed.redirecting')}</p></div>;
+        return <CompletionStep />; // Renderiza o CompletionStep
       default:
-        return <div className="text-center"><p>{t('steps.unknown_step')}: {currentStep}</p></div>;
+        return <div className="text-center py-10"><p>{t('steps.unknown_step')}: {currentStep}</p></div>;
     }
   };
 
