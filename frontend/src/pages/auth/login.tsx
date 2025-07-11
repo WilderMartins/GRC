@@ -34,6 +34,7 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
   const [ssoProviders, setSsoProviders] = useState<LoginIdentityProvider[]>([]);
   const [isLoadingSso, setIsLoadingSso] = useState(true);
   const [ssoError, setSsoError] = useState<string | null>(null);
+  const [ssoLoadingProvider, setSsoLoadingProvider] = useState<string | null>(null); // Novo estado para loading de botão SSO
 
   // Estados para 2FA
   const [isTwoFactorStep, setIsTwoFactorStep] = useState(false);
@@ -236,14 +237,28 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
               {!isLoadingSso && ssoProviders.length > 0 && (
                 <div className="space-y-3">
                   {ssoProviders.map((provider) => (
-                    <button key={provider.id} onClick={() => window.location.href = provider.login_url}
-                            className="flex w-full items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors">
-                      <span className="mr-2 text-xl"> {/* Aumentado o tamanho do emoji/ícone */}
-                        {provider.type === 'oauth2_google' && '🇬'}
-                        {provider.type === 'oauth2_github' && <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.5.49.09.66-.213.66-.473 0-.234-.01-1.028-.015-1.86-2.782.602-3.369-1.206-3.369-1.206-.445-1.13-.91-1.43-.91-1.43-.889-.608.067-.596.067-.596 1.003.07 1.531 1.03 1.531 1.03.892 1.527 2.341 1.087 2.91.831.091-.645.35-1.087.638-1.337-2.22-.252-4.555-1.11-4.555-4.937 0-1.09.39-1.984 1.029-2.682-.103-.254-.446-1.27.098-2.647 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.82c.85.004 1.705.115 2.504.336 1.909-1.296 2.747-1.026 2.747-1.026.546 1.377.203 2.393.1 2.647.64.698 1.028 1.592 1.028 2.682 0 3.837-2.339 4.683-4.567 4.93.359.307.678.915.678 1.846 0 1.337-.012 2.416-.012 2.74 0 .26.169.566.668.473A10.01 10.01 0 0022 12.017C22 6.484 17.522 2 12 2Z" clipRule="evenodd" /></svg>}
-                        {provider.type === 'saml' && '🔑'}
-                      </span>
-                      {t('login.sso_button_prefix', {providerName: provider.name})}
+                    <button
+                      key={provider.id}
+                      onClick={() => {
+                        setSsoLoadingProvider(provider.id); // ou provider.login_url se for mais único
+                        window.location.href = provider.login_url;
+                      }}
+                      disabled={isLoadingTraditionalLogin || isVerifyingTwoFactor || !!ssoLoadingProvider}
+                      className="flex w-full items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-60"
+                    >
+                      {ssoLoadingProvider === provider.id ? (
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-700 dark:text-gray-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        <span className="mr-2 text-xl">
+                          {provider.type === 'oauth2_google' && '🇬'}
+                          {provider.type === 'oauth2_github' && <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.5.49.09.66-.213.66-.473 0-.234-.01-1.028-.015-1.86-2.782.602-3.369-1.206-3.369-1.206-.445-1.13-.91-1.43-.91-1.43-.889-.608.067-.596.067-.596 1.003.07 1.531 1.03 1.531 1.03.892 1.527 2.341 1.087 2.91.831.091-.645.35-1.087.638-1.337-2.22-.252-4.555-1.11-4.555-4.937 0-1.09.39-1.984 1.029-2.682-.103-.254-.446-1.27.098-2.647 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.82c.85.004 1.705.115 2.504.336 1.909-1.296 2.747-1.026 2.747-1.026.546 1.377.203 2.393.1 2.647.64.698 1.028 1.592 1.028 2.682 0 3.837-2.339 4.683-4.567 4.93.359.307.678.915.678 1.846 0 1.337-.012 2.416-.012 2.74 0 .26.169.566.668.473A10.01 10.01 0 0022 12.017C22 6.484 17.522 2 12 2Z" clipRule="evenodd" /></svg>}
+                          {provider.type === 'saml' && '🔑'}
+                        </span>
+                      )}
+                      {ssoLoadingProvider === provider.id ? t('login.sso_redirecting_button') : t('login.sso_button_prefix', {providerName: provider.name})}
                     </button>
                   ))}
                 </div>
