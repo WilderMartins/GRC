@@ -158,6 +158,22 @@ Os serviços comunicam-se em uma rede Docker customizada chamada `grc_network` p
 *   **Build do Frontend**: Garanta que o build de produção do frontend esteja otimizado e sendo servido corretamente pelo Nginx.
 *   **Logging**: Configure o logging do Nginx e do backend para um sistema centralizado em produção.
 *   **Backups**: Implemente uma estratégia de backup robusta para o volume de dados do PostgreSQL.
+*   **Migrações de Banco de Dados**:
+    *   Atualmente, o backend utiliza `AutoMigrate` do GORM para inicializar o esquema do banco de dados. Isso é conveniente para desenvolvimento.
+    *   **Para ambientes de Staging e Produção, é fortemente recomendado o uso de uma ferramenta de migração de banco de dados dedicada** (como [golang-migrate/migrate](https://github.com/golang-migrate/migrate)). Isso proporciona versionamento, controle granular sobre alterações de esquema (incluindo a aplicação correta de constraints de chave estrangeira como `ON DELETE CASCADE/SET NULL`), e a capacidade de realizar rollbacks de forma segura.
+    *   As tags `constraint:OnDelete:...` foram adicionadas aos modelos GORM, mas sua aplicação efetiva em bancos de dados existentes via `AutoMigrate` pode ser limitada. Migrações dedicadas garantiriam que essas constraints estejam corretamente implementadas.
+
+### Comportamento de Exclusão e Integridade Referencial
+
+Com as constraints `ON DELETE CASCADE` e `ON DELETE SET NULL` definidas nos modelos:
+*   **Organização**: A exclusão de uma organização resultará na exclusão em cascata de todos os seus dados associados (Usuários, Riscos, Vulnerabilidades, Avaliações de Auditoria, Provedores de Identidade, Webhooks). Esta é uma operação destrutiva e deve ser tratada com extremo cuidado.
+*   **Risco**: A exclusão de um risco resultará na exclusão em cascata de seus Stakeholders de Risco e Workflows de Aprovação associados.
+*   **Usuário**:
+    *   Se um usuário for excluído, os campos `OwnerID` nos Riscos, e `RequesterID`/`ApproverID` nos Workflows de Aprovação que o referenciam serão definidos como `NULL`.
+    *   As entradas na tabela de junção `RiskStakeholder` associadas a este usuário serão excluídas em cascata.
+*   **AuditFramework / AuditControl**: A exclusão de um Framework cascateia para seus Controles, e a exclusão de um Controle cascateia para suas Avaliações.
+
+É crucial garantir que estas constraints sejam devidamente aplicadas ao esquema do banco de dados através de migrações apropriadas para que este comportamento seja efetivo.
 
 ## Endpoints da API (Backend)
 

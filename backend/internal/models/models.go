@@ -94,7 +94,7 @@ func (org *Organization) BeforeCreate(tx *gorm.DB) (err error) {
 
 type User struct {
 	ID             uuid.UUID `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID `gorm:"type:uuid;not null"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
 	Name           string    `gorm:"size:255;not null"`
 	Email          string    `gorm:"size:255;not null;uniqueIndex"`
 	PasswordHash   string    `gorm:"size:255;not null"`
@@ -122,7 +122,7 @@ func (user *User) BeforeCreate(tx *gorm.DB) (err error) {
 
 type Risk struct {
 	ID             uuid.UUID       `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID       `gorm:"type:uuid;not null"`
+	OrganizationID uuid.UUID       `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
 	Title          string          `gorm:"size:255;not null"`
 	Description    string          `gorm:"type:text"`
 	Category       RiskCategory    `gorm:"type:varchar(50)"`
@@ -130,12 +130,12 @@ type Risk struct {
 	Probability    RiskProbability `gorm:"type:varchar(20)"`
 	RiskLevel      string          `gorm:"type:varchar(20);default:'Indefinido'"` // Nível de Risco Calculado
 	Status         RiskStatus      `gorm:"type:varchar(20);default:'aberto'"`
-	OwnerID        uuid.UUID       `gorm:"type:uuid"` // FK to User
+	OwnerID        uuid.UUID       `gorm:"type:uuid;constraint:OnDelete:SET NULL;"` // FK to User
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	Owner          User              `gorm:"foreignKey:OwnerID"`
-	Stakeholders   []RiskStakeholder `gorm:"foreignKey:RiskID"`
-	ApprovalWorkflows []ApprovalWorkflow `gorm:"foreignKey:RiskID"`
+	Owner          User              `gorm:"foreignKey:OwnerID"` // Relação Belongs To User
+	Stakeholders   []RiskStakeholder `gorm:"foreignKey:RiskID;constraint:OnDelete:CASCADE;"`
+	ApprovalWorkflows []ApprovalWorkflow `gorm:"foreignKey:RiskID;constraint:OnDelete:CASCADE;"`
 }
 
 func (risk *Risk) BeforeCreate(tx *gorm.DB) (err error) {
@@ -147,7 +147,7 @@ func (risk *Risk) BeforeCreate(tx *gorm.DB) (err error) {
 
 type Vulnerability struct {
 	ID             uuid.UUID             `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID             `gorm:"type:uuid;not null"`
+	OrganizationID uuid.UUID             `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
 	Title          string                `gorm:"size:255;not null"`
 	Description    string                `gorm:"type:text"`
 	CVEID          string                `gorm:"size:50;index"` // Optional
@@ -169,16 +169,16 @@ func (vuln *Vulnerability) BeforeCreate(tx *gorm.DB) (err error) {
 type RiskStakeholder struct {
 	RiskID    uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;primaryKey"`
-	Risk      Risk      `gorm:"foreignKey:RiskID"`
-	User      User      `gorm:"foreignKey:UserID"`
+	Risk      Risk      `gorm:"foreignKey:RiskID;constraint:OnDelete:CASCADE;"`
+	User      User      `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE;"`
 	CreatedAt time.Time
 }
 
 type ApprovalWorkflow struct {
 	ID          uuid.UUID      `gorm:"type:uuid;primary_key;"`
-	RiskID      uuid.UUID      `gorm:"type:uuid;not null"`
-	RequesterID uuid.UUID      `gorm:"type:uuid;not null"` // FK to User
-	ApproverID  uuid.UUID      `gorm:"type:uuid;not null"` // FK to User
+	RiskID      uuid.UUID      `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
+	RequesterID uuid.UUID      `gorm:"type:uuid;constraint:OnDelete:SET NULL;"` // FK to User
+	ApproverID  uuid.UUID      `gorm:"type:uuid;constraint:OnDelete:SET NULL;"` // FK to User
 	Status      ApprovalStatus `gorm:"type:varchar(20);default:'pendente'"`
 	Comments    string         `gorm:"type:text"`
 	CreatedAt   time.Time
@@ -198,7 +198,7 @@ func (aw *ApprovalWorkflow) BeforeCreate(tx *gorm.DB) (err error) {
 type AuditFramework struct {
 	ID             uuid.UUID `gorm:"type:uuid;primary_key;"`
 	Name           string    `gorm:"size:255;not null;uniqueIndex"` // NIST CSF 2.0, CIS Controls v8, etc.
-	AuditControls  []AuditControl `gorm:"foreignKey:FrameworkID"`
+	AuditControls  []AuditControl `gorm:"foreignKey:FrameworkID;constraint:OnDelete:CASCADE;"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -216,8 +216,8 @@ type AuditControl struct {
 	ControlID   string    `gorm:"size:50;not null"` // e.g., AC-1, PR.IP-2
 	Description string    `gorm:"type:text"`
 	Family      string    `gorm:"size:100"` // e.g., Access Control, Identify
-	Framework   AuditFramework `gorm:"foreignKey:FrameworkID"`
-	AuditAssessments []AuditAssessment `gorm:"foreignKey:AuditControlID"` // TODO: JULES - Resolvido descomentando.
+	Framework   AuditFramework `gorm:"foreignKey:FrameworkID;constraint:OnDelete:CASCADE;"` // Se o Framework for deletado, os controles também são.
+	AuditAssessments []AuditAssessment `gorm:"foreignKey:AuditControlID;constraint:OnDelete:CASCADE;"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -233,7 +233,7 @@ func (ac *AuditControl) BeforeCreate(tx *gorm.DB) (err error) {
 
 type AuditAssessment struct {
 	ID             uuid.UUID          `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID          `gorm:"type:uuid;not null"`
+	OrganizationID uuid.UUID          `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
 	// Storing AuditControl's UUID for a more robust FK relationship
 	AuditControlID uuid.UUID          `gorm:"type:uuid;not null"` // FK to AuditControl's ID
 	Status         AuditControlStatus `gorm:"type:varchar(30)"`
@@ -242,7 +242,9 @@ type AuditAssessment struct {
 	AssessmentDate time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	AuditControl   AuditControl       `gorm:"foreignKey:AuditControlID"` // TODO: JULES - Resolvido descomentando.
+	AuditControl   AuditControl       `gorm:"foreignKey:AuditControlID;constraint:OnDelete:CASCADE;"` // Se o AuditControl for deletado
+	// A OrganizationID também é uma FK. Se a Organization for deletada, as Assessments devem ser deletadas.
+	// Isso será tratado na definição da relação em Organization struct.
 }
 
 func (as *AuditAssessment) BeforeCreate(tx *gorm.DB) (err error) {
@@ -285,7 +287,7 @@ type IdentityProvider struct {
 	AttributeMappingJSON string               `gorm:"type:jsonb"` // Optional: maps IdP attributes to User fields
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-	Organization         Organization `gorm:"foreignKey:OrganizationID"`
+	Organization         Organization `gorm:"foreignKey:OrganizationID;constraint:OnDelete:CASCADE;"`
 }
 
 // BeforeCreate hook to ensure ID is set for IdentityProvider
@@ -319,7 +321,7 @@ type WebhookConfiguration struct {
 	IsActive       bool      `gorm:"default:true;not null"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	Organization   Organization `gorm:"foreignKey:OrganizationID"`
+	Organization   Organization `gorm:"foreignKey:OrganizationID;constraint:OnDelete:CASCADE;"`
 }
 
 // BeforeCreate hook para WebhookConfiguration
