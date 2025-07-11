@@ -132,11 +132,36 @@ Se o setup (via Wizard ou CLI) foi concluído com sucesso, para iniciar a aplica
 docker-compose up
 ```
 
-O servidor backend estará acessível em `http://localhost:PORTA` (onde `PORTA` é o valor de `SERVER_PORT` no seu `.env`, padrão: `8080`).
+O servidor backend estará acessível em `http://localhost:PORTA_DO_NGINX/api/` ou `http://localhost:PORTA_DO_NGINX/auth/` (se `NGINX_PORT` for 80, então `http://localhost/api/`). Se acessando o backend diretamente (sem Nginx), use `http://localhost:PORTA_DO_BACKEND` (onde `PORTA_DO_BACKEND` é o valor de `SERVER_PORT` no seu `.env`, padrão: `8080`).
+
+## Detalhes do Ambiente Docker
+
+O `docker-compose.yml` define três serviços principais:
+
+*   **`db`**: O container do banco de dados PostgreSQL (versão 16.2-alpine). Os dados são persistidos no volume nomeado `postgres_data`.
+*   **`backend`**: A aplicação Go (API). Construída a partir do `Dockerfile.backend`, que usa um build multi-stage para uma imagem final Alpine pequena e executa como usuário não-root.
+    *   Depende do serviço `db` estar saudável antes de iniciar.
+    *   Lê variáveis de ambiente do arquivo `.env` para configuração (porta, JWT, DB, etc.).
+*   **`nginx`**: Servidor Nginx (versão 1.25-alpine) atuando como proxy reverso para o `backend` e servindo o frontend.
+    *   A configuração (`nginx/nginx.conf`) faz proxy de requisições para `/api/`, `/auth/`, e `/health` para o serviço `backend`.
+    *   **Servindo o Frontend**: Por padrão, está configurado para servir um frontend Next.js estático (gerado por `next build && next export` ou `output: 'export'` no `next.config.js`).
+        *   **Importante**: Você deve buildar seu frontend Next.js (ex: `cd frontend && npm run build` e/ou `npm run export` se necessário) para gerar a pasta `out/` dentro de `frontend/`. O `docker-compose.yml` monta `frontend/out` para ser servido pelo Nginx. Se esta pasta estiver vazia ou ausente, o Nginx não servirá o frontend.
+        *   Alternativamente, para desenvolvimento do frontend ou se usar SSR/ISR com `next start`, você pode rodar o frontend separadamente (ex: `npm run dev` no host ou em seu próprio container) e acessar a API do backend através do Nginx ou diretamente.
+
+Os serviços comunicam-se em uma rede Docker customizada chamada `grc_network` para melhor isolamento.
+
+### Considerações para Produção com Docker/Nginx:
+
+*   **Variáveis de Ambiente**: Certifique-se de que todas as variáveis no arquivo `.env` de produção, especialmente `JWT_SECRET_KEY` e `ENCRYPTION_KEY_HEX`, sejam fortes, únicas e mantidas em segredo.
+*   **HTTPS**: A configuração do Nginx (`nginx/nginx.conf`) contém exemplos comentados para habilitar HTTPS. Em produção, HTTPS é **obrigatório**. Você precisará obter certificados SSL/TLS (ex: via Let's Encrypt) e configurar o Nginx para usá-los.
+*   **Headers de Segurança**: Descomente e ajuste os headers de segurança no `nginx.conf` (X-Frame-Options, CSP, HSTS, etc.) para aumentar a segurança da aplicação.
+*   **Build do Frontend**: Garanta que o build de produção do frontend esteja otimizado e sendo servido corretamente pelo Nginx.
+*   **Logging**: Configure o logging do Nginx e do backend para um sistema centralizado em produção.
+*   **Backups**: Implemente uma estratégia de backup robusta para o volume de dados do PostgreSQL.
 
 ## Endpoints da API (Backend)
 
-A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autenticação JWT.
+A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autenticação JWT. Para detalhes completos, veja o arquivo [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
 
 ### Autenticação
 

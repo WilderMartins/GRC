@@ -21,8 +21,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o /app/server ./cmd/s
 FROM alpine:3.19 # Pin to a specific version
 
 # Add ca-certificates in case your app needs to make HTTPS requests
+# Add curl for healthcheck
 # Create a non-root user and group
-RUN apk --no-cache add ca-certificates && \
+RUN apk --no-cache add ca-certificates curl && \
     addgroup -S appgroup && \
     adduser -S appuser -G appgroup
 
@@ -40,6 +41,12 @@ USER appuser
 
 # Expose port (default 8080, or set by SERVER_PORT) to the outside world
 EXPOSE 8080
+
+# Healthcheck to verify the application is running
+# Note: Adjust port if your application internally listens on a different port than exposed,
+# though for this setup, 8080 is consistently used.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
 
 # Command to run the executable which is now the Gin HTTP server.
 CMD ["./server"]

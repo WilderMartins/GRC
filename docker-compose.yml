@@ -1,7 +1,13 @@
 version: '3.8'
 
+networks:
+  grc_network:
+    driver: bridge
+
 services:
   backend:
+    networks:
+      - grc_network
     build:
       context: . # Context is the root of the project
       dockerfile: Dockerfile.backend
@@ -31,6 +37,8 @@ services:
     restart: unless-stopped
 
   db:
+    networks:
+      - grc_network
     image: postgres:16.2-alpine # Pinned to a specific patch version
     container_name: phoenix_grc_db
     environment:
@@ -51,6 +59,8 @@ services:
     restart: unless-stopped
 
   nginx:
+    networks:
+      - grc_network
     image: nginx:1.25-alpine # Pinned to a specific version
     container_name: phoenix_grc_nginx
     ports:
