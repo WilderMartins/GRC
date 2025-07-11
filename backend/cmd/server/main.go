@@ -203,6 +203,7 @@ func startServer() {
 			auditRoutes.GET("/frameworks/:frameworkId/control-families", handlers.GetControlFamiliesForFrameworkHandler) // Nova rota
 			auditRoutes.POST("/assessments", handlers.CreateOrUpdateAssessmentHandler)
 			auditRoutes.GET("/assessments/control/:controlId", handlers.GetAssessmentForControlHandler)
+			auditRoutes.DELETE("/assessments/:assessmentId/evidence", handlers.DeleteAssessmentEvidenceHandler) // Nova rota para deletar evidência
 			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/assessments", handlers.ListOrgAssessmentsByFrameworkHandler)
 			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/compliance-score", handlers.GetComplianceScoreHandler)
 		}
@@ -228,6 +229,12 @@ func startServer() {
 		// Colocado no nível /api/v1/ pois não é específico de uma organização via path param,
 		// mas opera na organização do usuário autenticado.
 		apiV1.GET("/users/organization-lookup", handlers.OrganizationUserLookupHandler)
+
+		// Endpoint para obter URLs assinadas para acesso a arquivos
+		fileAccessRoutes := apiV1.Group("/files")
+		{
+			fileAccessRoutes.GET("/signed-url", handlers.GetSignedURLForObjectHandler)
+		}
 	}
 
 	serverPort := os.Getenv("SERVER_PORT")

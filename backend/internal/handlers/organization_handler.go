@@ -119,20 +119,21 @@ func UpdateOrganizationBrandingHandler(c *gin.Context) {
 		fileExtension := filepath.Ext(header.Filename)
 		objectName := fmt.Sprintf("%s/branding/logo_%d%s", targetOrgID.String(), time.Now().UnixNano(), fileExtension)
 
-		logoURL, errUpload := filestorage.DefaultFileStorageProvider.UploadFile(c.Request.Context(), targetOrgID.String(), objectName, file)
+		// UploadFile agora retorna objectName
+		objectNameReturned, errUpload := filestorage.DefaultFileStorageProvider.UploadFile(c.Request.Context(), targetOrgID.String(), objectName, file)
 		if errUpload != nil {
-			log.Printf("Falha ao fazer upload do logo para GCS para org %s por usuário %s: %v", targetOrgID, actingUserID, errUpload)
+			log.Printf("Falha ao fazer upload do logo para org %s por usuário %s: %v", targetOrgID, actingUserID, errUpload)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao fazer upload do logo: " + errUpload.Error()})
 			return
 		}
-		uploadedLogoURL = logoURL
-		log.Printf("Logo para organização %s atualizado por usuário %s: %s", targetOrgID, actingUserID, uploadedLogoURL)
-		organization.LogoURL = uploadedLogoURL // Atualiza apenas se novo logo foi enviado
+		log.Printf("Logo para organização %s atualizado por usuário %s. ObjectName: %s", targetOrgID, actingUserID, objectNameReturned)
+		organization.LogoURL = objectNameReturned // Armazena o objectName
 	} else if errFile != http.ErrMissingFile {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Erro ao processar arquivo de logo: " + errFile.Error()})
 		return
 	}
-
+	// Nota: Se nenhum arquivo for enviado, organization.LogoURL (que conteria o objectName anterior) não é alterado aqui.
+	// A remoção explícita de um logo precisaria de um sinal no payload JSON `data`.
 
 	// Atualizar cores se fornecidas no payload
 	if payloadString != "" { // Se o campo 'data' foi enviado
@@ -142,6 +143,15 @@ func UpdateOrganizationBrandingHandler(c *gin.Context) {
 		if payload.SecondaryColor != "" {
 			organization.SecondaryColor = payload.SecondaryColor
 		}
+		// Se o payload JSON 'data' pudesse indicar a remoção do logo:
+		// var tempData map[string]interface{}
+		// if json.Unmarshal([]byte(payloadString), &tempData) == nil {
+		// 	if clearLogo, ok := tempData["clear_logo"].(bool); ok && clearLogo {
+		// 		organization.LogoURL = "" // Limpa o objectName
+		// 	} else if newLogoURL, ok := tempData["logo_url"].(string); ok && newLogoURL == "" { // Outra forma de indicar remoção
+		//      organization.LogoURL = ""
+		//  }
+		// }
 	}
 
 

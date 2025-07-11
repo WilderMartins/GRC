@@ -6,11 +6,15 @@ import (
 	"io"
 	"log"
 	"phoenixgrc/backend/pkg/config" // Referência ao config da aplicação
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsGoConfig "github.com/aws/aws-sdk-go-v2/config" // Alias para evitar conflito com pkg/config
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager" // Para S3 Upload Manager
+	"github.com/aws/aws-sdk-go-v2/service/s3/types" // Para types.NoSuchKey
 	// "github.com/aws/smithy-go" // Para error handling mais específico, se necessário
 )
 
@@ -94,24 +98,69 @@ func (s *S3StorageProvider) UploadFile(ctx context.Context, organizationID strin
 	// 1. Path-style: https://s3.<region>.amazonaws.com/<bucket>/<key>
 	// 2. Virtual-hosted-style: https://<bucket>.s3.<region>.amazonaws.com/<key> (preferível)
 	// uploadOutput.Location é a URL do objeto, geralmente no formato virtual-hosted.
-	publicURL := uploadOutput.Location
-	if publicURL == "" { // Fallback se Location não for preenchido (improvável com uploader)
-		publicURL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucketName, s.region, objectName)
+	// publicURL := uploadOutput.Location // Não retornamos mais a URL diretamente.
+	// if publicURL == "" {
+	//	publicURL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucketName, s.region, objectName)
+	// }
+
+	log.Printf("File uploaded successfully to S3: s3://%s/%s", s.bucketName, objectName)
+	return objectName, nil // Retorna o objectName (key)
+}
+
+// DeleteFile remove um arquivo do S3 usando o objectName (key).
+func (s *S3StorageProvider) DeleteFile(ctx context.Context, objectName string) error {
+	if s.client == nil || s.bucketName == "" {
+		return fmt.Errorf("S3 provider not initialized or configured correctly")
+	}
+	if objectName == "" {
+		return fmt.Errorf("object name cannot be empty for DeleteFile")
 	}
 
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(objectName),
+	})
 
-	log.Printf("File uploaded successfully to S3: %s", publicURL)
-	return publicURL, nil
+	if err != nil {
+		var nsk *types.NoSuchKey
+		// Em aws-sdk-go-v2, para verificar o tipo de erro específico:
+		// if errors.As(err, &nsk)
+		// Por simplicidade e compatibilidade com a verificação de string que pode já existir:
+		if strings.Contains(err.Error(), "NoSuchKey") {
+			log.Printf("S3 DeleteFile: Object %s not found in bucket %s (considered successful for idempotency).", objectName, s.bucketName)
+			return nil
+		}
+		return fmt.Errorf("failed to delete object '%s' from S3 bucket '%s': %w", objectName, s.bucketName, err)
+	}
+
+	log.Printf("File deleted successfully from S3: s3://%s/%s", s.bucketName, objectName)
+	return nil
 }
 
-// DeleteFile (opcional, pode ser implementado se necessário)
-func (s *S3StorageProvider) DeleteFile(ctx context.Context, fileURL string) error {
-	// Para implementar: parsear fileURL para obter bucket (verificar se é o s.bucketName) e object key.
-	// Depois chamar s.client.DeleteObject(ctx, &s3.DeleteObjectInput{...})
-	return fmt.Errorf("S3 DeleteFile not yet implemented")
+// GetSignedURL gera uma URL assinada para um objeto no S3.
+func (s *S3StorageProvider) GetSignedURL(ctx context.Context, objectName string, durationMinutes int) (string, error) {
+	if s.client == nil || s.bucketName == "" {
+		return "", fmt.Errorf("S3 provider not initialized or configured correctly")
+	}
+	if objectName == "" {
+		return "", fmt.Errorf("object name cannot be empty for GetSignedURL")
+	}
+
+	presignClient := s3.NewPresignClient(s.client)
+	presignedURL, err := presignClient.PresignGetObject(ctx,
+		&s3.GetObjectInput{
+			Bucket: aws.String(s.bucketName),
+			Key:    aws.String(objectName),
+		},
+		s3.WithPresignExpires(time.Duration(durationMinutes)*time.Minute),
+	)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to generate signed URL for S3 object '%s': %w", objectName, err)
+	}
+
+	return presignedURL.URL, nil
 }
 
-// TODO: Adicionar lógica de deleção se o prompt exigir ou for uma melhoria futura.
-// TODO: Considerar URLs assinadas para acesso privado em vez de ACLs públicas.
 
 // Ensure newline at end of file

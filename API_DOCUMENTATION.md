@@ -402,9 +402,9 @@ A autorização geralmente requer que o usuário autenticado pertença à organi
                 "secondary_color": "#RRGGBB"  // string, opcional, formato HEX
             }
             ```
-        *   Campo `logo_file` (arquivo, opcional): Arquivo de imagem para o logo (JPEG, PNG, GIF, SVG, limite 2MB).
+        *   Campo `logo_file` (arquivo, opcional): Arquivo de imagem para o logo (JPEG, PNG, GIF, SVG, limite 2MB). Se fornecido, o `objectName` do logo armazenado será salvo no campo `LogoURL` do modelo `Organization`.
     *   **Respostas:**
-        *   `200 OK`: Objeto `models.Organization` atualizado.
+        *   `200 OK`: Objeto `models.Organization` atualizado. O campo `LogoURL` conterá o `objectName` (se um arquivo foi carregado) ou estará vazio/inalterado. Para acessar o logo carregado, use o endpoint `GET /api/v1/files/signed-url`.
         *   `400 Bad Request`: Formato de ID inválido, JSON inválido, formato de cor inválido, arquivo de logo muito grande ou tipo não permitido.
         *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Organização não encontrada.
@@ -742,19 +742,19 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             {
                 "audit_control_id": "uuid-do-audit-control", // string UUID, obrigatório
                 "status": "string (obrigatório, um de: conforme, nao_conforme, parcialmente_conforme)",
-                "evidence_url": "string (opcional, URL)", // Usado se evidence_file não for enviado
+                "evidence_url": "string (opcional, URL externa)", // Usado se evidence_file não for enviado e for uma URL externa. Se um arquivo for carregado, este campo é ignorado.
                 "score": "integer (opcional, 0-100, default baseado no status)",
                 "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)"
             }
             ```
-        *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, sua URL (após upload) substitui `evidence_url` no JSON.
+        *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, o `objectName` do arquivo armazenado será salvo no campo `EvidenceURL` do modelo `AuditAssessment`.
     *   **Respostas:**
-        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado.
+        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado. O campo `EvidenceURL` conterá o `objectName` (se um arquivo foi carregado) ou a URL externa fornecida. Para acessar arquivos carregados, use o endpoint `GET /api/v1/files/signed-url`.
         *   `400 Bad Request`: Formulário/JSON inválido, `audit_control_id` inválido, data inválida, arquivo muito grande ou tipo não permitido.
         *   `500 Internal Server Error`: Falha no upload ou ao salvar no banco.
 
 *   **`GET /api/v1/audit/assessments/control/:controlId`**
-    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado.
+    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado. O campo `EvidenceURL` conterá o `objectName` (se aplicável) ou uma URL externa.
     *   **Autenticação:** JWT Obrigatório.
     *   **Parâmetros de Path:** `controlId` (string UUID).
     *   **Respostas:**
@@ -762,6 +762,16 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
         *   `400 Bad Request`: `controlId` inválido.
         *   `404 Not Found`: Nenhuma avaliação encontrada para este controle na organização.
         *   `500 Internal Server Error`.
+
+*   **`DELETE /api/v1/audit/assessments/:assessmentId/evidence`**
+    *   **Descrição:** Remove o arquivo de evidência associado a uma avaliação específica e limpa o campo `EvidenceURL` no banco de dados. Se a `EvidenceURL` for um link externo, apenas o campo no banco é limpo.
+    *   **Autenticação:** JWT Obrigatório. (Autorização: Usuário deve pertencer à organização da avaliação; TODO: refinar para admin/manager ou criador da avaliação).
+    *   **Parâmetros de Path:** `assessmentId` (string UUID).
+    *   **Respostas:**
+        *   `200 OK`: `{ "message": "Evidence deleted successfully from assessment." }` ou `{ "message": "No evidence to delete for this assessment." }`
+        *   `403 Forbidden`: Usuário não autorizado.
+        *   `404 Not Found`: Avaliação não encontrada.
+        *   `500 Internal Server Error`: Falha ao deletar arquivo do storage ou ao atualizar o registro da avaliação.
 
 *   **`GET /api/v1/audit/organizations/:orgId/frameworks/:frameworkId/assessments`**
     *   **Descrição:** Lista todas as avaliações de uma organização específica para um determinado framework (paginado).
@@ -880,6 +890,29 @@ Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
         }
         ```
     *   **Respostas:** (Já documentado na Seção 2 - Autenticação)
+
+---
+
+### 9. Gerenciamento de Arquivos (`/api/v1/files`)
+
+Endpoints para operações relacionadas a arquivos, como obter URLs de acesso seguro.
+
+*   **`GET /api/v1/files/signed-url`**
+    *   **Descrição:** Gera uma URL assinada de curta duração para acessar um objeto de arquivo armazenado (ex: evidências de auditoria, logos). Os arquivos são armazenados de forma privada e esta URL fornece acesso temporário.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Query Params:**
+        *   `objectKey` (string, obrigatório): A chave/path do objeto no bucket de armazenamento. Este é o valor que agora é armazenado em campos como `AuditAssessment.EvidenceURL` ou `Organization.LogoURL` quando se referem a um arquivo carregado pela aplicação.
+        *   `durationMinutes` (int, opcional, default: 15): Duração em minutos para a validade da URL assinada (máximo usualmente permitido pelos provedores é 7 dias, ou 10080 minutos).
+    *   **Respostas:**
+        *   `200 OK`:
+            ```json
+            {
+                "signed_url": "https://storage.provider.com/path/to/object?signature=..."
+            }
+            ```
+        *   `400 Bad Request`: `objectKey` ausente ou `durationMinutes` inválido.
+        *   `404 Not Found`: Se o `objectKey` de alguma forma não for encontrado ou o usuário não tiver permissão para o bucket implícito (embora a autorização aqui seja mais sobre o acesso ao endpoint em si).
+        *   `500 Internal Server Error`: Falha ao gerar URL assinada ou provedor de armazenamento não configurado.
 
 ---
 **TODOs Gerais da Documentação:**

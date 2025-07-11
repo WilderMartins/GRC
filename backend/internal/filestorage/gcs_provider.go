@@ -7,6 +7,9 @@ import (
 	"log"
 	// "os" // Removido, config.Cfg é usado
 	"phoenixgrc/backend/pkg/config" // Adicionado para acessar config.Cfg
+	"net/url"
+	"strings"
+	"time"
 
 	// "path/filepath" // Para manipulação de nomes de arquivo, se necessário
 	// "github.com/google/uuid" // Para gerar nomes de arquivo únicos
@@ -63,7 +66,7 @@ func InitializeGCSProvider() (*GCSStorageProvider, error) {
 	return provider, nil
 }
 
-// UploadFile carrega um arquivo para o GCS e retorna sua URL pública.
+// UploadFile carrega um arquivo para o GCS e retorna seu objectName (path no bucket).
 // objectName deve ser o nome final do arquivo como você quer que apareça no bucket (ex: incluindo prefixos de pasta).
 func (g *GCSStorageProvider) UploadFile(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (string, error) {
 	if g.client == nil || g.bucketName == "" {
@@ -71,18 +74,11 @@ func (g *GCSStorageProvider) UploadFile(ctx context.Context, organizationID stri
 	}
 
 	bucket := g.client.Bucket(g.bucketName)
-	obj := bucket.Object(objectName) // objectName já inclui o path completo dentro do bucket
+	obj := bucket.Object(objectName)
 
-	// Configurar o writer para o objeto GCS
 	wc := obj.NewWriter(ctx)
-	// Opcional: Definir ACL para tornar o objeto público para leitura
-	// Isso depende da política do bucket. Se o bucket for público, isso pode não ser necessário.
-	// Se o bucket for privado, você precisaria de URLs assinadas ou ACLs.
-	// Para simplificar, vamos assumir que o objeto será publicamente legível.
-	// Em produção, URLs assinadas são geralmente mais seguras.
-	wc.ACL = []storage.ACLRule{{Entity: storage.AllUsers, Role: storage.RoleReader}}
-	// Opcional: Definir o tipo de conteúdo (MIME type) se conhecido
-	// wc.ContentType = "image/jpeg" // Exemplo
+	// Objetos não são públicos por padrão. Acesso via GetSignedURL.
+	// wc.ContentType = "image/jpeg" // Opcional: Definir o tipo de conteúdo
 
 	if _, err := io.Copy(wc, fileContent); err != nil {
 		return "", fmt.Errorf("failed to copy file content to GCS object writer: %w", err)
@@ -91,20 +87,57 @@ func (g *GCSStorageProvider) UploadFile(ctx context.Context, organizationID stri
 		return "", fmt.Errorf("failed to close GCS object writer: %w", err)
 	}
 
-	// Construir a URL pública do objeto
-	// Formato: https://storage.googleapis.com/[BUCKET_NAME]/[OBJECT_NAME]
-	// Ou, se usar um domínio customizado: https://[CUSTOM_DOMAIN]/[OBJECT_NAME]
-	// Por simplicidade, usaremos a URL padrão do storage.googleapis.com.
-	publicURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", g.bucketName, objectName)
-
-	log.Printf("File uploaded successfully to GCS: %s", publicURL)
-	return publicURL, nil
+	log.Printf("File uploaded successfully to GCS: gs://%s/%s", g.bucketName, objectName)
+	return objectName, nil // Retorna o objectName
 }
 
-// DeleteFile (opcional, não implementado neste escopo inicial)
-func (g *GCSStorageProvider) DeleteFile(ctx context.Context, fileURL string) error {
-	// Para implementar: parsear fileURL para obter bucket e object name, depois chamar obj.Delete(ctx)
-	return fmt.Errorf("GCS DeleteFile not yet implemented")
+// DeleteFile remove um arquivo do GCS usando o objectName (path no bucket).
+func (g *GCSStorageProvider) DeleteFile(ctx context.Context, objectName string) error {
+	if g.client == nil || g.bucketName == "" {
+		return fmt.Errorf("GCS provider not initialized or configured correctly")
+	}
+	if objectName == "" {
+		return fmt.Errorf("object name cannot be empty for DeleteFile")
+	}
+
+	obj := g.client.Bucket(g.bucketName).Object(objectName)
+	if err := obj.Delete(ctx); err != nil {
+		if err == storage.ErrObjectNotExist {
+			log.Printf("GCS DeleteFile: Object %s not found in bucket %s (considered successful for idempotency).", objectName, g.bucketName)
+			return nil
+		}
+		return fmt.Errorf("failed to delete object '%s' from GCS bucket '%s': %w", objectName, g.bucketName, err)
+	}
+
+	log.Printf("File deleted successfully from GCS: gs://%s/%s", g.bucketName, objectName)
+	return nil
 }
+
+// GetSignedURL gera uma URL assinada para um objeto no GCS.
+func (g *GCSStorageProvider) GetSignedURL(ctx context.Context, objectName string, durationMinutes int) (string, error) {
+	if g.client == nil || g.bucketName == "" {
+		return "", fmt.Errorf("GCS provider not initialized or configured correctly")
+	}
+	if objectName == "" {
+		return "", fmt.Errorf("object name cannot be empty for GetSignedURL")
+	}
+
+	opts := &storage.SignedURLOptions{
+		Scheme:  storage.SigningSchemeV4,
+		Method:  "GET",
+		Expires: time.Now().Add(time.Duration(durationMinutes) * time.Minute),
+		// TODO: Considerar se o service account para assinar URLs precisa ser configurado explicitamente
+		//       ou se as credenciais padrão do ambiente (ADC) são suficientes.
+		//       Pode ser necessário: GoogleAccessID: "your-service-account-email", PrivateKey: []byte("your-private-key"),
+	}
+
+	signedURL, err := storage.SignedURL(g.bucketName, objectName, opts)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate signed URL for GCS object '%s': %w", objectName, err)
+	}
+
+	return signedURL, nil
+}
+
 
 // Note: DefaultFileStorageProvider and InitFileStorage are now in filestorage.go
