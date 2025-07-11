@@ -163,6 +163,22 @@ Os serviços comunicam-se em uma rede Docker customizada chamada `grc_network` p
     *   Atualmente, o backend utiliza `AutoMigrate` do GORM para inicializar o esquema do banco de dados. Isso é conveniente para desenvolvimento.
     *   **Para ambientes de Staging e Produção, é fortemente recomendado o uso de uma ferramenta de migração de banco de dados dedicada** (como [golang-migrate/migrate](https://github.com/golang-migrate/migrate)). Isso proporciona versionamento, controle granular sobre alterações de esquema (incluindo a aplicação correta de constraints de chave estrangeira como `ON DELETE CASCADE/SET NULL`), e a capacidade de realizar rollbacks de forma segura.
     *   As tags `constraint:OnDelete:...` foram adicionadas aos modelos GORM, mas sua aplicação efetiva em bancos de dados existentes via `AutoMigrate` pode ser limitada. Migrações dedicadas garantiriam que essas constraints estejam corretamente implementadas.
+*   **Monitoramento e Métricas**:
+    *   A aplicação expõe métricas no formato Prometheus no endpoint `GET /metrics`. Este endpoint não requer autenticação.
+    *   Métricas expostas incluem:
+        *   `phoenixgrc_http_requests_total`: Contador de requisições HTTP (labels: `method`, `path`, `status_code`).
+        *   `phoenixgrc_http_request_duration_seconds`: Histograma da latência das requisições HTTP (labels: `method`, `path`).
+        *   `phoenixgrc_app_info`: Informações da aplicação, como versão (label: `version`).
+        *   Métricas padrão do Go (goroutines, estatísticas de memória, etc.).
+    *   Configure seu servidor Prometheus para fazer scrape deste endpoint. Exemplo de configuração de job no `prometheus.yml`:
+        ```yaml
+        scrape_configs:
+          - job_name: 'phoenix-grc-backend'
+            static_configs:
+              - targets: ['localhost:8080'] # Ou o endereço do seu container/serviço backend
+                # Se o Nginx estiver na frente e expondo o backend em um path diferente para /metrics, ajuste.
+                # Se o /metrics estiver na mesma porta do Nginx (ex: 80), use essa porta.
+        ```
 
 ### Comportamento de Exclusão e Integridade Referencial
 

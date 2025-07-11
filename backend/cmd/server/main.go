@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	// "golang.org/x/crypto/bcrypt" // Moved to setup package
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o novo pacote de logger
+	"github.com/prometheus/client_golang/prometheus/promhttp" // Para expor métricas
 )
 
 // runSetup() function is now removed from here and exists in backend/cmd/setup/main.go
@@ -95,11 +96,17 @@ func startServer() {
 	router := gin.New() // Usar gin.New() para controle explícito de middleware
 
 	// Adicionar middlewares globais:
-	// 1. GinZap para logging estruturado de requisições
-	// 2. GinRecovery para capturar panics, logá-los com zap e retornar 500
+	// 1. Metrics middleware - deve vir primeiro ou no início para medir a latência total.
+	router.Use(phxmiddleware.Metrics())
+	// 2. GinZap para logging estruturado de requisições
+	// 3. GinRecovery para capturar panics, logá-los com zap e retornar 500
 	// O formato de tempo RFC3339 é um bom padrão. UTC para consistência.
 	router.Use(phxmiddleware.GinZap(phxlog.L, time.RFC3339, true))
 	router.Use(phxmiddleware.GinRecovery(phxlog.L, time.RFC3339, true, true)) // true para recovery (retornar 500)
+
+	// Endpoint para métricas Prometheus
+	// Deve ser público e não agrupado sob /api ou /auth
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Rotas Públicas (sem autenticação JWT)
 	publicApi := router.Group("/api/public")
