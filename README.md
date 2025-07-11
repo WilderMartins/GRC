@@ -74,7 +74,7 @@ Recomendamos usar o Wizard de Instalação via Browser para a primeira configura
 
     **Importante:** O Wizard de Instalação (`/setup` no browser) ou o setup via CLI (`docker-compose run --rm backend setup`) cuidará da criação da primeira organização e do usuário administrador. Para o Wizard via browser, apenas as variáveis de conexão com o banco de dados (`POSTGRES_*`) e `JWT_SECRET_KEY`, `APP_ROOT_URL`, `FRONTEND_BASE_URL`, `ENCRYPTION_KEY_HEX` precisam ser configuradas inicialmente no arquivo `.env`. O restante pode ser configurado depois.
 
-    **Nota sobre SAML:** A funcionalidade SAML está atualmente desativada no código devido a desafios técnicos. As variáveis `SAML_SP_KEY_PEM` e `SAML_SP_CERT_PEM` são listadas para referência futura.
+    **Nota sobre SAML:** A funcionalidade SAML foi parcialmente reativada (código descomentado, dependência atualizada), mas a lógica principal do ACS ainda é um placeholder e **requer implementação e testes completos**. As variáveis `SAML_SP_KEY_PEM` e `SAML_SP_CERT_PEM` são necessárias se for utilizar SAML.
 
 3.  **Construa e Inicie os Containers Docker:**
     ```bash
@@ -187,12 +187,13 @@ A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autentic
     *   **`POST /auth/login/2fa/backup-code/verify`**: Para verificar um código de backup.
     *   Ambos retornam o token JWT completo em caso de sucesso.
 
-*   **SAML 2.0 (Funcionalidade Futura / Temporariamente Desativada):**
-    *   A integração com SAML 2.0 está planejada mas encontra-se temporariamente desativada devido a desafios técnicos.
-    *   Os endpoints teóricos seriam:
+*   **SAML 2.0 (Implementação Parcial - Requer Teste e Finalização):**
+    *   **Nota:** A funcionalidade SAML foi parcialmente reativada (dependência `github.com/crewjam/saml v0.5.1` adicionada, código descomentado). No entanto, a compilação completa e os testes funcionais não puderam ser verificados no ambiente de desenvolvimento atual. A lógica principal do Assertion Consumer Service (ACS) para processar a asserção SAML, provisionar/logar usuários e emitir o token JWT da aplicação ainda é um placeholder e precisa ser totalmente implementada.
+    *   **Endpoints (ver `API_DOCUMENTATION.md` para detalhes):**
         *   `GET /auth/saml/{idpId}/login`
         *   `GET /auth/saml/{idpId}/metadata`
         *   `POST /auth/saml/{idpId}/acs`
+    *   **Variáveis de Ambiente Relacionadas:** `APP_ROOT_URL`, `SAML_SP_KEY_PEM`, `SAML_SP_CERT_PEM`.
 
 *   **OAuth2 Login (Exemplo Google - Iniciação pelo SP):**
     *   **`GET /auth/oauth2/google/{idpId}/login`**: Redireciona o usuário para a página de autorização do Google. `{idpId}` é o ID do `IdentityProvider` configurado para Google.
@@ -500,7 +501,7 @@ Endpoints para gerenciar o processo de aprovação para aceite de riscos.
 ## Próximos Passos (Desenvolvimento Futuro)
 
 *   Finalização e polimento do Frontend Next.js.
-*   Reativação e finalização da funcionalidade SAML.
+*   **SAML**: Concluir a implementação da lógica do Assertion Consumer Service (ACS), realizar testes de compilação e funcionais completos.
 *   Implementação da funcionalidade de exclusão de arquivos no `filestorage`.
 *   Testes de integração e E2E abrangentes.
 *   Melhorias na paginação e filtros da API.

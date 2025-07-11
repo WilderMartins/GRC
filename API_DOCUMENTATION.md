@@ -134,14 +134,14 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `401 Unauthorized`: Código de backup inválido, usuário não encontrado, ou 2FA/códigos de backup não habilitados.
         *   `500 Internal Server Error`: Falha ao gerar token JWT ou atualizar códigos de backup.
 
-*   **Endpoints SAML 2.0 (Temporariamente Desativados / Funcionalidade Futura)**
-    *   **Nota:** A funcionalidade SAML está atualmente desativada devido a desafios técnicos na implementação e problemas com dependências. Os endpoints abaixo são placeholders e não devem ser considerados operacionais no momento.
+*   **Endpoints SAML 2.0 (Implementação Parcial - Requer Teste e Finalização)**
+    *   **Nota:** A biblioteca SAML (`github.com/crewjam/saml v0.5.1`) foi adicionada/atualizada e o código relacionado foi descomentado. No entanto, a compilação completa e testes funcionais não puderam ser realizados no ambiente atual. A lógica principal do Assertion Consumer Service (ACS) para processar a asserção, provisionar usuários e emitir tokens JWT ainda é um placeholder e precisa ser implementada. **Esta funcionalidade deve ser considerada experimental e requer testes e desenvolvimento adicionais antes do uso em produção.**
     *   **`GET /auth/saml/:idpId/login`**
-        *   **Descrição Teórica:** Redirecionaria o usuário para o IdP SAML configurado.
+        *   **Descrição:** Tenta iniciar o fluxo de login SAML SP-initiated redirecionando o usuário para o IdP SAML configurado.
     *   **`GET /auth/saml/:idpId/metadata`**
-        *   **Descrição Teórica:** Exporia os metadados do Service Provider (Phoenix GRC).
+        *   **Descrição:** Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado.
     *   **`POST /auth/saml/:idpId/acs`**
-        *   **Descrição Teórica:** Endpoint para o IdP SAML redirecionar com a asserção SAML.
+        *   **Descrição:** Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido. **Lógica de processamento da asserção e provisionamento de usuário pendente.**
 
 ---
 

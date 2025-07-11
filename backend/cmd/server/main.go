@@ -10,7 +10,7 @@ import (
 	"phoenixgrc/backend/internal/handlers"
 	// "phoenixgrc/backend/internal/models" // No longer directly used here for setup
 	"phoenixgrc/backend/internal/oauth2auth"
-	// "phoenixgrc/backend/internal/samlauth"   // Temporariamente comentado
+	"phoenixgrc/backend/internal/samlauth"   // Descomentado
 	// "phoenixgrc/backend/internal/seeders" // Setup will handle its own seeding call
 	"phoenixgrc/backend/internal/filestorage"
 	"phoenixgrc/backend/internal/notifications"
@@ -31,12 +31,14 @@ func startServer() {
 	}
 	log.Println("JWT Initialized.")
 
-	/* // SAML Temporariamente Comentado
+	// SAML Global Config Initialization
 	if err := samlauth.InitializeSAMLSPGlobalConfig(); err != nil {
-		log.Fatalf("Failed to initialize SAML SP Global Config: %v", err)
+		// Logar como aviso em vez de fatal, para permitir que a app inicie mesmo se SAML SP certs não estiverem configurados.
+		// A tentativa de usar SAML falhará nos handlers se a config global não estiver OK.
+		log.Printf("WARNING: Failed to initialize SAML SP Global Config: %v. SAML logins may not work.", err)
+	} else {
+		log.Println("SAML SP Global Config Initialized.")
 	}
-	log.Println("SAML SP Global Config Initialized.")
-	*/
 
 	if err := oauth2auth.InitializeOAuth2GlobalConfig(); err != nil {
 		log.Fatalf("Failed to initialize OAuth2 Global Config: %v", err)
@@ -93,14 +95,14 @@ func startServer() {
 	authRoutes := router.Group("/auth")
 	{
 		authRoutes.POST("/login", handlers.LoginHandler) // Restaurado para usar o handler implementado
-		/* // SAML Temporariamente Comentado
+
 		samlIdPGroup := authRoutes.Group("/saml/:idpId")
 		{
 			samlIdPGroup.GET("/metadata", samlauth.MetadataHandler)
-			samlIdPGroup.POST("/acs", samlauth.ACSHandler)
+			samlIdPGroup.POST("/acs", samlauth.ACSHandler) // O middleware samlsp pode proteger este
 			samlIdPGroup.GET("/login", samlauth.SAMLLoginHandler)
 		}
-		*/
+
 		oauth2GoogleGroup := authRoutes.Group("/oauth2/google/:idpId")
 		{
 			oauth2GoogleGroup.GET("/login", oauth2auth.GoogleLoginHandler)
