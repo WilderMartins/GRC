@@ -715,21 +715,32 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
     *   **Autenticação:** JWT Obrigatório.
     *   **Parâmetros de Path:** `frameworkId` (string UUID).
     *   **Respostas:**
-        *   `200 OK`: Array de objetos `models.AuditControl`.
+        *   `200 OK`: Array de objetos `AuditControlWithAssessmentResponse`.
             ```json
             [
                 {
+                    // Campos de models.AuditControl
                     "ID": "uuid-controle-1",
                     "FrameworkID": "uuid-framework-1",
                     "ControlID": "GV.OC-1",
                     "Description": "Papéis e responsabilidades...",
                     "Family": "Governança Organizacional (GV.OC)",
-                    "CreatedAt": "timestamp",
-                    "UpdatedAt": "timestamp"
+                    // ... outros campos de AuditControl
+                    "assessment": { // Objeto models.AuditAssessment (pode ser null)
+                        "ID": "uuid-assessment-1",
+                        "OrganizationID": "uuid-da-org-do-usuario",
+                        "AuditControlID": "uuid-controle-1",
+                        "Status": "conforme",
+                        "EvidenceURL": "objectName/ou/urlExterna", // Contém objectName ou URL externa
+                        "Score": 100,
+                        "AssessmentDate": "timestamp"
+                        // ... outros campos de AuditAssessment
+                    }
                 }
             ]
             ```
         *   `400 Bad Request`: `frameworkId` inválido.
+        *   `403 Forbidden`: Se o `organizationID` não puder ser obtido do token.
         *   `404 Not Found`: Framework não encontrado (se nenhum controle for retornado e o framework não existir).
         *   `500 Internal Server Error`.
 

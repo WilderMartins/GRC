@@ -29,9 +29,10 @@ type AppConfig struct {
 	AWSSESEmailSender   string
 	TOTPIssuerName      string
 	AWSS3Bucket         string // Novo para S3
-	FileStorageProvider string // "gcs" ou "s3"
-	FrontendBaseURL     string // Adicionado para links em emails/notificações
-	FeatureToggles      map[string]bool
+	FileStorageProvider                string // "gcs" ou "s3"
+	FrontendBaseURL                    string // Adicionado para links em emails/notificações
+	DefaultOrganizationIDForGlobalSSO string // UUID da organização padrão para novos usuários de SSO global
+	FeatureToggles                     map[string]bool
 	// Adicionar outras configurações aqui
 }
 
@@ -72,6 +73,7 @@ func LoadConfig() {
 	Cfg.AWSS3Bucket = getEnv("AWS_S3_BUCKET", "")
 	Cfg.FileStorageProvider = strings.ToLower(getEnv("FILE_STORAGE_PROVIDER", "gcs")) // Default para GCS
 	Cfg.FrontendBaseURL = getEnv("FRONTEND_BASE_URL", "http://localhost:3000")
+	Cfg.DefaultOrganizationIDForGlobalSSO = getEnv("DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO", "")
 
 
 	// Carregar Feature Toggles

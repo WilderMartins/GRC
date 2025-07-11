@@ -75,6 +75,13 @@ func startServer() {
 
 	router := gin.Default()
 
+	// Rotas Públicas (sem autenticação JWT)
+	publicApi := router.Group("/api/public")
+	{
+		publicApi.GET("/social-identity-providers", handlers.ListGlobalSocialIdentityProvidersHandler)
+		// Outras rotas públicas podem ser adicionadas aqui no futuro
+	}
+
 	router.GET("/health", func(c *gin.Context) {
 		sqlDB, err := database.DB.DB()
 		if err != nil {

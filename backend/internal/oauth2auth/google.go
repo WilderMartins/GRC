@@ -43,66 +43,75 @@ func InitializeOAuth2GlobalConfig() error {
 	return nil
 }
 
-
-func getGoogleOAuthConfig(idpModel *models.IdentityProvider) (*oauth2.Config, *GoogleOAuthConfig, error) {
-	if appRootURL == "" {
-		return nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized")
+func getGoogleOAuthConfig(idpIDStr string, db *gorm.DB) (*oauth2.Config, *GoogleOAuthConfig, *models.IdentityProvider, error) {
+	currentAppRootURL := appConfig.Cfg.AppRootURL
+	if currentAppRootURL == "" {
+		// Fallback for older initialization if appConfig is not yet fully propagated
+		// This might happen if InitializeOAuth2GlobalConfig was called before appConfig was ready.
+		// Ideally, appConfig.Cfg.AppRootURL should be the single source of truth.
+		if appRootURL != "" {
+			currentAppRootURL = appRootURL
+		} else {
+			return nil, nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized or empty")
+		}
 	}
+
 
 	var cfg GoogleOAuthConfig
-	if err := json.Unmarshal([]byte(idpModel.ConfigJSON), &cfg); err != nil {
-		return nil, nil, fmt.Errorf("failed to unmarshal Google OAuth2 config from JSON: %w", err)
-	}
+	var idpModelFromDB *models.IdentityProvider = nil
 
-	if cfg.ClientID == "" || cfg.ClientSecret == "" {
-		return nil, &cfg, fmt.Errorf("client_id or client_secret missing in Google OAuth2 config")
-	}
+	dynamicRedirectURI := fmt.Sprintf("%s/auth/oauth2/google/%s/callback", currentAppRootURL, idpIDStr)
 
-	// Construct the RedirectURI dynamically based on the IdP ID
-	// Example: http://localhost:8080/auth/oauth2/google/{idp_uuid}/callback
-	// The {idp_uuid} part needs to be handled carefully if the IdP is identified by a path param.
-	// For now, let's assume a generic callback path per provider type if idpId is not in the path,
-	// or make it part of the state.
-	// For this implementation, the idpId IS in the path.
-	dynamicRedirectURI := fmt.Sprintf("%s/auth/oauth2/google/%s/callback", appRootURL, idpModel.ID.String())
+	if idpIDStr == GlobalIdPIdentifier {
+		cfg.ClientID = appConfig.Cfg.GoogleClientID
+		cfg.ClientSecret = appConfig.Cfg.GoogleClientSecret
+		if len(cfg.Scopes) == 0 { // Default scopes for global
+			cfg.Scopes = []string{googleAPI.UserinfoEmailScope, googleAPI.UserinfoProfileScope}
+		}
+		if cfg.ClientID == "" || cfg.ClientSecret == "" {
+			return nil, &cfg, nil, fmt.Errorf("global Google OAuth2 (GOOGLE_CLIENT_ID/SECRET) not configured")
+		}
+	} else {
+		idpID, err := uuid.Parse(idpIDStr)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid IdP ID format for Google OAuth2: %s", idpIDStr)
+		}
+		var fetchedModel models.IdentityProvider
+		err = db.Where("id = ? AND provider_type = ? AND is_active = ?", idpID, models.IDPTypeOAuth2Google, true).First(&fetchedModel).Error
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, nil, nil, fmt.Errorf("active Google OAuth2 provider configuration not found for ID: %s", idpIDStr)
+			}
+			return nil, nil, nil, fmt.Errorf("database error fetching Google IdP config for ID %s: %w", idpIDStr, err)
+		}
+		idpModelFromDB = &fetchedModel
 
-
-	scopes := cfg.Scopes
-	if len(scopes) == 0 {
-		scopes = []string{googleAPI.UserinfoEmailScope, googleAPI.UserinfoProfileScope} // Default scopes
+		if errUnmarshal := json.Unmarshal([]byte(idpModelFromDB.ConfigJSON), &cfg); errUnmarshal != nil {
+			return nil, nil, idpModelFromDB, fmt.Errorf("failed to unmarshal Google OAuth2 config from JSON for IdP %s: %w", idpIDStr, errUnmarshal)
+		}
+		if cfg.ClientID == "" || cfg.ClientSecret == "" {
+			return nil, &cfg, idpModelFromDB, fmt.Errorf("client_id or client_secret missing in Google OAuth2 config for IdP %s", idpIDStr)
+		}
+		if len(cfg.Scopes) == 0 { // Default scopes
+			cfg.Scopes = []string{googleAPI.UserinfoEmailScope, googleAPI.UserinfoProfileScope}
+		}
 	}
 
 	return &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
-		RedirectURL:  dynamicRedirectURI, // Use the dynamically constructed one
-		Scopes:       scopes,
+		RedirectURL:  dynamicRedirectURI,
+		Scopes:       cfg.Scopes,
 		Endpoint:     googleOAuth2.Endpoint,
-	}, &cfg, nil
+	}, &cfg, idpModelFromDB, nil
 }
 
 // GoogleLoginHandler initiates the Google OAuth2 login flow.
 func GoogleLoginHandler(c *gin.Context) {
-	idpIDStr := c.Param("idpId") // Assuming idpId identifies the specific Google configuration
-	idpID, err := uuid.Parse(idpIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IdP ID format for Google OAuth2"})
-		return
-	}
-
+	idpIDStr := c.Param("idpId") // Pode ser UUID ou "global"
 	db := database.GetDB()
-	var idpModel models.IdentityProvider
-	err = db.Where("id = ? AND provider_type = ? AND is_active = ?", idpID, models.IDPTypeOAuth2Google, true).First(&idpModel).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Active Google OAuth2 provider configuration not found for ID: " + idpIDStr})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching Google IdP config: " + err.Error()})
-		return
-	}
 
-	oauthCfg, _, err := getGoogleOAuthConfig(&idpModel)
+	oauthCfg, _, _, err := getGoogleOAuthConfig(idpIDStr, db)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to configure Google OAuth2: " + err.Error()})
 		return
@@ -141,12 +150,7 @@ func GoogleLoginHandler(c *gin.Context) {
 
 // GoogleCallbackHandler handles the callback from Google after user authorization.
 func GoogleCallbackHandler(c *gin.Context) {
-	idpIDStr := c.Param("idpId")
-	idpID, err := uuid.Parse(idpIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IdP ID format in callback for Google OAuth2"})
-		return
-	}
+	idpIDStr := c.Param("idpId") // Pode ser UUID ou "global"
 
 	// Verify state cookie
 	stateCookie, err := c.Cookie(googleOAuthStateCookie)
@@ -170,16 +174,8 @@ func GoogleCallbackHandler(c *gin.Context) {
 		return
 	}
 
-	db := database.GetDB()
-	var idpModel models.IdentityProvider
-	err = db.Where("id = ? AND provider_type = ? AND is_active = ?", idpID, models.IDPTypeOAuth2Google, true).First(&idpModel).Error
-	if err != nil {
-		// Log this error server-side
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve IdP configuration during callback"})
-		return
-	}
-
-	oauthCfg, _, err := getGoogleOAuthConfig(&idpModel)
+	db := database.GetDB() // db instance
+	oauthCfg, _, idpModelFromDB, err := getGoogleOAuthConfig(idpIDStr, db) // Passar db
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to re-configure Google OAuth2 for token exchange: " + err.Error()})
 		return
@@ -223,39 +219,114 @@ func GoogleCallbackHandler(c *gin.Context) {
 
 	// --- User Provisioning/Login ---
 	var user models.User
-	err = db.Where("email = ? AND organization_id = ?", email, idpModel.OrganizationID).First(&user).Error
+	var userOrgID uuid.NullUUID // Used for token generation; may be null for global IdP users not yet in an org
+	ssoProviderName := "google" // Default for global
 
-	if err != nil && err != gorm.ErrRecordNotFound {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching user: " + err.Error()})
-		return
-	}
+	if idpIDStr == GlobalIdPIdentifier {
+		// Global IdP flow
+		ssoProviderName = "global_google"
+		err = db.Where("email = ? AND (sso_provider = ? OR social_login_id = ?)", email, ssoProviderName, externalID).First(&user).Error
 
-	if err == gorm.ErrRecordNotFound { // User does not exist, provision
-		user = models.User{
-			OrganizationID: idpModel.OrganizationID,
-			Name:           fullName,
-			Email:          email,
-			PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
-			SSOProvider:    idpModel.Name,
-			SocialLoginID:  externalID, // Store Google's User ID
-			Role:           models.RoleUser,
-		}
-		if createErr := db.Create(&user).Error; createErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new OAuth2 user: " + createErr.Error()})
+		if err != nil && err != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching user for global Google login: " + err.Error()})
 			return
 		}
-	} else { // User exists, update
-		user.SSOProvider = idpModel.Name
-		user.SocialLoginID = externalID
-		if user.Name == "" { user.Name = fullName }
-		if saveErr := db.Save(&user).Error; saveErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update OAuth2 user: " + saveErr.Error()})
+
+		if err == gorm.ErrRecordNotFound { // User does not exist
+			if !appConfig.Cfg.AllowGlobalSSOUserCreation {
+				c.JSON(http.StatusForbidden, gin.H{"error": "New user registration via global Google SSO is disabled. Please use an organization-specific login or contact support."})
+				return
+			}
+			// Create a new user for global SSO
+			orgIDForNewUser := uuid.NullUUID{}
+			if appConfig.Cfg.DefaultOrganizationIDForGlobalSSO != "" {
+				parsedOrgID, errParseOrg := uuid.Parse(appConfig.Cfg.DefaultOrganizationIDForGlobalSSO)
+				if errParseOrg == nil {
+					orgIDForNewUser = uuid.NullUUID{UUID: parsedOrgID, Valid: true}
+				} else {
+					log.Printf("Aviso: DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO ('%s') não é um UUID válido. Usuário será criado sem organização.", appConfig.Cfg.DefaultOrganizationIDForGlobalSSO)
+				}
+			}
+
+			user = models.User{
+				OrganizationID: orgIDForNewUser,
+				Name:           fullName,
+				Email:          email,
+				PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
+				SSOProvider:    ssoProviderName,
+				SocialLoginID:  externalID,
+				Role:           models.RoleUser, // Default role for new global users
+				IsActive:       true,            // Activate immediately
+			}
+			if createErr := db.Create(&user).Error; createErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new global Google SSO user: " + createErr.Error()})
+				return
+			}
+		} else { // User exists, update
+			user.SSOProvider = ssoProviderName
+			user.SocialLoginID = externalID
+			if user.Name == "" || user.Name == user.Email { user.Name = fullName } // Update name if it was a placeholder
+			user.IsActive = true // Ensure user is active
+			if saveErr := db.Save(&user).Error; saveErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update global Google SSO user: " + saveErr.Error()})
+				return
+			}
+		}
+		// For global users, OrganizationID in token will be based on user.OrganizationID (which might be null)
+		userOrgID = user.OrganizationID
+
+	} else { // Organization-specific IdP flow
+		if idpModelFromDB == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "IdP configuration missing for organization-specific Google login."})
 			return
 		}
+		ssoProviderName = idpModelFromDB.Name // Use the actual name from the IdP config
+
+		// Try to find user by email within the organization OR by social login ID if previously linked
+		err = db.Where("(email = ? AND organization_id = ?) OR (social_login_id = ? AND organization_id = ?)",
+			email, idpModelFromDB.OrganizationID, externalID, idpModelFromDB.OrganizationID).First(&user).Error
+
+		if err != nil && err != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching user for org Google login: " + err.Error()})
+			return
+		}
+
+		if err == gorm.ErrRecordNotFound { // User does not exist in this org, provision
+			user = models.User{
+				OrganizationID: idpModelFromDB.OrganizationID,
+				Name:           fullName,
+				Email:          email,
+				PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
+				SSOProvider:    ssoProviderName,
+				SocialLoginID:  externalID,
+				Role:           models.RoleUser, // Default role, could be customized based on IdP config later
+				IsActive:       true,
+			}
+			if createErr := db.Create(&user).Error; createErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new org Google SSO user: " + createErr.Error()})
+				return
+			}
+		} else { // User exists, update
+			user.SSOProvider = ssoProviderName
+			user.SocialLoginID = externalID
+			if user.Name == "" || user.Name == user.Email { user.Name = fullName }
+			user.IsActive = true
+			// Ensure the user is associated with this IdP's organization if they somehow existed without it but matched email
+			if !user.OrganizationID.Valid || user.OrganizationID.UUID != idpModelFromDB.OrganizationID.UUID {
+				user.OrganizationID = idpModelFromDB.OrganizationID
+			}
+			if saveErr := db.Save(&user).Error; saveErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update org Google SSO user: " + saveErr.Error()})
+				return
+			}
+		}
+		userOrgID = user.OrganizationID // Should be valid and match idpModelFromDB.OrganizationID
 	}
 
 	// Generate Phoenix GRC JWT token
-	jwtToken, jwtErr := auth.GenerateToken(&user, user.OrganizationID)
+	// Pass userOrgID which might be null for global users not yet part of an org.
+	// The GenerateToken function should handle a potentially nil OrganizationID for the token claims.
+	jwtToken, jwtErr := auth.GenerateToken(&user, userOrgID)
 	if jwtErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate session token: " + jwtErr.Error()})
 		return
