@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"log" // Será gradualmente substituído
 	"net/http"
 	"os"
+	"strings" // Para ToLower em appEnv
 	"phoenixgrc/backend/internal/auth"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/handlers"
@@ -15,38 +16,56 @@ import (
 	"phoenixgrc/backend/internal/filestorage"
 	"phoenixgrc/backend/internal/notifications"
 	// "strings" // No longer needed for setup here
+	"go.uber.org/zap" // Adicionar import do zap
+	"time"            // Para time.RFC3339 no middleware de log
 
-	"phoenixgrc/backend/cmd/setup" // Descomentado para permitir a chamada do setup
+	phxmiddleware "phoenixgrc/backend/internal/middleware" // Importar o pacote de middleware
+	"phoenixgrc/backend/cmd/setup"                         // Descomentado para permitir a chamada do setup
 	// "phoenixgrc/backend/cmd/setup" // Comentado para permitir compilação do server isoladamente. Refatorar setup.
 
 	"github.com/gin-gonic/gin"
 	// "golang.org/x/crypto/bcrypt" // Moved to setup package
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o novo pacote de logger
 )
 
 // runSetup() function is now removed from here and exists in backend/cmd/setup/main.go
 
 func startServer() {
-	if err := auth.InitializeJWT(); err != nil {
-		log.Fatalf("Failed to initialize JWT: %v", err)
+	// Inicializar o logger global zap primeiro
+	// Usar GIN_MODE para determinar o ambiente (development vs production) para o logger
+	// e LOG_LEVEL para o nível de log.
+	appEnv := os.Getenv("GIN_MODE") // gin.ReleaseMode ("release") ou gin.DebugMode ("debug")
+	if strings.ToLower(appEnv) == gin.ReleaseMode {
+		appEnv = "production" // Mapear "release" para "production" para o logger
+	} else {
+		appEnv = "development" // Default para development se não for release
 	}
-	log.Println("JWT Initialized.")
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info" // Default
+	}
+	phxlog.Init(logLevel, appEnv) // Usar phxlog.Init para evitar conflito com log.L padrão do Go
+
+	// Agora usar phxlog.L ou phxlog.S para logging
+	if err := auth.InitializeJWT(); err != nil {
+		phxlog.L.Fatal("Failed to initialize JWT", zap.Error(err))
+	}
+	phxlog.L.Info("JWT Initialized.")
 
 	// SAML Global Config Initialization
 	if err := samlauth.InitializeSAMLSPGlobalConfig(); err != nil {
-		// Logar como aviso em vez de fatal, para permitir que a app inicie mesmo se SAML SP certs não estiverem configurados.
-		// A tentativa de usar SAML falhará nos handlers se a config global não estiver OK.
-		log.Printf("WARNING: Failed to initialize SAML SP Global Config: %v. SAML logins may not work.", err)
+		phxlog.L.Warn("Failed to initialize SAML SP Global Config. SAML logins may not work.", zap.Error(err))
 	} else {
-		log.Println("SAML SP Global Config Initialized.")
+		phxlog.L.Info("SAML SP Global Config Initialized.")
 	}
 
 	if err := oauth2auth.InitializeOAuth2GlobalConfig(); err != nil {
-		log.Fatalf("Failed to initialize OAuth2 Global Config: %v", err)
+		phxlog.L.Fatal("Failed to initialize OAuth2 Global Config", zap.Error(err))
 	}
-	log.Println("OAuth2 Global Config Initialized.")
+	phxlog.L.Info("OAuth2 Global Config Initialized.")
 
 	if err := filestorage.InitFileStorage(); err != nil {
-		log.Printf("Warning: File storage initialization failed: %v. Uploads may not work.", err)
+		phxlog.L.Warn("File storage initialization failed. Uploads may not work.", zap.Error(err))
 	}
 
 	notifications.InitEmailService()
@@ -62,18 +81,25 @@ func startServer() {
 	if dbPort == "" { dbPort = "5432" }
 	if dbSSLMode == "" { dbSSLMode = "disable" }
 	if dbUser == "" || dbPassword == "" || dbName == "" {
-		log.Fatal("Database credentials (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB) must be set for the server.")
+		phxlog.L.Fatal("Database credentials (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB) must be set for the server.")
 	}
 
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
 		dbHost, dbPort, dbUser, dbPassword, dbName, dbSSLMode)
 
 	if err := database.ConnectDB(dsn); err != nil {
-		log.Fatalf("Failed to connect to database for the server: %v", err)
+		phxlog.L.Fatal("Failed to connect to database for the server", zap.Error(err))
 	}
-	log.Println("Database connection established for the server.")
+	phxlog.L.Info("Database connection established for the server.")
 
-	router := gin.Default()
+	router := gin.New() // Usar gin.New() para controle explícito de middleware
+
+	// Adicionar middlewares globais:
+	// 1. GinZap para logging estruturado de requisições
+	// 2. GinRecovery para capturar panics, logá-los com zap e retornar 500
+	// O formato de tempo RFC3339 é um bom padrão. UTC para consistência.
+	router.Use(phxmiddleware.GinZap(phxlog.L, time.RFC3339, true))
+	router.Use(phxmiddleware.GinRecovery(phxlog.L, time.RFC3339, true, true)) // true para recovery (retornar 500)
 
 	// Rotas Públicas (sem autenticação JWT)
 	publicApi := router.Group("/api/public")
@@ -248,22 +274,36 @@ func startServer() {
 	if serverPort == "" {
 		serverPort = "8080"
 	}
-	log.Printf("Starting server on port %s", serverPort)
+	phxlog.L.Info("Starting server", zap.String("port", serverPort))
 	if err := router.Run(":" + serverPort); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		phxlog.L.Fatal("Failed to start server", zap.Error(err))
 	}
 }
 
 func main() {
+	// Logger já foi inicializado pela importação de pkg/log ou será re-inicializado em startServer().
+	// Se startServer() não for chamado (ex: no fluxo de setup), o logger da importação será usado.
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
-		// Call RunSetup from the setup package
-		// A função RunSetup agora é pública no pacote setup e pode ser chamada.
-		// O pacote setup precisa ser ajustado para que main.go possa ser importado,
-		// ou a lógica de RunSetup movida para um pacote internal/setupUtils e chamada por ambos os cmd.
-		// Assumindo que phoenixgrc/backend/cmd/setup pode ser importado e RunSetup é acessível:
-		log.Println("Starting Phoenix GRC setup...")
-		setup.RunSetup() // Descomentado para habilitar o setup via ./server setup
-		log.Println("Phoenix GRC setup finished.")
+		// A inicialização do logger em startServer() não ocorrerá.
+		// O logger já foi inicializado pelo init() do pacote phxlog.
+		// Podemos re-inicializá-lo aqui se quisermos garantir consistência com as vars de env
+		// lidas em main, mas o init() do pkg/log já faz isso.
+		// Por segurança, podemos chamar phxlog.Init aqui também, não fará mal.
+		appEnv := os.Getenv("GIN_MODE")
+		if strings.ToLower(appEnv) == gin.ReleaseMode {
+			appEnv = "production"
+		} else {
+			appEnv = "development"
+		}
+		logLevel := os.Getenv("LOG_LEVEL")
+		if logLevel == "" {
+			logLevel = "info"
+		}
+		phxlog.Init(logLevel, appEnv) // Re-inicializa com base nas vars de main.
+
+		phxlog.L.Info("Starting Phoenix GRC setup...")
+		setup.RunSetup() // RunSetup usará o logger global phxlog.L / phxlog.S
+		phxlog.L.Info("Phoenix GRC setup finished.")
 	} else {
 		startServer()
 	}

@@ -71,6 +71,7 @@ Recomendamos usar o Wizard de Instalação via Browser para a primeira configura
         *   `AWS_SES_EMAIL_SENDER` (email remetente verificado no SES)
     *   **Outras Configurações:**
         *   `TOTP_ISSUER_NAME` (opcional, padrão `PhoenixGRC`. Nome que aparece no app autenticador)
+        *   `LOG_LEVEL` (opcional, padrão `info`. Define o nível de log da aplicação. Valores: `debug`, `info`, `warn`, `error`, `dpanic`, `panic`, `fatal`. Em desenvolvimento, `GIN_MODE=debug` também resulta em logs mais verbosos e em formato de console.)
 
     **Importante:** O Wizard de Instalação (`/setup` no browser) ou o setup via CLI (`docker-compose run --rm backend setup`) cuidará da criação da primeira organização e do usuário administrador. Para o Wizard via browser, apenas as variáveis de conexão com o banco de dados (`POSTGRES_*`) e `JWT_SECRET_KEY`, `APP_ROOT_URL`, `FRONTEND_BASE_URL`, `ENCRYPTION_KEY_HEX` precisam ser configuradas inicialmente no arquivo `.env`. O restante pode ser configurado depois.
 

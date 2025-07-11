@@ -2,13 +2,14 @@ package database
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"phoenixgrc/backend/internal/models"
+	"phoenixgrc/backend/internal/models" // Mantido para referência futura, não usado diretamente aqui
+	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
 
 	"github.com/golang-migrate/migrate/v4"
 	postgresdriver "github.com/golang-migrate/migrate/v4/database/postgres" // Renomeado para evitar conflito com gorm/driver/postgres
 	_ "github.com/golang-migrate/migrate/v4/source/file"                   // Importar driver source file
+	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -16,28 +17,33 @@ import (
 
 var DB *gorm.DB
 
-// ConnectDB initializes the database connection and runs migrations.
+// ConnectDB initializes the database connection.
 func ConnectDB(dsn string) error {
 	var err error
-	logLevel := logger.Silent
-	if os.Getenv("APP_ENV") == "development" {
-		logLevel = logger.Info
+	gormLogLevel := logger.Silent
+	appEnv := os.Getenv("APP_ENV")
+	if appEnv == "" { // Fallback para GIN_MODE se APP_ENV não estiver setado
+		appEnv = os.Getenv("GIN_MODE")
+	}
+
+	if appEnv == "development" || appEnv == "debug" {
+		gormLogLevel = logger.Info
 	}
 
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logLevel),
+		Logger: logger.Default.LogMode(gormLogLevel),
 	})
 
 	if err != nil {
+		// O chamador (main.go) fará o log fatal com zap.
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	log.Println("Database connection established.")
+	phxlog.L.Info("Database connection established.")
 	return nil
 }
 
 // RunPhoenixMigrations aplica migrações SQL usando golang-migrate.
-// dbURL deve ser a string de conexão completa para o banco de dados.
 func RunPhoenixMigrations(dbURL string, gormInstance *gorm.DB) error {
 	if gormInstance == nil {
 		return fmt.Errorf("GORM DB instance is nil")
@@ -47,28 +53,20 @@ func RunPhoenixMigrations(dbURL string, gormInstance *gorm.DB) error {
 		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
-	// O path para as migrações deve ser relativo ao diretório de execução do binário.
-	// Se o binário está na raiz do projeto 'backend/', o path é correto.
-	// Se estiver em 'backend/cmd/server/', o path precisa ser '../internal/database/migrations'
-	// Para robustez, considere usar um path absoluto ou configurável.
-	// Por agora, assumimos que o binário é executado da raiz do projeto 'backend/'.
 	sourceURL := "file://internal/database/migrations"
-	log.Printf("Attempting to run migrations from source: %s", sourceURL)
+	phxlog.L.Info("Attempting to run migrations", zap.String("sourceURL", sourceURL))
 
 	driver, err := postgresdriver.WithInstance(sqlDB, &postgresdriver.Config{})
 	if err != nil {
 		return fmt.Errorf("could not create postgres driver for migrate: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		sourceURL,
-		"postgres", // Nome do banco de dados para o driver (pode ser qualquer string, mas "postgres" é comum)
-		driver,
-	)
+	m, err := migrate.NewWithDatabaseInstance(sourceURL, "postgres", driver)
 	if err != nil {
-		// Tentar um path relativo comum se o primeiro falhar (ex: se rodando de cmd/server)
-		// Esta é uma tentativa de fallback, idealmente o path é configurado corretamente.
-		log.Printf("Failed to initialize migrate with source '%s': %v. Trying alternative path '../internal/database/migrations'", sourceURL, err)
+		phxlog.L.Warn("Failed to initialize migrate with primary source, trying alternative",
+			zap.String("source", sourceURL),
+			zap.Error(err),
+			zap.String("alternative_source", "file://../internal/database/migrations")) // Para quando rodado de cmd/server/
 		sourceURL = "file://../internal/database/migrations"
 		m, err = migrate.NewWithDatabaseInstance(sourceURL, "postgres", driver)
 		if err != nil {
@@ -76,61 +74,44 @@ func RunPhoenixMigrations(dbURL string, gormInstance *gorm.DB) error {
 		}
 	}
 
-	log.Println("Applying database migrations...")
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("failed to apply migrations: %w", err)
+	phxlog.L.Info("Applying database migrations...")
+	errUp := m.Up() // Armazenar o erro de m.Up()
+	if errUp != nil && errUp != migrate.ErrNoChange {
+		return fmt.Errorf("failed to apply migrations: %w", errUp)
 	}
 
-	// Logar versão atual
-	version, dirty, err := m.Version()
-	if err != nil {
-		log.Printf("Warning: could not get migration version after applying: %v", err)
+	version, dirty, errVersion := m.Version()
+	if errVersion != nil {
+		phxlog.L.Warn("Could not get migration version after applying", zap.Error(errVersion))
 	} else {
-		log.Printf("Database migration applied. Current version: %d, Dirty: %t", version, dirty)
+		phxlog.L.Info("Database migration status", zap.Uint("version", version), zap.Bool("dirty", dirty))
 	}
 
-	if err == migrate.ErrNoChange {
-		log.Println("No new database migrations to apply.")
+	if errUp == migrate.ErrNoChange {
+		phxlog.L.Info("No new database migrations to apply.")
 		return nil
 	}
 
-	log.Println("Database migrations applied successfully.")
+	phxlog.L.Info("Database migrations applied successfully.")
 	return nil
 }
 
-
 // MigrateDB agora usa golang-migrate em vez de GORM auto-migration.
-// A dbURL é necessária para o golang-migrate.
 func MigrateDB(dbURL string) error {
 	if DB == nil {
 		return fmt.Errorf("database connection is not initialized. Call ConnectDB first")
 	}
-	log.Println("Running database migrations via golang-migrate...")
+	phxlog.L.Info("Running database migrations via golang-migrate...")
 
 	err := RunPhoenixMigrations(dbURL, DB)
 	if err != nil {
-		return fmt.Errorf("golang-migrate migration failed: %w", err)
+		// O erro de RunPhoenixMigrations já é bem formatado e logado internamente se necessário.
+		// O chamador (setup/main.go) fará o log fatal se este erro for retornado.
+		return fmt.Errorf("golang-migrate migration process failed: %w", err)
 	}
 
-	// A chamada AutoMigrate original foi comentada/removida.
-	// As migrações agora são gerenciadas exclusivamente por arquivos SQL.
-	// err = DB.AutoMigrate(
-	// 	&models.Organization{},
-	// 	&models.User{},
-	// 	&models.Risk{},
-	// 	&models.Vulnerability{},
-	// 	&models.RiskStakeholder{},
-	// 	&models.ApprovalWorkflow{},
-	// 	&models.AuditFramework{},
-	// 	&models.AuditControl{},
-	// 	&models.AuditAssessment{},
-	// 	&models.IdentityProvider{},
-	// 	&models.WebhookConfiguration{},
-	// )
-	// if err != nil {
-	// 	return fmt.Errorf("database migration failed: %w", err)
-	// }
-	log.Println("golang-migrate database migrations process completed.")
+	// AutoMigrate do GORM foi removido.
+	phxlog.L.Info("golang-migrate database migrations process completed.")
 	return nil
 }
 
