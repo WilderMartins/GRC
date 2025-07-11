@@ -175,6 +175,75 @@ Com as constraints `ON DELETE CASCADE` e `ON DELETE SET NULL` definidas nos mode
 
 É crucial garantir que estas constraints sejam devidamente aplicadas ao esquema do banco de dados através de migrações apropriadas para que este comportamento seja efetivo.
 
+---
+
+## Gerenciamento de Migrações de Banco de Dados
+
+Este projeto utiliza `golang-migrate/migrate` para gerenciar as alterações no schema do banco de dados. As migrações são arquivos SQL versionados localizados em `backend/internal/database/migrations/`.
+
+### Pré-requisitos para Desenvolvimento de Migrações
+
+Você precisa ter a [CLI `migrate`](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate) instalada.
+Siga as instruções de instalação na documentação oficial. Uma forma comum é:
+```bash
+go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+```
+(Certifique-se de que seu `$GOPATH/bin` ou `$HOME/go/bin` está no seu `PATH`.)
+
+### Configurando a URL do Banco para a CLI `migrate`
+
+A CLI `migrate` requer uma URL de conexão com o banco de dados. Crie ou atualize seu arquivo `.env` na raiz do diretório `backend/` (se você o criou lá para as configurações do backend) ou defina a variável de ambiente `DB_URL_MIGRATE` de outra forma.
+
+**Exemplo de variável `DB_URL_MIGRATE` (pode ser adicionada ao seu `.env` ou exportada no terminal):**
+```env
+# .env (exemplo para backend)
+# POSTGRES_HOST=localhost
+# POSTGRES_PORT=5432
+# POSTGRES_USER=admin
+# POSTGRES_PASSWORD=password123
+# POSTGRES_DB=phoenix_grc_dev
+# POSTGRES_SSLMODE=disable
+# ... outras vars ...
+
+# URL específica para a CLI golang-migrate
+# Substitua com seus valores de POSTGRES_USER, POSTGRES_PASSWORD, etc.
+DB_URL_MIGRATE="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=${POSTGRES_SSLMODE}"
+```
+A aplicação Go (durante o comando `setup`) também constrói uma URL similar internamente para aplicar as migrações.
+
+### Comandos da CLI `migrate` (Executar da Raiz do Projeto `phoenixgrc/`)
+
+*   **Criar uma nova migração:**
+    Substitua `<migration_name>` por um nome descritivo em snake_case (ex: `add_user_last_login_at`).
+    ```bash
+    migrate create -ext sql -dir backend/internal/database/migrations -seq <migration_name>
+    ```
+    Isso cria os arquivos `<timestamp>_<migration_name>.up.sql` e `<timestamp>_<migration_name>.down.sql`. Edite-os com suas DDLs.
+
+*   **Aplicar migrações pendentes (up):**
+    (Certifique-se que sua variável de ambiente `DB_URL_MIGRATE` está exportada ou use-a diretamente no comando)
+    ```bash
+    migrate -database "${DB_URL_MIGRATE}" -path backend/internal/database/migrations up
+    ```
+
+*   **Reverter a última migração (down 1):**
+    ```bash
+    migrate -database "${DB_URL_MIGRATE}" -path backend/internal/database/migrations down 1
+    ```
+
+*   **Verificar versão atual:**
+    ```bash
+    migrate -database "${DB_URL_MIGRATE}" -path backend/internal/database/migrations version
+    ```
+
+Consulte a documentação do `golang-migrate` para mais comandos e opções.
+
+### Fluxo de Migração na Aplicação
+
+Ao executar o comando `docker-compose run --rm backend setup` (ou o binário compilado `./server setup`), a aplicação tentará aplicar automaticamente quaisquer migrações SQL pendentes que ainda não foram executadas no banco de dados. O sistema anterior de `AutoMigrate` do GORM foi substituído por este método de migrações versionadas para maior controle em ambientes de produção.
+
+---
+
 ## Endpoints da API (Backend)
 
 A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autenticação JWT. Para detalhes completos, veja o arquivo [API_DOCUMENTATION.md](API_DOCUMENTATION.md).

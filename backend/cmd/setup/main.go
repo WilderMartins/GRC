@@ -59,9 +59,41 @@ func RunSetup() {
 
 	// 2. Database Migrations
 	fmt.Println("\n--- Running Database Migrations ---")
-	if err := database.MigrateDB(); err != nil {
-		// database.MigrateDB() already logs the error
-		log.Fatalf("Database migration process failed.")
+	// Construir a dbURL para golang-migrate
+	// Formato: postgresql://user:password@host:port/dbname?sslmode=disable
+	// Nota: o usuário e senha podem conter caracteres especiais que precisam ser URL-encoded.
+	// No entanto, para input manual, geralmente não é um problema, mas para produção, sim.
+	// A biblioteca lib/pq (usada por database/sql e GORM) lida com isso na DSN.
+	// O golang-migrate também usa lib/pq internamente para o driver postgres.
+	// A DSN simples que construímos para o GORM deve ser aceitável para o driver do migrate se
+	// não houver caracteres muito exóticos.
+	// A forma mais segura de construir a URL para migrate é usar `url.URL` e `url.QueryEscape`.
+	// Por simplicidade aqui, vou usar uma formatação direta, assumindo que as credenciais não são problemáticas.
+
+	// A dbURL para golang-migrate é um pouco diferente da DSN do GORM.
+	// Ex: "postgres://postgres:password@localhost:5432/phoenix_grc_dev?sslmode=disable"
+	// Adicionar o schema padrão (public) para a tabela schema_migrations, a menos que outro seja especificado.
+	// Por agora, vamos manter simples e assumir que schema_migrations vai para o 'public' ou o search_path padrão do usuário.
+	// Se `DB_SCHEMA` for uma variável de ambiente relevante, ela deveria ser usada aqui.
+	// Para o migrate, o schema é geralmente controlado pelo search_path do usuário ou pode ser
+	// especificado na URL se o driver suportar (ex: ?search_path=myschema).
+	// O driver postgres do migrate não parece ter um suporte explícito a `search_path` na URL de forma padrão.
+	// Ele opera no search_path padrão da conexão.
+
+	// A DSN que já temos é `host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC`
+	// O migrate espera algo como `postgres://user:pass@host:port/dbname?sslmode=val`
+	// Vamos construir essa URL.
+	migrateDbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		dbUser,     // Assumindo que não precisa de URL encoding para setup manual
+		dbPassword, // Assumindo que não precisa de URL encoding para setup manual
+		dbHost,
+		dbPort,
+		dbName,
+		dbSSLMode,
+	)
+
+	if err := database.MigrateDB(migrateDbURL); err != nil {
+		log.Fatalf("Database migration process failed: %v", err)
 	}
 	fmt.Println("Database migrations completed successfully.")
 
