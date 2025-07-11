@@ -21,7 +21,42 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `200 OK`: `{ "status": "ok", "database": "connected" }`
         *   `503 Service Unavailable`: Se o banco de dados não estiver acessível.
 
-### 2. Autenticação (`/auth`)
+---
+
+### 2. Endpoints Públicos Adicionais
+
+*   **`GET /api/public/social-identity-providers`**
+    *   **Descrição:** Lista todos os provedores de identidade OAuth2 configurados que podem ser usados para login social. Isso inclui provedores globais (usando credenciais de todo o aplicativo) e provedores específicos da organização que foram marcados como públicos. Este endpoint é destinado a ser usado pela tela de login para exibir dinamicamente as opções de login social.
+    *   **Autenticação:** Nenhuma.
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `PublicIdentityProviderResponse`.
+            ```json
+            [
+                {
+                    "id": "global", // Ou UUID para IdP específico da organização
+                    "name": "Google (Global)", // Nome amigável
+                    "type": "oauth2_google", // Tipo do provedor (oauth2_google, oauth2_github)
+                    "provider_slug": "google", // Slug para construir URLs de login (ex: google, github)
+                    "icon_url": "/path/to/google_icon.svg" // URL para um ícone (opcional, pode ser gerenciado pelo frontend)
+                },
+                {
+                    "id": "uuid-org-idp-github",
+                    "name": "GitHub (Organização Acme)",
+                    "type": "oauth2_github",
+                    "provider_slug": "github",
+                    "icon_url": "/path/to/github_icon.svg"
+                }
+            ]
+            ```
+            *   **Campos da Resposta:**
+                *   `id` (string): O identificador do provedor. Será "global" para IdPs globais, ou o UUID do `IdentityProvider` para IdPs de organização. Este `id` deve ser usado no path `{idpId}` das rotas de login OAuth2.
+                *   `name` (string): Nome amigável do provedor (ex: "Google", "GitHub da Empresa X").
+                *   `type` (string): O tipo técnico do provedor (ex: `oauth2_google`, `oauth2_github`).
+                *   `provider_slug` (string): Um slug curto identificando o tipo de provedor (ex: `google`, `github`). Usado para construir as URLs de login como `/auth/oauth2/{provider_slug}/{id}/login`.
+                *   `icon_url` (string, opcional): Uma URL para um ícone representando o provedor.
+        *   `500 Internal Server Error`: Falha ao buscar os provedores de identidade.
+
+### 3. Autenticação (`/auth`)
 
 *   **`POST /auth/login`**
     *   **Descrição:** Realiza o login de um usuário com email e senha. Pode requerer um segundo fator se o 2FA estiver habilitado.
@@ -85,38 +120,79 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `500 Internal Server Error`: Falha ao gerar token JWT.
 
 *   **`GET /auth/oauth2/google/:idpId/login`**
-    *   **Descrição:** Inicia o fluxo de login OAuth2 com Google para o provedor de identidade (`idpId`) configurado. Redireciona o usuário para a página de autorização do Google.
+    *   **Descrição:** Inicia o fluxo de login OAuth2 com Google. Redireciona o usuário para a página de autorização do Google.
+        *   Se `{idpId}` for um UUID, usa a configuração do `IdentityProvider` específico da organização.
+        *   Se `{idpId}` for a string `"global"`, usa as credenciais OAuth2 globais do Google configuradas nas variáveis de ambiente do backend.
     *   **Autenticação:** Nenhuma.
     *   **Parâmetros de Path:**
-        *   `idpId` (string UUID): ID do `IdentityProvider` configurado para Google.
+        *   `idpId` (string): UUID do `IdentityProvider` da organização OU a string `"global"`.
     *   **Respostas:**
         *   `302 Found`: Redirecionamento para o Google.
-        *   `404 Not Found`: Configuração do IdP não encontrada.
-        *   `500 Internal Server Error`: Falha ao configurar OAuth2 ou gerar estado.
+        *   `404 Not Found`: Configuração do IdP (para UUID) não encontrada ou inativa.
+        *   `500 Internal Server Error`: Falha ao configurar OAuth2 (ex: credenciais globais ausentes para `"global"`, `APP_ROOT_URL` não configurado, ou erro ao gerar estado).
 
 *   **`GET /auth/oauth2/google/:idpId/callback`**
-    *   **Descrição:** Endpoint de callback para o Google após autorização do usuário. Processa o código, obtém informações do usuário, provisiona/loga o usuário no Phoenix GRC, gera um token JWT e redireciona para o frontend.
+    *   **Descrição:** Endpoint de callback para o Google após autorização do usuário. Processa o código de autorização, obtém informações do usuário do Google, e então:
+        *   Provisiona um novo usuário no Phoenix GRC ou loga um usuário existente.
+        *   Para IdPs globais (`idpId="global"`):
+            *   Se `ALLOW_GLOBAL_SSO_USER_CREATION` for `true`, novos usuários são criados.
+            *   Se `DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO` estiver configurado, novos usuários globais são associados a essa organização; caso contrário, são criados sem organização inicial.
+            *   Usuários globais existentes são logados.
+        *   Para IdPs de organização (UUID): Usuários são provisionados/logados dentro da organização do IdP.
+        *   Gera um token JWT para o usuário.
+        *   Redireciona para o frontend. A URL exata de redirecionamento do frontend é construída usando `APP_ROOT_URL` (configurado no backend) e um path padrão como `/oauth2/callback`. O resultado final será algo como: `[APP_ROOT_URL]/oauth2/callback?token=[JWT_TOKEN]&sso_success=true&provider=google`. O frontend deve estar preparado para lidar com esta rota e extrair o token.
     *   **Autenticação:** Nenhuma.
     *   **Parâmetros de Path:**
-        *   `idpId` (string UUID): ID do `IdentityProvider`.
+        *   `idpId` (string): UUID do `IdentityProvider` OU a string `"global"`.
     *   **Query Params (enviados pelo Google):** `code`, `state`.
     *   **Respostas:**
-        *   `302 Found`: Redirecionamento para `FRONTEND_OAUTH2_CALLBACK_URL` com o token JWT.
-        *   `400 Bad Request`: Estado inválido, email não fornecido pelo Google.
-        *   `401 Unauthorized`: Código de autorização não encontrado.
-        *   `500 Internal Server Error`: Falha na troca de token, obtenção de user info, criação/atualização de usuário, ou geração de token JWT.
+        *   `302 Found`: Redirecionamento para o frontend com token JWT.
+        *   `400 Bad Request`: Estado OAuth inválido, email não fornecido pelo Google.
+        *   `401 Unauthorized`: Código de autorização não encontrado/inválido.
+        *   `403 Forbidden`: Se a criação de usuário global estiver desabilitada (`ALLOW_GLOBAL_SSO_USER_CREATION=false`) e um novo usuário global tentar se registrar.
+        *   `500 Internal Server Error`: Falha na troca de token, obtenção de user info, criação/atualização de usuário no DB, ou geração de token JWT.
 
 *   **`GET /auth/oauth2/github/:idpId/login`**
-    *   **Descrição:** Inicia o fluxo de login OAuth2 com GitHub. Similar ao Google.
+    *   **Descrição:** Inicia o fluxo de login OAuth2 com GitHub. Similar ao Google Login, usando configurações de IdP de organização (para UUID) ou credenciais globais do GitHub (para `idpId="global"`).
     *   **Autenticação:** Nenhuma.
-    *   **Parâmetros de Path:** `idpId`.
-    *   **Respostas:** Similar ao Google Login.
+    *   **Parâmetros de Path:**
+        *   `idpId` (string): UUID do `IdentityProvider` da organização OU a string `"global"`.
+    *   **Respostas:** Similar ao Google Login (`404` se IdP de org não encontrado, `500` para falhas de config/estado).
 
 *   **`GET /auth/oauth2/github/:idpId/callback`**
-    *   **Descrição:** Callback para GitHub. Similar ao Google Callback.
+    *   **Descrição:** Callback para GitHub. Similar ao Google Callback, mas obtendo informações do usuário do GitHub.
+        *   Provisiona/loga usuários, respeitando `ALLOW_GLOBAL_SSO_USER_CREATION` e `DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO` para IdPs globais.
+        *   Redireciona para o frontend. A URL exata de redirecionamento do frontend é construída usando `APP_ROOT_URL` (configurado no backend) e um path padrão como `/oauth2/callback`. O resultado final será algo como: `[APP_ROOT_URL]/oauth2/callback?token=[JWT_TOKEN]&sso_success=true&provider=github`. O frontend deve estar preparado para lidar com esta rota e extrair o token.
     *   **Autenticação:** Nenhuma.
-    *   **Parâmetros de Path:** `idpId`.
-    *   **Respostas:** Similar ao Google Callback.
+    *   **Parâmetros de Path:**
+        *   `idpId` (string): UUID do `IdentityProvider` OU a string `"global"`.
+    *   **Query Params (enviados pelo GitHub):** `code`, `state`.
+    *   **Respostas:** Similar ao Google Callback (`302` para sucesso, `400` para estado/email inválido, `401` para código inválido, `403` para criação global desabilitada, `500` para outras falhas).
+
+*   **`POST /auth/login/2fa/backup-code/verify`**
+    *   **Descrição:** Verifica um código de backup fornecido pelo usuário como segundo fator de autenticação.
+    *   **Autenticação:** Nenhuma (parte do fluxo de login multi-etapa).
+    *   **Payload da Requisição (`application/json`):**
+        ```json
+        {
+            "user_id": "uuid-string-do-usuario", // string, obrigatório (obtido da resposta do /auth/login)
+            "backup_code": "string-codigo-backup" // string, obrigatório
+        }
+        ```
+    *   **Respostas:**
+        *   `200 OK` (Token JWT completo): Similar à resposta de `/auth/login/2fa/verify` com TOTP.
+        *   `400 Bad Request`: Payload inválido.
+        *   `401 Unauthorized`: Código de backup inválido, usuário não encontrado, ou 2FA/códigos de backup não habilitados.
+        *   `500 Internal Server Error`: Falha ao gerar token JWT ou atualizar códigos de backup.
+
+*   **Endpoints SAML 2.0 (Implementação Parcial - Requer Teste e Finalização)**
+    *   **Nota:** A biblioteca SAML (`github.com/crewjam/saml v0.5.1`) foi adicionada/atualizada e o código relacionado foi descomentado. No entanto, a compilação completa e testes funcionais não puderam ser realizados no ambiente atual. A lógica principal do Assertion Consumer Service (ACS) para processar a asserção, provisionar usuários e emitir tokens JWT ainda é um placeholder e precisa ser implementada. **Esta funcionalidade deve ser considerada experimental e requer testes e desenvolvimento adicionais antes do uso em produção.**
+    *   **`GET /auth/saml/:idpId/login`**
+        *   **Descrição:** Tenta iniciar o fluxo de login SAML SP-initiated redirecionando o usuário para o IdP SAML configurado.
+    *   **`GET /auth/saml/:idpId/metadata`**
+        *   **Descrição:** Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado.
+    *   **`POST /auth/saml/:idpId/acs`**
+        *   **Descrição:** Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido. **Lógica de processamento da asserção e provisionamento de usuário pendente.**
 
 ---
 
@@ -139,6 +215,20 @@ Estes endpoints operam no contexto do usuário autenticado via JWT.
             }
             ```
         *   `401 Unauthorized`: Token JWT ausente ou inválido.
+
+*   **`GET /api/v1/me/dashboard/summary`**
+    *   **Descrição:** Retorna um resumo de dados para o dashboard do usuário autenticado.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Respostas:**
+        *   `200 OK`:
+            ```json
+            {
+                "assigned_risks_open_count": 5,
+                "assigned_vulnerabilities_open_count": 2, // Pode ser da organização se não houver atribuição direta
+                "pending_approval_tasks_count": 1
+            }
+            ```
+        *   `500 Internal Server Error`: Falha ao buscar dados do resumo.
 
 ---
 
@@ -219,22 +309,24 @@ Todos os endpoints nesta seção requerem autenticação JWT.
     *   **Descrição:** Atualiza um risco existente. O `RiskLevel` é recalculado se impacto/probabilidade mudarem.
     *   **Parâmetros de Path:** `riskId`.
     *   **Payload da Requisição (`application/json`):** Similar ao `POST /api/v1/risks`.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização do risco.
     *   **Respostas:**
         *   `200 OK`: Objeto `models.Risk` atualizado (com `Owner` pré-carregado).
         *   `400 Bad Request`: Payload ou `riskId` inválido.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Risco não encontrado.
         *   `500 Internal Server Error`: Falha ao atualizar.
-        *   *(TODO: Adicionar verificação de autorização - apenas owner ou admin/manager da org? Atualmente permite qualquer um da org)*
 
 *   **`DELETE /api/v1/risks/:riskId`**
     *   **Descrição:** Deleta um risco.
     *   **Parâmetros de Path:** `riskId`.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização do risco.
     *   **Respostas:**
         *   `200 OK`: `{ "message": "Risk deleted successfully" }`
         *   `400 Bad Request`: `riskId` inválido.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Risco não encontrado.
         *   `500 Internal Server Error`: Falha ao deletar.
-        *   *(TODO: Adicionar verificação de autorização)*
 
 *   **`POST /api/v1/risks/bulk-upload-csv`**
     *   **Descrição:** Upload em massa de riscos via arquivo CSV.
@@ -361,9 +453,9 @@ A autorização geralmente requer que o usuário autenticado pertença à organi
                 "secondary_color": "#RRGGBB"  // string, opcional, formato HEX
             }
             ```
-        *   Campo `logo_file` (arquivo, opcional): Arquivo de imagem para o logo (JPEG, PNG, GIF, SVG, limite 2MB).
+        *   Campo `logo_file` (arquivo, opcional): Arquivo de imagem para o logo (JPEG, PNG, GIF, SVG, limite 2MB). Se fornecido, o `objectName` do logo armazenado será salvo no campo `LogoURL` do modelo `Organization`.
     *   **Respostas:**
-        *   `200 OK`: Objeto `models.Organization` atualizado.
+        *   `200 OK`: Objeto `models.Organization` atualizado. O campo `LogoURL` conterá o `objectName` (se um arquivo foi carregado) ou estará vazio/inalterado. Para acessar o logo carregado, use o endpoint `GET /api/v1/files/signed-url`.
         *   `400 Bad Request`: Formato de ID inválido, JSON inválido, formato de cor inválido, arquivo de logo muito grande ou tipo não permitido.
         *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Organização não encontrada.
@@ -549,6 +641,19 @@ Gerencia usuários dentro de uma organização. Requer role de Admin ou Manager 
         *   `403 Forbidden` (ex: tentar desativar o último admin ativo).
         *   `404 Not Found`.
 
+*   **`GET /api/v1/users/organization-lookup`**
+    *   **Descrição:** Retorna uma lista simplificada de usuários (ID, Nome) da organização do usuário autenticado. Útil para preencher dropdowns ou campos de seleção de proprietário/stakeholder. Retorna apenas usuários ativos.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `UserLookupResponse`.
+            ```json
+            [
+                { "id": "uuid-user1", "name": "Nome do Usuário 1" },
+                { "id": "uuid-user2", "name": "Nome do Usuário 2" }
+            ]
+            ```
+        *   `500 Internal Server Error`: Falha ao listar usuários para lookup.
+
 ---
 
 ### 6. Gestão de Vulnerabilidades (`/api/v1/vulnerabilities`)
@@ -580,6 +685,9 @@ Todos os endpoints nesta seção requerem autenticação JWT.
         *   `page_size` (int, opcional, default: 10)
         *   `status` (string, opcional): Filtra por status.
         *   `severity` (string, opcional): Filtra por severidade.
+        *   `title_like` (string, opcional): Filtra por título (case-insensitive, partial match).
+        *   `cve_id` (string, opcional): Filtra por CVE ID (case-insensitive, exact match).
+        *   `asset_affected_like` (string, opcional): Filtra por ativo afetado (case-insensitive, partial match).
     *   **Respostas:**
         *   `200 OK`: Resposta paginada com array de `models.Vulnerability`.
         *   `500 Internal Server Error`.
@@ -597,18 +705,22 @@ Todos os endpoints nesta seção requerem autenticação JWT.
     *   **Descrição:** Atualiza uma vulnerabilidade existente.
     *   **Parâmetros de Path:** `vulnId`.
     *   **Payload da Requisição (`application/json`):** Similar ao POST.
+    *   **Autorização:** Requer que o usuário autenticado tenha a role `admin` ou `manager` na organização.
     *   **Respostas:**
         *   `200 OK`: Objeto `models.Vulnerability` atualizado.
         *   `400 Bad Request`.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`.
         *   `500 Internal Server Error`.
 
 *   **`DELETE /api/v1/vulnerabilities/:vulnId`**
     *   **Descrição:** Deleta uma vulnerabilidade.
     *   **Parâmetros de Path:** `vulnId`.
+    *   **Autorização:** Requer que o usuário autenticado tenha a role `admin` ou `manager` na organização.
     *   **Respostas:**
         *   `200 OK`: `{ "message": "Vulnerability deleted successfully" }`
         *   `400 Bad Request`.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`.
         *   `500 Internal Server Error`.
 
@@ -635,26 +747,51 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             ```
         *   `500 Internal Server Error`.
 
+*   **`GET /api/v1/audit/frameworks/:frameworkId/control-families`**
+    *   **Descrição:** Lista todas as famílias de controles únicas para um framework de auditoria específico.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Parâmetros de Path:** `frameworkId` (string UUID).
+    *   **Respostas:**
+        *   `200 OK`:
+            ```json
+            {
+                "families": ["Família de Controle 1", "Família de Controle 2"]
+            }
+            ```
+        *   `400 Bad Request`: `frameworkId` inválido.
+        *   `500 Internal Server Error`: Falha ao listar famílias de controles.
+
 *   **`GET /api/v1/audit/frameworks/:frameworkId/controls`**
     *   **Descrição:** Lista todos os controles para um framework de auditoria específico.
     *   **Autenticação:** JWT Obrigatório.
     *   **Parâmetros de Path:** `frameworkId` (string UUID).
     *   **Respostas:**
-        *   `200 OK`: Array de objetos `models.AuditControl`.
+        *   `200 OK`: Array de objetos `AuditControlWithAssessmentResponse`.
             ```json
             [
                 {
+                    // Campos de models.AuditControl
                     "ID": "uuid-controle-1",
                     "FrameworkID": "uuid-framework-1",
                     "ControlID": "GV.OC-1",
                     "Description": "Papéis e responsabilidades...",
                     "Family": "Governança Organizacional (GV.OC)",
-                    "CreatedAt": "timestamp",
-                    "UpdatedAt": "timestamp"
+                    // ... outros campos de AuditControl
+                    "assessment": { // Objeto models.AuditAssessment (pode ser null)
+                        "ID": "uuid-assessment-1",
+                        "OrganizationID": "uuid-da-org-do-usuario",
+                        "AuditControlID": "uuid-controle-1",
+                        "Status": "conforme",
+                        "EvidenceURL": "objectName/ou/urlExterna", // Contém objectName ou URL externa
+                        "Score": 100,
+                        "AssessmentDate": "timestamp"
+                        // ... outros campos de AuditAssessment
+                    }
                 }
             ]
             ```
         *   `400 Bad Request`: `frameworkId` inválido.
+        *   `403 Forbidden`: Se o `organizationID` não puder ser obtido do token.
         *   `404 Not Found`: Framework não encontrado (se nenhum controle for retornado e o framework não existir).
         *   `500 Internal Server Error`.
 
@@ -667,19 +804,19 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             {
                 "audit_control_id": "uuid-do-audit-control", // string UUID, obrigatório
                 "status": "string (obrigatório, um de: conforme, nao_conforme, parcialmente_conforme)",
-                "evidence_url": "string (opcional, URL)", // Usado se evidence_file não for enviado
+                "evidence_url": "string (opcional, URL externa)", // Usado se evidence_file não for enviado e for uma URL externa. Se um arquivo for carregado, este campo é ignorado.
                 "score": "integer (opcional, 0-100, default baseado no status)",
                 "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)"
             }
             ```
-        *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, sua URL (após upload) substitui `evidence_url` no JSON.
+        *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, o `objectName` do arquivo armazenado será salvo no campo `EvidenceURL` do modelo `AuditAssessment`.
     *   **Respostas:**
-        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado.
+        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado. O campo `EvidenceURL` conterá o `objectName` (se um arquivo foi carregado) ou a URL externa fornecida. Para acessar arquivos carregados, use o endpoint `GET /api/v1/files/signed-url`.
         *   `400 Bad Request`: Formulário/JSON inválido, `audit_control_id` inválido, data inválida, arquivo muito grande ou tipo não permitido.
         *   `500 Internal Server Error`: Falha no upload ou ao salvar no banco.
 
 *   **`GET /api/v1/audit/assessments/control/:controlId`**
-    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado.
+    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado. O campo `EvidenceURL` conterá o `objectName` (se aplicável) ou uma URL externa.
     *   **Autenticação:** JWT Obrigatório.
     *   **Parâmetros de Path:** `controlId` (string UUID).
     *   **Respostas:**
@@ -688,20 +825,30 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
         *   `404 Not Found`: Nenhuma avaliação encontrada para este controle na organização.
         *   `500 Internal Server Error`.
 
+*   **`DELETE /api/v1/audit/assessments/:assessmentId/evidence`**
+    *   **Descrição:** Remove o arquivo de evidência associado a uma avaliação específica e limpa o campo `EvidenceURL` no banco de dados. Se a `EvidenceURL` for um link externo, apenas o campo no banco é limpo.
+    *   **Autenticação:** JWT Obrigatório. (Autorização: Usuário deve pertencer à organização da avaliação; TODO: refinar para admin/manager ou criador da avaliação).
+    *   **Parâmetros de Path:** `assessmentId` (string UUID).
+    *   **Respostas:**
+        *   `200 OK`: `{ "message": "Evidence deleted successfully from assessment." }` ou `{ "message": "No evidence to delete for this assessment." }`
+        *   `403 Forbidden`: Usuário não autorizado.
+        *   `404 Not Found`: Avaliação não encontrada.
+        *   `500 Internal Server Error`: Falha ao deletar arquivo do storage ou ao atualizar o registro da avaliação.
+
 *   **`GET /api/v1/audit/organizations/:orgId/frameworks/:frameworkId/assessments`**
     *   **Descrição:** Lista todas as avaliações de uma organização específica para um determinado framework (paginado).
-    *   **Autenticação:** JWT Obrigatório. Usuário deve pertencer à `:orgId` ou ser Admin.
+    *   **Autenticação:** JWT Obrigatório. O `organization_id` no token do usuário deve corresponder ao `:orgId` no path.
     *   **Parâmetros de Path:** `orgId`, `frameworkId`.
     *   **Query Params:** `page`, `page_size`.
     *   **Respostas:**
         *   `200 OK`: Resposta paginada com array de `models.AuditAssessment` (com `AuditControl` pré-carregado).
         *   `400 Bad Request`: IDs inválidos.
-        *   `403 Forbidden`.
+        *   `403 Forbidden`: Usuário não autorizado a acessar a organização especificada.
         *   `500 Internal Server Error`.
 
 *   **`GET /api/v1/audit/organizations/:orgId/frameworks/:frameworkId/compliance-score`**
     *   **Descrição:** Calcula e retorna o score geral de conformidade para um framework dentro de uma organização.
-    *   **Autenticação:** JWT Obrigatório. Usuário deve pertencer à `:orgId` ou ser Admin.
+    *   **Autenticação:** JWT Obrigatório. O `organization_id` no token do usuário deve corresponder ao `:orgId` no path.
     *   **Parâmetros de Path:** `orgId`, `frameworkId`.
     *   **Respostas:**
         *   `200 OK`: Objeto `ComplianceScoreResponse`.
@@ -734,21 +881,22 @@ Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
 *   **`POST /api/v1/users/me/2fa/totp/setup`**
     *   **Descrição:** Inicia o processo de configuração do TOTP para o usuário autenticado. Gera um novo segredo TOTP, armazena-o (associado ao usuário, `IsTOTPEnabled` ainda é `false`) e retorna o segredo e um QR code para o usuário escanear em seu aplicativo autenticador.
     *   **Autenticação:** JWT Obrigatório.
+    *   **Nota de Segurança:** O segredo TOTP gerado é armazenado de forma segura no backend (criptografado em repouso).
     *   **Respostas:**
         *   `200 OK`:
             ```json
             {
-                "secret": "BASE32_ENCODED_SECRET_KEY",
+                "secret": "BASE32_ENCODED_SECRET_KEY", // Segredo em texto plano para o usuário configurar no app autenticador
                 "qr_code": "data:image/png;base64,BASE64_ENCODED_PNG_IMAGE_OF_QR_CODE",
                 "account": "user@example.com", // Email do usuário
                 "issuer": "PhoenixGRC",       // Nome da aplicação (configurável)
-                "backup_codes_generated": false // Será true quando os códigos de backup forem implementados e gerados nesta etapa
+                "backup_codes_generated": false // Indica se os códigos de backup foram gerados automaticamente (atualmente falso, gerados via endpoint dedicado)
             }
             ```
         *   `500 Internal Server Error`: Falha ao gerar chave TOTP, QR code, ou salvar segredo.
 
 *   **`POST /api/v1/users/me/2fa/totp/verify`**
-    *   **Descrição:** Verifica um código TOTP fornecido pelo usuário. Se for a primeira verificação após o setup, ativa o TOTP para o usuário (`IsTOTPEnabled = true`).
+    *   **Descrição:** Verifica um código TOTP fornecido pelo usuário. Se for a primeira verificação após o setup, ativa o TOTP para o usuário (`IsTOTPEnabled = true`) e pode acionar a geração de códigos de backup.
     *   **Autenticação:** JWT Obrigatório.
     *   **Payload da Requisição (`application/json`):**
         ```json
@@ -778,20 +926,55 @@ Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
         *   `401 Unauthorized`: Senha inválida.
         *   `500 Internal Server Error`: Falha ao salvar o estado do usuário.
 
-#### 8.2. Códigos de Backup (TODO)
+#### 8.2. Códigos de Backup
 
-*   **`GET /api/v1/users/me/2fa/backup-codes/generate`** (TODO)
-    *   **Descrição:** Gera um novo conjunto de códigos de backup para o usuário. Invalida quaisquer códigos anteriores. Retorna os novos códigos (apenas uma vez).
+*   **`POST /api/v1/users/me/2fa/backup-codes/generate`**
+    *   **Descrição:** Gera um novo conjunto de códigos de backup para o usuário. Invalida quaisquer códigos de backup anteriores. Os códigos retornados devem ser armazenados de forma segura pelo usuário, pois são exibidos apenas uma vez.
     *   **Autenticação:** JWT Obrigatório. Requer que TOTP esteja habilitado.
     *   **Respostas:**
-        *   `200 OK`: `{ "backup_codes": ["code1", "code2", ...] }`
-        *   *(Outros erros a definir)*
+        *   `200 OK`:
+            ```json
+            {
+                "backup_codes": ["code1-plain-text", "code2-plain-text", "..."]
+            }
+            ```
+        *   `400 Bad Request`: Se TOTP não estiver habilitado.
+        *   `500 Internal Server Error`: Falha ao gerar ou salvar os hashes dos códigos.
 
-*   **`POST /auth/login/2fa/backup-code/verify`** (TODO - parte do fluxo de login)
-    *   **Descrição:** Verifica um código de backup fornecido pelo usuário durante o login 2FA.
-    *   **Payload:** `{ "user_id": "uuid", "backup_code": "string" }`
-    *   **Respostas:** Similar ao `/auth/login/2fa/verify` com TOTP, emitindo JWT se o código for válido e não utilizado.
-    *   *(Outros erros a definir)*
+*   **`POST /auth/login/2fa/backup-code/verify`**
+    *   **Descrição:** Verifica um código de backup fornecido pelo usuário durante a etapa de 2FA do login. Se válido, o código é consumido (não pode ser reutilizado) e o login prossegue com a emissão de um token JWT.
+    *   **Autenticação:** Nenhuma (parte do fluxo de login multi-etapa).
+    *   **Payload da Requisição (`application/json`):** (Já documentado na Seção 2 - Autenticação)
+        ```json
+        {
+            "user_id": "uuid-string-do-usuario",
+            "backup_code": "string-codigo-backup"
+        }
+        ```
+    *   **Respostas:** (Já documentado na Seção 2 - Autenticação)
+
+---
+
+### 9. Gerenciamento de Arquivos (`/api/v1/files`)
+
+Endpoints para operações relacionadas a arquivos, como obter URLs de acesso seguro.
+
+*   **`GET /api/v1/files/signed-url`**
+    *   **Descrição:** Gera uma URL assinada de curta duração para acessar um objeto de arquivo armazenado (ex: evidências de auditoria, logos). Os arquivos são armazenados de forma privada e esta URL fornece acesso temporário.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Query Params:**
+        *   `objectKey` (string, obrigatório): A chave/path do objeto no bucket de armazenamento. Este é o valor que agora é armazenado em campos como `AuditAssessment.EvidenceURL` ou `Organization.LogoURL` quando se referem a um arquivo carregado pela aplicação.
+        *   `durationMinutes` (int, opcional, default: 15): Duração em minutos para a validade da URL assinada (máximo usualmente permitido pelos provedores é 7 dias, ou 10080 minutos).
+    *   **Respostas:**
+        *   `200 OK`:
+            ```json
+            {
+                "signed_url": "https://storage.provider.com/path/to/object?signature=..."
+            }
+            ```
+        *   `400 Bad Request`: `objectKey` ausente ou `durationMinutes` inválido.
+        *   `404 Not Found`: Se o `objectKey` de alguma forma não for encontrado ou o usuário não tiver permissão para o bucket implícito (embora a autorização aqui seja mais sobre o acesso ao endpoint em si).
+        *   `500 Internal Server Error`: Falha ao gerar URL assinada ou provedor de armazenamento não configurado.
 
 ---
 **TODOs Gerais da Documentação:**
@@ -800,4 +983,49 @@ Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
 *   Expandir exemplos de payloads de requisição e resposta onde for útil.
 *   Detalhar a estrutura exata do `config_json` para cada `provider_type` de IdentityProvider.
 *   Adicionar uma seção sobre códigos de erro comuns e seus significados.
+
+---
+
+## Configuração do Backend (Variáveis de Ambiente Relevantes)
+
+A seguir, uma lista de variáveis de ambiente importantes para configurar o comportamento do backend, especialmente para funcionalidades como OAuth2 global e comportamento de provisionamento.
+
+*   **`APP_ROOT_URL`**
+    *   **Descrição:** A URL raiz da aplicação frontend. Usada para construir URIs de redirecionamento corretos para fluxos OAuth2 e SAML, e em links enviados em emails/notificações. Deve ser a URL base que o usuário acessa no navegador.
+    *   **Exemplo:** `http://localhost:3000` (para desenvolvimento local com frontend na porta 3000) ou `https://app.suaempresa.com`.
+
+*   **`GOOGLE_CLIENT_ID`**
+    *   **Descrição:** O Client ID fornecido pelo Google Cloud Console para o seu projeto OAuth2. Necessário se o login global com Google estiver habilitado via `/api/public/social-identity-providers`.
+    *   **Exemplo:** `xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com`
+
+*   **`GOOGLE_CLIENT_SECRET`**
+    *   **Descrição:** O Client Secret fornecido pelo Google Cloud Console. Necessário se o login global com Google estiver habilitado.
+    *   **Exemplo:** `GOCSPX-xxxxxxxxxxxxxxxxxxxxxxx`
+
+*   **`GITHUB_CLIENT_ID`**
+    *   **Descrição:** O Client ID do seu aplicativo OAuth do GitHub. Necessário se o login global com GitHub estiver habilitado via `/api/public/social-identity-providers`.
+    *   **Exemplo:** `Iv1.xxxxxxxxxxxxxxxx`
+
+*   **`GITHUB_CLIENT_SECRET`**
+    *   **Descrição:** O Client Secret do seu aplicativo OAuth do GitHub. Necessário se o login global com GitHub estiver habilitado.
+    *   **Exemplo:** `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+
+*   **`ALLOW_GLOBAL_SSO_USER_CREATION`**
+    *   **Descrição:** Um booleano (`true` ou `false`) que determina se novos usuários podem ser criados no sistema quando eles fazem login pela primeira vez através de um provedor de identidade OAuth2 global (identificado como `"global"`).
+    *   **Default:** `false` (o comportamento exato se não definido pode depender da função `getEnvAsBool`, mas é recomendado definir explicitamente).
+    *   **Exemplo:** `true`
+
+*   **`DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO`**
+    *   **Descrição:** O UUID de uma organização existente para a qual novos usuários, criados via SSO global (quando `ALLOW_GLOBAL_SSO_USER_CREATION` é `true`), serão automaticamente associados. Se esta variável estiver definida com um UUID válido, os novos usuários globais pertencerão a esta organização. Se estiver vazia ou inválida, os novos usuários globais serão criados sem associação direta a uma organização (terão `OrganizationID` nulo no banco de dados).
+    *   **Exemplo:** `a1b2c3d4-e5f6-7890-1234-567890abcdef`
+
+*   **`ENCRYPTION_KEY_HEX`**
+    *   **Descrição:** Chave de criptografia de 32 bytes (representada como 64 caracteres hexadecimais) usada para criptografar dados sensíveis em repouso, como o segredo TOTP dos usuários. **Esta chave é crítica para a segurança. Deve ser gerada de forma segura (ex: usando um gerador de números aleatórios criptograficamente seguro) e mantida em segredo.** Não deve ser commitada no repositório de código.
+    *   **Exemplo:** `your_super_secret_and_randomly_generated_64_hex_characters_long_key`
+
+*   **`FRONTEND_BASE_URL`** (Nota: `APP_ROOT_URL` é preferível para consistência)
+    *   **Descrição:** URL base do frontend. Usada em alguns contextos para construir links, como em notificações de webhook. É recomendado usar `APP_ROOT_URL` de forma consistente para todos os casos de URLs base do frontend.
+    *   **Exemplo:** `http://localhost:3000`
+
+Outras variáveis de ambiente para configuração de banco de dados (ex: `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`), JWT (`JWT_SECRET_KEY`, `JWT_TOKEN_LIFESPAN_HOURS`), provedores de armazenamento de arquivos (ex: `GCS_PROJECT_ID`, `AWS_S3_BUCKET`), etc., também são cruciais e geralmente definidas no arquivo `.env` (para desenvolvimento) ou no ambiente de implantação.
 ```

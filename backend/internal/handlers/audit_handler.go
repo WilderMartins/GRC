@@ -35,6 +35,34 @@ func ListFrameworksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, frameworks)
 }
 
+// GetControlFamiliesForFrameworkHandler lists all unique control families for a specific framework.
+func GetControlFamiliesForFrameworkHandler(c *gin.Context) {
+	frameworkIDStr := c.Param("frameworkId")
+	frameworkID, err := uuid.Parse(frameworkIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid framework ID format"})
+		return
+	}
+
+	db := database.GetDB()
+	var families []string
+	// Usar Distinct para pegar apenas famílias únicas e não nulas/vazias
+	if err := db.Model(&models.AuditControl{}).
+		Where("framework_id = ? AND family <> ''", frameworkID).
+		Distinct("family").
+		Order("family asc").
+		Pluck("family", &families).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list control families for framework: " + err.Error()})
+		return
+	}
+
+	if families == nil {
+		families = []string{} // Garantir array vazio em vez de nulo se não houver famílias
+	}
+
+	c.JSON(http.StatusOK, gin.H{"families": families})
+}
+
 // GetFrameworkControlsHandler lists all controls for a specific framework.
 func GetFrameworkControlsHandler(c *gin.Context) {
 	frameworkIDStr := c.Param("frameworkId")
@@ -146,7 +174,9 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		parsedAssessmentDate = time.Now() // Default to now if not provided
 	}
 
-	uploadedFileURL := payload.EvidenceURL // Use URL from payload if no file is uploaded or if it's preferred
+	// assessmentEvidenceIdentifier armazenará o objectName se um arquivo for carregado,
+	// ou a URL externa fornecida no payload se nenhum arquivo for carregado.
+	assessmentEvidenceIdentifier := payload.EvidenceURL
 
 	// Handle file upload if "evidence_file" is provided
 	file, header, errFile := c.Request.FormFile("evidence_file")
@@ -213,8 +243,12 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			return
 		}
 		uploadedFileURL = fileURL // Override with the GCS URL
-		log.Printf("Evidence file uploaded for org %s, control %s: %s", organizationID, auditControlUUID, uploadedFileURL)
-
+		// uploadedFileURL agora é objectName
+		uploadedFileObjectName := fileURL
+		log.Printf("Evidence file uploaded for org %s, control %s. ObjectName: %s", organizationID, auditControlUUID, uploadedFileObjectName)
+		// O campo EvidenceURL no payload JSON (payload.EvidenceURL) é ignorado se um arquivo for enviado.
+		// Armazenaremos o objectName no campo EvidenceURL do modelo.
+		assessmentEvidenceIdentifier = uploadedFileObjectName
 	} else if errFile != http.ErrMissingFile {
 		// Some other error occurred with FormFile other than file simply not being there
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Error processing evidence file: " + errFile.Error()})
@@ -226,7 +260,7 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		OrganizationID: organizationID,
 		AuditControlID: auditControlUUID,
 		Status:         payload.Status,
-		EvidenceURL:    uploadedFileURL, // Use the URL from upload or from payload
+		EvidenceURL:    assessmentEvidenceIdentifier, // Contém objectName ou URL externa
 		AssessmentDate: parsedAssessmentDate,
 	}
 	if payload.Score != nil {
@@ -319,20 +353,20 @@ func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
 	}
 
 	// Security check: Ensure the authenticated user can access this organization's assessments.
-	// For now, assume user's token orgID must match path orgId if they are not a superadmin.
-	tokenOrgID, tokenOrgExists := c.Get("organizationID")
-	userRole, roleExists := c.Get("userRole")
+	tokenAuthOrgID, tokenAuthOrgExists := c.Get("organizationID")
+	// userAuthRole, roleAuthExists := c.Get("userRole") // userRole não é usado para esta verificação específica
 
-	if !tokenOrgExists || !roleExists {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing token information"})
-		return
-	}
-	// Basic check: user must belong to the org, or be a superadmin (not implemented yet)
-	if tokenOrgID.(uuid.UUID) != targetOrgID && userRole.(models.UserRole) != models.RoleAdmin { // Simplistic admin check
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this organization's assessments"})
+	if !tokenAuthOrgExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing authentication token information"})
 		return
 	}
 
+	// User must belong to the organization they are trying to access.
+	// A future superadmin role would bypass this.
+	if tokenAuthOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to the specified organization's assessments"})
+		return
+	}
 
 	frameworkIDStr := c.Param("frameworkId")
 	frameworkID, err := uuid.Parse(frameworkIDStr)
@@ -424,15 +458,19 @@ func GetComplianceScoreHandler(c *gin.Context) {
 		return
 	}
 
-	// Security check (similar to ListOrgAssessmentsByFrameworkHandler)
-	tokenOrgID, tokenOrgExists := c.Get("organizationID")
-	userRole, roleExists := c.Get("userRole")
-	if !tokenOrgExists || !roleExists {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing token information"})
+	// Security check
+	tokenAuthOrgID, tokenAuthOrgExists := c.Get("organizationID")
+	// userAuthRole, roleAuthExists := c.Get("userRole") // userRole não é usado para esta verificação específica
+
+	if !tokenAuthOrgExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing authentication token information"})
 		return
 	}
-	if tokenOrgID.(uuid.UUID) != targetOrgID && userRole.(models.UserRole) != models.RoleAdmin {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this organization's compliance score"})
+
+	// User must belong to the organization they are trying to access.
+	// A future superadmin role would bypass this.
+	if tokenAuthOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to the specified organization's compliance score"})
 		return
 	}
 
@@ -536,4 +574,70 @@ func GetComplianceScoreHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// DeleteAssessmentEvidenceHandler remove a evidência de uma avaliação específica.
+func DeleteAssessmentEvidenceHandler(c *gin.Context) {
+	assessmentIDStr := c.Param("assessmentId")
+	assessmentID, err := uuid.Parse(assessmentIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assessment ID format"})
+		return
+	}
+
+	orgIDToken, orgOk := c.Get("organizationID")
+	if !orgOk {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgIDToken.(uuid.UUID)
+
+	// TODO: Adicionar verificação de role se necessário (ex: apenas admin/manager ou quem criou/atualizou a avaliação)
+	// Por enquanto, qualquer um da organização pode remover a evidência de uma avaliação da sua organização.
+
+	db := database.GetDB()
+	var assessment models.AuditAssessment
+	if err := db.Where("id = ? AND organization_id = ?", assessmentID, organizationID).First(&assessment).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Assessment not found or not part of your organization"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch assessment: " + err.Error()})
+		return
+	}
+
+	if assessment.EvidenceURL == "" {
+		c.JSON(http.StatusOK, gin.H{"message": "No evidence to delete for this assessment."})
+		return
+	}
+
+	// Assume que EvidenceURL armazena o objectName se for um arquivo gerenciado,
+	// ou uma URL externa se não for. Só tentamos deletar se não for uma URL HTTP(S).
+	if !strings.HasPrefix(assessment.EvidenceURL, "http://") && !strings.HasPrefix(assessment.EvidenceURL, "https://") {
+		if filestorage.DefaultFileStorageProvider == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "File storage provider not configured, cannot delete evidence file."})
+			return
+		}
+		err := filestorage.DefaultFileStorageProvider.DeleteFile(c.Request.Context(), assessment.EvidenceURL)
+		if err != nil {
+			// Log o erro, mas continue para limpar o campo no DB.
+			// O usuário pode ter deletado o arquivo diretamente no bucket.
+			log.Printf("Failed to delete evidence file '%s' from storage, but proceeding to clear DB field: %v", assessment.EvidenceURL, err)
+		}
+	} else {
+		log.Printf("EvidenceURL for assessment %s is an external URL, not deleting from managed storage.", assessmentID)
+	}
+
+	// Limpar o campo EvidenceURL e, opcionalmente, reajustar status/score
+	assessment.EvidenceURL = ""
+	// Poderia-se também resetar o score ou status se a remoção da evidência invalidar a avaliação.
+	// Ex: assessment.Score = 0; assessment.Status = models.ControlStatusNonConformant (ou um novo status "evidence_removed")
+	// Por ora, apenas remove a URL.
+
+	if err := db.Save(&assessment).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update assessment after deleting evidence: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Evidence deleted successfully from assessment."})
 }

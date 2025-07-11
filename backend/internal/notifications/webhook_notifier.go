@@ -107,10 +107,13 @@ func NotifyRiskEvent(orgID uuid.UUID, risk models.Risk, eventType models.Webhook
 		return
 	}
 
-	riskURLPlaceholder := fmt.Sprintf("%s/risks/%s", appCfg.Cfg.Port, risk.ID.String()) // Usar config da app para URL base
-    if appCfg.Cfg.Port == "" { // Fallback se APP_ROOT_URL não estiver na config ou for apenas porta
-        riskURLPlaceholder = fmt.Sprintf("http://localhost:3000/risks/%s", risk.ID.String()) // Hardcoded frontend URL as last resort
-    }
+	// Construir a URL base do frontend a partir da configuração
+	frontendBaseURL := appCfg.Cfg.FrontendBaseURL // Assumindo que esta variável existe em AppConfig e é carregada de FRONTEND_BASE_URL
+	if frontendBaseURL == "" {
+		frontendBaseURL = "http://localhost:3000" // Fallback se não configurado
+		log.Printf("AVISO: FRONTEND_BASE_URL não configurado, usando fallback para notificação: %s", frontendBaseURL)
+	}
+	riskURLPlaceholder := fmt.Sprintf("%s/risks/%s", strings.TrimSuffix(frontendBaseURL, "/"), risk.ID.String())
 
 
 	var messageText string

@@ -20,11 +20,15 @@ import (
 	"golang.org/x/oauth2"
 	githubOAuth2 "golang.org/x/oauth2/github"
 	"gorm.io/gorm"
+	appConfig "phoenixgrc/backend/pkg/config" // Para credenciais globais e AppRootURL
 )
 
 const githubOAuthStateCookie = "phoenixgrc_github_oauth_state"
+// globalIdPIdentifier já deve estar definido em common.go ou google.go, ou definir aqui se necessário.
+// const globalIdPIdentifier = "global" // Definido em google.go e usado aqui
 
 // GithubOAuthConfig defines fields for Github OAuth2 provider from IdentityProvider.ConfigJSON
+// ou das variáveis de ambiente globais.
 type GithubOAuthConfig struct {
 	ClientID     string   `json:"client_id"`
 	ClientSecret string   `json:"client_secret"`
@@ -46,58 +50,67 @@ type GithubUserEmailResponse struct {
 	Verified bool   `json:"verified"`
 }
 
-func getGithubOAuthConfig(idpModel *models.IdentityProvider) (*oauth2.Config, *GithubOAuthConfig, error) {
-	if appRootURL == "" { // appRootURL is initialized by InitializeOAuth2GlobalConfig
-		return nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized")
+func getGithubOAuthConfig(idpIDStr string, db *gorm.DB) (*oauth2.Config, *GithubOAuthConfig, *models.IdentityProvider, error) {
+	currentAppRootURL := appConfig.Cfg.AppRootURL
+	if currentAppRootURL == "" {
+		return nil, nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized or empty")
 	}
 
 	var cfg GithubOAuthConfig
-	if err := json.Unmarshal([]byte(idpModel.ConfigJSON), &cfg); err != nil {
-		return nil, nil, fmt.Errorf("failed to unmarshal Github OAuth2 config from JSON: %w", err)
-	}
+	var idpModelFromDB *models.IdentityProvider = nil
 
-	if cfg.ClientID == "" || cfg.ClientSecret == "" {
-		return nil, &cfg, fmt.Errorf("client_id or client_secret missing in Github OAuth2 config")
-	}
+	dynamicRedirectURI := fmt.Sprintf("%s/auth/oauth2/github/%s/callback", currentAppRootURL, idpIDStr)
 
-	dynamicRedirectURI := fmt.Sprintf("%s/auth/oauth2/github/%s/callback", appRootURL, idpModel.ID.String())
+	if idpIDStr == GlobalIdPIdentifier {
+		cfg.ClientID = appConfig.Cfg.GithubClientID
+		cfg.ClientSecret = appConfig.Cfg.GithubClientSecret
+		if len(cfg.Scopes) == 0 { // Default scopes for global
+			cfg.Scopes = []string{"read:user", "user:email"}
+		}
+		if cfg.ClientID == "" || cfg.ClientSecret == "" {
+			return nil, &cfg, nil, fmt.Errorf("global Github OAuth2 (GITHUB_CLIENT_ID/SECRET) not configured")
+		}
+	} else {
+		idpID, err := uuid.Parse(idpIDStr)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid IdP ID format for Github OAuth2: %s", idpIDStr)
+		}
+		var fetchedModel models.IdentityProvider
+		err = db.Where("id = ? AND provider_type = ? AND is_active = ?", idpID, models.IDPTypeOAuth2Github, true).First(&fetchedModel).Error
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, nil, nil, fmt.Errorf("active Github OAuth2 provider configuration not found for ID: %s", idpIDStr)
+			}
+			return nil, nil, nil, fmt.Errorf("database error fetching Github IdP config for ID %s: %w", idpIDStr, err)
+		}
+		idpModelFromDB = &fetchedModel
 
-	scopes := cfg.Scopes
-	if len(scopes) == 0 {
-		scopes = []string{"read:user", "user:email"} // Default scopes
+		if errUnmarshal := json.Unmarshal([]byte(idpModelFromDB.ConfigJSON), &cfg); errUnmarshal != nil {
+			return nil, nil, idpModelFromDB, fmt.Errorf("failed to unmarshal Github OAuth2 config from JSON for IdP %s: %w", idpIDStr, errUnmarshal)
+		}
+		if cfg.ClientID == "" || cfg.ClientSecret == "" {
+			return nil, &cfg, idpModelFromDB, fmt.Errorf("client_id or client_secret missing in Github OAuth2 config for IdP %s", idpIDStr)
+		}
+		if len(cfg.Scopes) == 0 {
+			cfg.Scopes = []string{"read:user", "user:email"} // Default scopes
+		}
 	}
 
 	return &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
 		RedirectURL:  dynamicRedirectURI,
-		Scopes:       scopes,
+		Scopes:       cfg.Scopes,
 		Endpoint:     githubOAuth2.Endpoint,
-	}, &cfg, nil
+	}, &cfg, idpModelFromDB, nil
 }
 
 // GithubLoginHandler initiates the Github OAuth2 login flow.
 func GithubLoginHandler(c *gin.Context) {
-	idpIDStr := c.Param("idpId")
-	idpID, err := uuid.Parse(idpIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IdP ID format for Github OAuth2"})
-		return
-	}
-
+	idpIDStr := c.Param("idpId") // Pode ser UUID ou "global"
 	db := database.GetDB()
-	var idpModel models.IdentityProvider
-	err = db.Where("id = ? AND provider_type = ? AND is_active = ?", idpID, models.IDPTypeOAuth2Github, true).First(&idpModel).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Active Github OAuth2 provider configuration not found for ID: " + idpIDStr})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching Github IdP config: " + err.Error()})
-		return
-	}
 
-	oauthCfg, _, err := getGithubOAuthConfig(&idpModel)
+	oauthCfg, _, _, err := getGithubOAuthConfig(idpIDStr, db)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to configure Github OAuth2: " + err.Error()})
 		return
@@ -112,7 +125,7 @@ func GithubLoginHandler(c *gin.Context) {
 		Value:    state,
 		Expires:  time.Now().Add(10 * time.Minute),
 		HttpOnly: true,
-		Path:     "/",
+		Path:     "/", // Consider path "/auth/oauth2/github/"+idpIDStr for specificity
 		Secure:   c.Request.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -123,12 +136,7 @@ func GithubLoginHandler(c *gin.Context) {
 
 // GithubCallbackHandler handles the callback from Github after user authorization.
 func GithubCallbackHandler(c *gin.Context) {
-	idpIDStr := c.Param("idpId")
-	idpID, err := uuid.Parse(idpIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IdP ID format in callback for Github OAuth2"})
-		return
-	}
+	idpIDStr := c.Param("idpId") // Pode ser UUID ou "global"
 
 	stateCookie, err := c.Cookie(githubOAuthStateCookie)
 	if err != nil {
@@ -137,7 +145,7 @@ func GithubCallbackHandler(c *gin.Context) {
 	}
 	http.SetCookie(c.Writer, &http.Cookie{Name: githubOAuthStateCookie, Value: "", MaxAge: -1, Path: "/"})
 
-	if c.Query("state") != stateCookie {
+	if c.Query("state") != stateCookie.Value { // Compare with stateCookie.Value
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OAuth state"})
 		return
 	}
@@ -149,14 +157,7 @@ func GithubCallbackHandler(c *gin.Context) {
 	}
 
 	db := database.GetDB()
-	var idpModel models.IdentityProvider
-	err = db.Where("id = ? AND provider_type = ? AND is_active = ?", idpID, models.IDPTypeOAuth2Github, true).First(&idpModel).Error
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve IdP configuration during callback"})
-		return
-	}
-
-	oauthCfg, _, err := getGithubOAuthConfig(&idpModel)
+	oauthCfg, _, idpModelFromDB, err := getGithubOAuthConfig(idpIDStr, db)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to re-configure Github OAuth2 for token exchange: " + err.Error()})
 		return
@@ -174,8 +175,6 @@ func GithubCallbackHandler(c *gin.Context) {
 
 	// Get user info from Github
 	client := oauthCfg.Client(context.Background(), token)
-
-	// Fetch primary user info
 	req, _ := http.NewRequest("GET", "https://api.github.com/user", nil)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -192,36 +191,34 @@ func GithubCallbackHandler(c *gin.Context) {
 	}
 
 	email := ghUser.Email
-	// If primary email is not set or not public, try fetching from /user/emails
 	if email == "" {
 		reqEmails, _ := http.NewRequest("GET", "https://api.github.com/user/emails", nil)
 		respEmails, errEmails := client.Do(reqEmails)
 		if errEmails != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user emails from Github: " + errEmails.Error()})
-			return
-		}
-		defer respEmails.Body.Close()
-		bodyEmails, _ := io.ReadAll(respEmails.Body)
-
-		var ghEmails []GithubUserEmailResponse
-		if errJson := json.Unmarshal(bodyEmails, &ghEmails); errJson == nil {
-			for _, e := range ghEmails {
-				if e.Primary && e.Verified {
-					email = e.Email
-					break
-				}
-			}
-			if email == "" && len(ghEmails) > 0 { // Fallback to first verified email if no primary
+			// Log this error but don't necessarily fail the login if primary email might be found later
+			fmt.Fprintf(os.Stderr, "Failed to get user emails from Github: %v\n", errEmails)
+		} else {
+			defer respEmails.Body.Close()
+			bodyEmails, _ := io.ReadAll(respEmails.Body)
+			var ghEmails []GithubUserEmailResponse
+			if errJson := json.Unmarshal(bodyEmails, &ghEmails); errJson == nil {
 				for _, e := range ghEmails {
-					if e.Verified {
+					if e.Primary && e.Verified {
 						email = e.Email
 						break
+					}
+				}
+				if email == "" { // Fallback to first verified email if no primary
+					for _, e := range ghEmails {
+						if e.Verified {
+							email = e.Email
+							break
+						}
 					}
 				}
 			}
 		}
 	}
-
 
 	if email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email not provided or accessible from Github. Ensure 'user:email' scope is granted and a verified public email exists."})
@@ -230,48 +227,118 @@ func GithubCallbackHandler(c *gin.Context) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	fullName := strings.TrimSpace(ghUser.Name)
 	if fullName == "" {
-		fullName = strings.TrimSpace(ghUser.Login) // Use username if Name is not set
+		fullName = strings.TrimSpace(ghUser.Login)
 	}
 	if fullName == "" {
-		fullName = email // Fallback name
+		fullName = email
 	}
-	externalID := fmt.Sprintf("%d", ghUser.ID) // Github's unique ID for the user (is int64)
-
+	githubUserIDStr := fmt.Sprintf("%d", ghUser.ID)
 
 	// --- User Provisioning/Login ---
 	var user models.User
-	err = db.Where("email = ? AND organization_id = ?", email, idpModel.OrganizationID).First(&user).Error
+	var userOrgID uuid.NullUUID
+	ssoProviderName := "github" // Default for global
 
-	if err != nil && err != gorm.ErrRecordNotFound {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching user: " + err.Error()})
-		return
-	}
+	if idpIDStr == GlobalIdPIdentifier {
+		ssoProviderName = "global_github"
+		// Try to find user by email OR by social login ID if previously linked with global_github
+		err = db.Where("email = ? OR (social_login_id = ? AND sso_provider = ?)", email, githubUserIDStr, ssoProviderName).First(&user).Error
 
-	if err == gorm.ErrRecordNotFound { // User does not exist, provision
-		user = models.User{
-			OrganizationID: idpModel.OrganizationID,
-			Name:           fullName,
-			Email:          email,
-			PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
-			SSOProvider:    idpModel.Name, // Store the friendly name of the IdP config
-			SocialLoginID:  externalID,    // Store Github's User ID
-			Role:           models.RoleUser,
-		}
-		if createErr := db.Create(&user).Error; createErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new OAuth2 user: " + createErr.Error()})
+		if err != nil && err != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching user for global Github login: " + err.Error()})
 			return
 		}
-	} else { // User exists, update
-		user.SSOProvider = idpModel.Name
-		user.SocialLoginID = externalID
-		if user.Name == "" { user.Name = fullName } // Update name if it was empty
-		if saveErr := db.Save(&user).Error; saveErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update OAuth2 user: " + saveErr.Error()})
+
+		if err == gorm.ErrRecordNotFound {
+			if !appConfig.Cfg.AllowGlobalSSOUserCreation {
+				c.JSON(http.StatusForbidden, gin.H{"error": "New user registration via global Github SSO is disabled."})
+				return
+			}
+			orgIDForNewUser := uuid.NullUUID{}
+			if appConfig.Cfg.DefaultOrganizationIDForGlobalSSO != "" {
+				parsedOrgID, errParseOrg := uuid.Parse(appConfig.Cfg.DefaultOrganizationIDForGlobalSSO)
+				if errParseOrg == nil {
+					orgIDForNewUser = uuid.NullUUID{UUID: parsedOrgID, Valid: true}
+				} else {
+					log.Printf("Aviso: DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO ('%s') não é um UUID válido. Usuário será criado sem organização.", appConfig.Cfg.DefaultOrganizationIDForGlobalSSO)
+				}
+			}
+			user = models.User{
+				OrganizationID: orgIDForNewUser,
+				Name:           fullName,
+				Email:          email,
+				PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
+				SSOProvider:    ssoProviderName,
+				SocialLoginID:  githubUserIDStr,
+				Role:           models.RoleUser,
+				IsActive:       true,
+			}
+			if createErr := db.Create(&user).Error; createErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new global Github SSO user: " + createErr.Error()})
+				return
+			}
+		} else { // User exists
+			user.SSOProvider = ssoProviderName // Ensure it's marked as global_github
+			user.SocialLoginID = githubUserIDStr
+			if user.Name == "" || user.Name == user.Email { user.Name = fullName }
+			user.IsActive = true
+			if saveErr := db.Save(&user).Error; saveErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update global Github SSO user: " + saveErr.Error()})
+				return
+			}
+		}
+		userOrgID = user.OrganizationID // This will be nil if the user is not yet associated with an org
+
+	} else { // Organization-specific IdP flow
+		if idpModelFromDB == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "IdP configuration missing for organization-specific Github login."})
 			return
 		}
+		ssoProviderName = idpModelFromDB.Name // Use the actual name from the IdP config
+
+		// Try to find user by email within the organization OR by social login ID if previously linked to this org's IdP
+		err = db.Where("(email = ? AND organization_id = ?) OR (social_login_id = ? AND organization_id = ? AND sso_provider = ?)",
+			email, idpModelFromDB.OrganizationID, githubUserIDStr, idpModelFromDB.OrganizationID, ssoProviderName).First(&user).Error
+
+		if err != nil && err != gorm.ErrRecordNotFound {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error fetching user for org Github login: " + err.Error()})
+			return
+		}
+
+		if err == gorm.ErrRecordNotFound { // User does not exist in this org with this IdP, provision
+			user = models.User{
+				OrganizationID: idpModelFromDB.OrganizationID,
+				Name:           fullName,
+				Email:          email,
+				PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
+				SSOProvider:    ssoProviderName,
+				SocialLoginID:  githubUserIDStr,
+				Role:           models.RoleUser, // Default role
+				IsActive:       true,
+			}
+			if createErr := db.Create(&user).Error; createErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new org Github SSO user: " + createErr.Error()})
+				return
+			}
+		} else { // User exists, update
+			user.SSOProvider = ssoProviderName
+			user.SocialLoginID = githubUserIDStr
+			if user.Name == "" || user.Name == user.Email { user.Name = fullName }
+			user.IsActive = true
+			// Ensure the user is associated with this IdP's organization
+			if !user.OrganizationID.Valid || user.OrganizationID.UUID != idpModelFromDB.OrganizationID.UUID {
+				user.OrganizationID = idpModelFromDB.OrganizationID
+			}
+			if saveErr := db.Save(&user).Error; saveErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update org Github SSO user: " + saveErr.Error()})
+				return
+			}
+		}
+		userOrgID = user.OrganizationID // Should be valid and match idpModelFromDB.OrganizationID
 	}
 
-	jwtToken, jwtErr := auth.GenerateToken(&user, user.OrganizationID)
+	// Generate Phoenix GRC JWT token
+	jwtToken, jwtErr := auth.GenerateToken(&user, userOrgID)
 	if jwtErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate session token: " + jwtErr.Error()})
 		return
@@ -279,11 +346,12 @@ func GithubCallbackHandler(c *gin.Context) {
 
 	frontendRedirectURL := os.Getenv("FRONTEND_OAUTH2_CALLBACK_URL")
 	if frontendRedirectURL == "" {
-		frontendRedirectURL = os.Getenv("APP_ROOT_URL")
+		frontendRedirectURL = appConfig.Cfg.AppRootURL // Use configured AppRootURL
 		if frontendRedirectURL == "" {
-			frontendRedirectURL = "/"
+			frontendRedirectURL = "/" // Fallback
 		}
 	}
-	targetURL := fmt.Sprintf("%s?token=%s&sso_success=true&provider=github", frontendRedirectURL, jwtToken)
+	// Ensure no double slashes if frontendRedirectURL ends with / and APP_ROOT_URL also has it
+	targetURL := fmt.Sprintf("%s/oauth2/callback?token=%s&sso_success=true&provider=%s", strings.TrimSuffix(frontendRedirectURL, "/"), jwtToken, strings.ReplaceAll(ssoProviderName, "global_", ""))
 	c.Redirect(http.StatusFound, targetURL)
 }

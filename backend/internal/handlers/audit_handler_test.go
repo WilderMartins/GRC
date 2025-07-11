@@ -319,16 +319,199 @@ func TestListFrameworksHandler(t *testing.T) {
 // - Test case for when the assessment already exists (update path of upsert)
 
 // Placeholder for other audit handler tests
-// TestGetFrameworkControlsHandler, TestGetAssessmentForControlHandler, TestListOrgAssessmentsByFrameworkHandler
+// TestGetFrameworkControlsHandler, TestGetAssessmentForControlHandler
 // would follow similar patterns.
-// Remember to:
-// 1. Call setupTestEnvironment(t)
-// 2. Mock auth context if the route is protected.
-// 3. Set up sqlMock expectations for any DB calls.
-// 4. Create a request (httptest.NewRequest).
-// 5. Record the response (httptest.NewRecorder).
-// 6. router.ServeHTTP(rr, req).
-// 7. Assert status code and response body.
-// 8. Assert sqlMock.ExpectationsWereMet().
 
+func TestListOrgAssessmentsByFrameworkHandler_Auth(t *testing.T) {
+	setupTestEnvironment(t)
+	gin.SetMode(gin.TestMode)
+
+	targetOrgID := uuid.New()
+	otherOrgID := uuid.New()
+	frameworkID := uuid.New()
+	actingUserID := uuid.New() // User performing the action
+
+	testCases := []struct {
+		name           string
+		requestOrgID   uuid.UUID // Org ID in the URL path
+		tokenOrgID     uuid.UUID // Org ID in the user's token
+		userRole       models.UserRole
+		expectedStatus int
+		mockDB         func()
+	}{
+		{
+			name:           "User accesses own org's assessments - Allowed",
+			requestOrgID:   targetOrgID,
+			tokenOrgID:     targetOrgID, // Token org matches path org
+			userRole:       models.RoleUser, // Any role in the org can list
+			expectedStatus: http.StatusOK,
+			mockDB: func() {
+				// Mock DB calls for a successful listing
+				sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT "id" FROM "audit_controls" WHERE framework_id = $1`)).
+					WithArgs(frameworkID).
+					WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New())) // At least one control
+				sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id IN ($2)`)).
+					WithArgs(targetOrgID, sqlmock.AnyArg()).
+					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0)) // No assessments for simplicity
+				sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id IN ($2) ORDER BY assessment_date desc LIMIT $3 OFFSET $4`)).
+					WithArgs(targetOrgID, sqlmock.AnyArg(), 10, 0). // Default page size 10, offset 0
+					WillReturnRows(sqlmock.NewRows(nil)) // Empty result set
+			},
+		},
+		{
+			name:           "User (even admin) accesses other org's assessments - Forbidden",
+			requestOrgID:   otherOrgID,  // Path org is different
+			tokenOrgID:     targetOrgID, // Token org
+			userRole:       models.RoleAdmin, // Even as admin of own org
+			expectedStatus: http.StatusForbidden,
+			mockDB:         func() { /* No DB calls expected */ },
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := getRouterWithAuthContext(actingUserID, tc.tokenOrgID, tc.userRole)
+			router.GET("/organizations/:orgId/frameworks/:frameworkId/assessments", ListOrgAssessmentsByFrameworkHandler)
+
+			if tc.mockDB != nil {
+				tc.mockDB()
+			}
+
+			req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/organizations/%s/frameworks/%s/assessments", tc.requestOrgID, frameworkID), nil)
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+
+			assert.Equal(t, tc.expectedStatus, rr.Code, "Response code mismatch. Body: %s", rr.Body.String())
+			if err := sqlMock.ExpectationsWereMet(); err != nil {
+				t.Errorf("SQL mock expectations not met for %s: %s", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestGetComplianceScoreHandler_Auth(t *testing.T) {
+	setupTestEnvironment(t)
+	gin.SetMode(gin.TestMode)
+
+	targetOrgID := uuid.New()
+	otherOrgID := uuid.New()
+	frameworkID := uuid.New()
+	actingUserID := uuid.New()
+
+	testCases := []struct {
+		name           string
+		requestOrgID   uuid.UUID
+		tokenOrgID     uuid.UUID
+		userRole       models.UserRole
+		expectedStatus int
+		mockDB         func()
+	}{
+		{
+			name:           "User accesses own org's compliance score - Allowed",
+			requestOrgID:   targetOrgID,
+			tokenOrgID:     targetOrgID,
+			userRole:       models.RoleUser, // Any role
+			expectedStatus: http.StatusOK,
+			mockDB: func() {
+				// Mock DB calls for a successful score calculation
+				sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_frameworks" WHERE id = $1 ORDER BY "audit_frameworks"."id" LIMIT 1`)).
+					WithArgs(frameworkID).
+					WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(frameworkID, "Test Framework"))
+				sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_controls" WHERE framework_id = $1`)).
+					WithArgs(frameworkID).
+					WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New())) // At least one control
+				sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id IN ($2)`)).
+					WithArgs(targetOrgID, sqlmock.AnyArg()).
+					WillReturnRows(sqlmock.NewRows(nil)) // No assessments for simplicity, leads to 0 score
+			},
+		},
+		{
+			name:           "User (even admin) accesses other org's compliance score - Forbidden",
+			requestOrgID:   otherOrgID,
+			tokenOrgID:     targetOrgID,
+			userRole:       models.RoleAdmin,
+			expectedStatus: http.StatusForbidden,
+			mockDB:         func() { /* No DB calls expected */ },
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := getRouterWithAuthContext(actingUserID, tc.tokenOrgID, tc.userRole)
+			router.GET("/organizations/:orgId/frameworks/:frameworkId/compliance-score", GetComplianceScoreHandler)
+
+			if tc.mockDB != nil {
+				tc.mockDB()
+			}
+
+			req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/organizations/%s/frameworks/%s/compliance-score", tc.requestOrgID, frameworkID), nil)
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+
+			assert.Equal(t, tc.expectedStatus, rr.Code, "Response code mismatch. Body: %s", rr.Body.String())
+			if err := sqlMock.ExpectationsWereMet(); err != nil {
+				t.Errorf("SQL mock expectations not met for %s: %s", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestCreateOrUpdateAssessmentHandler_FileTooLarge(t *testing.T) {
+	setupTestEnvironment(t)
+	// Usar getRouterWithAuthContext de main_test_handler.go se padronizado,
+	// ou garantir que o contexto seja configurado com userRole.
+	router := getRouterWithAuthContext(testUserID, testOrgID, models.RoleAdmin)
+	router.POST("/assessments", CreateOrUpdateAssessmentHandler)
+
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+	controlID := uuid.New()
+	assessmentData := AssessmentPayload{AuditControlID: controlID.String(), Status: models.ControlStatusConformant}
+	jsonData, _ := json.Marshal(assessmentData)
+	_ = writer.WriteField("data", string(jsonData))
+
+	// Criar um arquivo mock grande (excedendo maxEvidenceFileSize)
+	largeFileContent := make([]byte, maxEvidenceFileSize+1) // maxEvidenceFileSize é 10MB
+	part, _ := writer.CreateFormFile("evidence_file", "large_evidence.txt")
+	_, _ = io.Copy(part, bytes.NewReader(largeFileContent))
+	writer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, "/assessments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "File size exceeds limit")
+	// Nenhuma expectativa de DB, pois deve falhar antes
+	assert.NoError(t, sqlMock.ExpectationsWereMet()) // Verificar se não houve interações inesperadas
+}
+
+func TestCreateOrUpdateAssessmentHandler_InvalidMimeType(t *testing.T) {
+	setupTestEnvironment(t)
+	router := getRouterWithAuthContext(testUserID, testOrgID, models.RoleAdmin)
+	router.POST("/assessments", CreateOrUpdateAssessmentHandler)
+
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+	controlID := uuid.New()
+	assessmentData := AssessmentPayload{AuditControlID: controlID.String(), Status: models.ControlStatusConformant}
+	jsonData, _ := json.Marshal(assessmentData)
+	_ = writer.WriteField("data", string(jsonData))
+
+	invalidFileContent := []byte{0xDE, 0xAD, 0xBE, 0xEF} // Exemplo de bytes binários
+	part, _ := writer.CreateFormFile("evidence_file", "invalid_type.exe")
+	_, _ = io.Copy(part, bytes.NewReader(invalidFileContent))
+	writer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, "/assessments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "File type")
+	assert.Contains(t, rr.Body.String(), "is not allowed")
+	assert.NoError(t, sqlMock.ExpectationsWereMet())
+}
 // Ensure newline at end of file

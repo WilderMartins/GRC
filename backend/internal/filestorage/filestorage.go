@@ -9,8 +9,10 @@ import (
 
 // FileStorageProvider defines an interface for file storage operations.
 type FileStorageProvider interface {
-	UploadFile(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (fileURL string, err error)
-	DeleteFile(ctx context.Context, fileURL string) error
+	// UploadFile uploads a file and returns the unique objectName (key/path) of the stored file.
+	UploadFile(ctx context.Context, organizationID string, objectName string, fileContent io.Reader) (storedObjectName string, err error)
+	DeleteFile(ctx context.Context, objectName string) error // Mudado fileURL para objectName
+	GetSignedURL(ctx context.Context, objectName string, durationMinutes int) (signedURL string, err error)
 }
 
 // DefaultFileStorageProvider holds the initialized default provider.

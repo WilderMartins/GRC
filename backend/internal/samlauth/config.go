@@ -1,10 +1,5 @@
 package samlauth
 
-// TODO: JULES - Pacote SAMLauth temporariamente comentado devido a problemas de compilação persistentes
-// com a biblioteca github.com/crewjam/saml no ambiente de sandbox.
-// A funcionalidade SAML precisará ser reativada e depurada quando o problema ambiental/linker for resolvido.
-
-/*
 import (
 	"crypto/rsa"
 	"crypto/x509"
@@ -71,6 +66,8 @@ func GetSAMLServiceProviderOptions(idpModel *models.IdentityProvider) (*samlsp.O
 		return nil, fmt.Errorf("SAML SP global config not initialized")
 	}
 	var cfg SAMLIdPConfig
+	// Ignorando erro de Unmarshal aqui, pois cfg será zero-value se ConfigJSON for inválido ou vazio,
+	// o que é tratado por defaults abaixo. Em um cenário de produção robusto, o erro seria logado.
 	_ = json.Unmarshal([]byte(idpModel.ConfigJSON), &cfg)
 
 	parsedSpRootURL, err := url.Parse(spRootURL)
@@ -78,26 +75,52 @@ func GetSAMLServiceProviderOptions(idpModel *models.IdentityProvider) (*samlsp.O
 		return nil, fmt.Errorf("failed to parse SP root URL: %w", err)
 	}
 
-	metadataURLDynamic := fmt.Sprintf("%s/auth/saml/%s/metadata", spRootURL, idpModel.ID.String())
-
-	spEntityID := cfg.SpEntityID
-	if spEntityID == "" {
-		spEntityID = metadataURLDynamic
+	// ACS URL deve ser construída dinamicamente baseada no ID do IdP e na raiz da aplicação.
+	// Ex: https://app.example.com/auth/saml/uuid-do-idp/acs
+	acsURLString := fmt.Sprintf("%s/auth/saml/%s/acs", spRootURL, idpModel.ID.String())
+	acsURL, err := url.Parse(acsURLString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ACS URL '%s': %w", acsURLString, err)
 	}
 
-	// AcsURL precisa ser definido, mesmo que dummy, para samlsp.New não dar panic.
-	dummyAcsURL := fmt.Sprintf("http://localhost:8080/auth/saml/%s/acs", idpModel.ID.String())
-	parsedDummyAcsURL, _ := url.Parse(dummyAcsURL)
+	// Metadata URL também deve ser dinâmica.
+	// Ex: https://app.example.com/auth/saml/uuid-do-idp/metadata
+	metadataURLString := fmt.Sprintf("%s/auth/saml/%s/metadata", spRootURL, idpModel.ID.String())
+	// parsedMetadataURL, err := url.Parse(metadataURLString) // Não usado diretamente em samlsp.Options, mas bom para consistência
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to parse Metadata URL '%s': %w", metadataURLString, err)
+	// }
+
+
+	// SpEntityID pode vir da configuração do IdP no banco, ou default para a URL de metadados do SP.
+	spEntityID := cfg.SpEntityID
+	if spEntityID == "" {
+		spEntityID = metadataURLString // Default EntityID para a URL de metadados do SP
+	}
 
 
 	opts := samlsp.Options{
-		URL:         *parsedSpRootURL,
+		URL:         *parsedSpRootURL, // URL base da aplicação (Service Provider)
 		Key:         spKey,
 		Certificate: spCertificate,
-		EntityID:    spEntityID,
-		SignRequest: cfg.SignRequest,
-		AcsURL:      parsedDummyAcsURL,
+		EntityID:    spEntityID,    // EntityID do Service Provider
+		SignRequest: cfg.SignRequest, // Se as AuthNRequests devem ser assinadas
+		AcsURL:      acsURL,        // Assertion Consumer Service URL
+		// IDPMetadataURL: idpModel.IDPMetadataURL, // Se o metadata do IdP for buscado de uma URL
+		// IDPMetadata: &idpModel.IDPMetadata, // Se o metadata do IdP for fornecido diretamente (XML)
+		// ForceAuthn: false, // Se o IdP deve forçar re-autenticação do usuário
 	}
+
+	// Para usar IDPMetadata, o idpModel precisaria ter o XML dos metadados do IdP.
+	// A biblioteca crewjam/saml pode buscar de uma URL se IDPMetadataURL for fornecido,
+	// ou usar um objeto `EntityDescriptor` se IDPMetadata for fornecido.
+	// O `config_json` do `IdentityProvider` deve conter `idp_metadata_url` ou o XML direto.
+	// Exemplo: se `idpModel.ConfigJSON` contiver `{"idp_metadata_url":"http://idp.example.com/metadata"}`
+	// ou `{"idp_entity_id":"...", "idp_sso_url":"...", "idp_x509_cert":"..."}`
+
+	// A lógica atual em idp_handler.go para SAML espera "idp_entity_id", "idp_sso_url", "idp_x509_cert"
+	// Isso significa que não estamos usando IDPMetadataURL ou IDPMetadata diretamente com crewjam/saml
+	// para buscar/parsear metadados do IdP, mas sim configurando manualmente. Isso é aceitável.
+
 	return &opts, nil
 }
-*/

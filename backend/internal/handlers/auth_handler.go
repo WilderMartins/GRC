@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"net/http"
+	"log"
 	"phoenixgrc/backend/internal/auth"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	"phoenixgrc/backend/internal/utils" // Added for crypto utils
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid" // Added for parsing UserID
@@ -216,7 +218,14 @@ func LoginVerifyTOTPHandler(c *gin.Context) {
 		return
 	}
 
-	valid := totp.Validate(payload.Token, user.TOTPSecret)
+	decryptedSecret, err := utils.Decrypt(user.TOTPSecret)
+	if err != nil {
+		log.Printf("ERROR: Failed to decrypt TOTP secret during login for user %s: %v", user.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process TOTP secret during login"})
+		return
+	}
+
+	valid := totp.Validate(payload.Token, decryptedSecret)
 	if !valid {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid TOTP token"})
 		return

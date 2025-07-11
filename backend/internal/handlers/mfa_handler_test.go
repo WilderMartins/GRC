@@ -153,13 +153,340 @@ func TestSetupTOTPHandler_Success(t *testing.T) {
 	assert.NoError(t, sqlMockMFA.ExpectationsWereMet(), "SQL mock expectations were not met")
 }
 
-// TODO: TestSetupTOTPHandler_UserNotFound
-// TODO: TestVerifyTOTPHandler_Success_Enable2FA
-// TODO: TestVerifyTOTPHandler_AlreadyEnabled
-// TODO: TestVerifyTOTPHandler_InvalidToken
-// TODO: TestVerifyTOTPHandler_TOTPNotSetup
-// TODO: TestDisableTOTPHandler_Success
-// TODO: TestDisableTOTPHandler_InvalidPassword
-// TODO: TestDisableTOTPHandler_TOTPNotEnabled
+func TestSetupTOTPHandler_UserNotFound(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New() // Um ID de usuário que não existirá
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() }) // Mock Auth Middleware
+	router.POST("/setup-totp", SetupTOTPHandler)
+
+	// Mock DB: Fetch user (não encontrado)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT 1`)).
+		WithArgs(userID).
+		WillReturnError(gorm.ErrRecordNotFound)
+
+	req, _ := http.NewRequest(http.MethodPost, "/setup-totp", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	var errorResponse map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+	assert.Equal(t, "User not found", errorResponse["error"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestVerifyTOTPHandler_Success_Enable2FA(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+
+	router.Use(func(c *gin.Context) { // Mock Auth Middleware
+		c.Set("userID", userID)
+		c.Next()
+	})
+	router.POST("/verify-totp", VerifyTOTPHandler)
+
+	plainTextSecret := "R3K44Z6L54SM4PZJ" // Outro segredo válido
+	encryptedSecret, errEncrypt := utils.Encrypt(plainTextSecret)
+	assert.NoError(t, errEncrypt)
+
+	mockUser := models.User{
+		ID:            userID,
+		Email:         "verify@example.com",
+		TOTPSecret:    encryptedSecret,
+		IsTOTPEnabled: false, // Importante: testando o fluxo de habilitação
+		IsActive:      true,
+	}
+
+	// Mock DB calls
+	// 1. Fetch user
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "email", "totp_secret", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.Email, mockUser.TOTPSecret, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT 1`)).
+		WithArgs(userID).
+		WillReturnRows(rowsUser)
+
+	// 2. Save user (to set IsTOTPEnabled = true)
+	sqlMockMFA.ExpectBegin()
+	sqlMockMFA.ExpectExec(regexp.QuoteMeta(`UPDATE "users" SET "is_totp_enabled"=$1,"updated_at"=$2 WHERE "id" = $3`)).
+		WithArgs(true, sqlmock.AnyArg(), userID). // is_totp_enabled=true
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	sqlMockMFA.ExpectCommit()
+
+	validToken, errToken := totp.GenerateCode(plainTextSecret, time.Now())
+	assert.NoError(t, errToken)
+
+	payload := VerifyTOTPPayload{Token: validToken}
+	jsonPayload, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequest(http.MethodPost, "/verify-totp", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code, "Response body: %s", rr.Body.String())
+	var response map[string]string
+	err := json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "TOTP successfully verified and enabled.", response["message"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestVerifyTOTPHandler_InvalidToken(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/verify-totp", VerifyTOTPHandler)
+
+	plainTextSecret := "R3K44Z6L54SM4PZK"
+	encryptedSecret, _ := utils.Encrypt(plainTextSecret)
+	mockUser := models.User{ID: userID, Email: "badtoken@example.com", TOTPSecret: encryptedSecret, IsTOTPEnabled: true, IsActive: true}
+
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "email", "totp_secret", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.Email, mockUser.TOTPSecret, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(userID).WillReturnRows(rowsUser)
+
+	payload := VerifyTOTPPayload{Token: "000000"} // Token inválido
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, "/verify-totp", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	var errorResponse map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+	assert.Equal(t, "Invalid TOTP token", errorResponse["error"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestVerifyTOTPHandler_TOTPNotSetup(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/verify-totp", VerifyTOTPHandler)
+
+	mockUser := models.User{ID: userID, Email: "notsetup@example.com", TOTPSecret: "", IsTOTPEnabled: false, IsActive: true} // TOTPSecret está vazio
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "email", "totp_secret", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.Email, mockUser.TOTPSecret, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(userID).WillReturnRows(rowsUser)
+
+	payload := VerifyTOTPPayload{Token: "123456"}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, "/verify-totp", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	var errorResponse map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+	assert.Equal(t, "TOTP not set up for this user. Please set up TOTP first.", errorResponse["error"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestVerifyTOTPHandler_AlreadyEnabled(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/verify-totp", VerifyTOTPHandler)
+
+	plainTextSecret := "R3K44Z6L54SM4PXL"
+	encryptedSecret, _ := utils.Encrypt(plainTextSecret)
+	mockUser := models.User{
+		ID:            userID,
+		Email:         "alreadyenabled@example.com",
+		TOTPSecret:    encryptedSecret,
+		IsTOTPEnabled: true, // TOTP já está habilitado
+		IsActive:      true,
+	}
+
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "email", "totp_secret", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.Email, mockUser.TOTPSecret, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(userID).WillReturnRows(rowsUser)
+	// Nenhuma chamada de DB Save é esperada aqui, pois IsTOTPEnabled já é true
+
+	validToken, _ := totp.GenerateCode(plainTextSecret, time.Now())
+	payload := VerifyTOTPPayload{Token: validToken}
+	jsonPayload, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequest(http.MethodPost, "/verify-totp", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var response map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.Equal(t, "TOTP token verified successfully.", response["message"]) // Mensagem para quando já está habilitado
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestDisableTOTPHandler_Success(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	userPassword := "password123"
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(userPassword), bcrypt.DefaultCost)
+
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/disable-totp", DisableTOTPHandler)
+
+	encryptedSecret, _ := utils.Encrypt("SOMEBIGSECRET")
+	mockUser := models.User{
+		ID:            userID,
+		Email:         "disable@example.com",
+		PasswordHash:  string(hashedPassword),
+		TOTPSecret:    encryptedSecret,
+		IsTOTPEnabled: true,
+		IsActive:      true,
+	}
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "email", "password_hash", "totp_secret", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.Email, mockUser.PasswordHash, mockUser.TOTPSecret, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT 1`)).
+		WithArgs(userID).
+		WillReturnRows(rowsUser)
+
+	sqlMockMFA.ExpectBegin()
+	sqlMockMFA.ExpectExec(regexp.QuoteMeta(`UPDATE "users" SET "is_totp_enabled"=$1,"totp_secret"=$2,"totp_backup_codes"=$3,"updated_at"=$4 WHERE "id" = $5`)).
+		WithArgs(false, "", "", sqlmock.AnyArg(), userID). // is_totp_enabled=false, secret="", backup_codes=""
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	sqlMockMFA.ExpectCommit()
+
+	payload := DisableTOTPPayload{Password: userPassword}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, "/disable-totp", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+	var response map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.Equal(t, "TOTP has been successfully disabled.", response["message"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestDisableTOTPHandler_InvalidPassword(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/disable-totp", DisableTOTPHandler)
+
+	userPassword := "realpassword"
+	wrongPassword := "wrongpassword"
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(userPassword), bcrypt.DefaultCost)
+	encryptedSecret, _ := utils.Encrypt("SOMEBIGSECRET")
+	mockUser := models.User{ID: userID, PasswordHash: string(hashedPassword), TOTPSecret: encryptedSecret, IsTOTPEnabled: true, IsActive: true}
+
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "password_hash", "totp_secret", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.PasswordHash, mockUser.TOTPSecret, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(userID).WillReturnRows(rowsUser)
+
+	payload := DisableTOTPPayload{Password: wrongPassword}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, "/disable-totp", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	var errorResponse map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+	assert.Equal(t, "Invalid password", errorResponse["error"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestDisableTOTPHandler_TOTPNotEnabled(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	userPassword := "password123"
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(userPassword), bcrypt.DefaultCost)
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/disable-totp", DisableTOTPHandler)
+
+	mockUser := models.User{ID: userID, PasswordHash: string(hashedPassword), IsTOTPEnabled: false, IsActive: true} // TOTP já desabilitado
+
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "password_hash", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.PasswordHash, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(userID).WillReturnRows(rowsUser)
+
+	payload := DisableTOTPPayload{Password: userPassword}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, "/disable-totp", bytes.NewBuffer(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	var errorResponse map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+	assert.Equal(t, "TOTP is not currently enabled for this account.", errorResponse["error"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestGenerateBackupCodesHandler_Success(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/generate-backup-codes", GenerateBackupCodesHandler)
+
+	mockUser := models.User{ID: userID, IsTOTPEnabled: true, IsActive: true} // TOTP precisa estar habilitado
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT 1`)).
+		WithArgs(userID).
+		WillReturnRows(rowsUser)
+
+	sqlMockMFA.ExpectBegin()
+	sqlMockMFA.ExpectExec(regexp.QuoteMeta(`UPDATE "users" SET "totp_backup_codes"=$1,"updated_at"=$2 WHERE "id" = $3`)).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), userID). // Verifica se totp_backup_codes é atualizado
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	sqlMockMFA.ExpectCommit()
+
+	req, _ := http.NewRequest(http.MethodPost, "/generate-backup-codes", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var response GenerateBackupCodesResponse
+	err := json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Len(t, response.BackupCodes, numBackupCodes, "Deveria gerar o número correto de códigos de backup")
+	for _, code := range response.BackupCodes {
+		assert.Len(t, code, backupCodeLength, "Código de backup com tamanho incorreto")
+	}
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
+
+func TestGenerateBackupCodesHandler_TOTPNotEnabled(t *testing.T) {
+	setupMFATestEnvironment(t)
+	router := gin.Default()
+	userID := uuid.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", userID); c.Next() })
+	router.POST("/generate-backup-codes", GenerateBackupCodesHandler)
+
+	mockUser := models.User{ID: userID, IsTOTPEnabled: false, IsActive: true} // TOTP desabilitado
+	rowsUser := sqlMockMFA.NewRows([]string{"id", "is_totp_enabled", "is_active"}).
+		AddRow(mockUser.ID, mockUser.IsTOTPEnabled, mockUser.IsActive)
+	sqlMockMFA.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1`)).WithArgs(userID).WillReturnRows(rowsUser)
+
+	req, _ := http.NewRequest(http.MethodPost, "/generate-backup-codes", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	var errorResponse map[string]string
+	json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+	assert.Equal(t, "TOTP must be enabled to generate backup codes.", errorResponse["error"])
+	assert.NoError(t, sqlMockMFA.ExpectationsWereMet())
+}
 
 // Ensure newline at end of file
