@@ -5,11 +5,11 @@ Phoenix GRC é uma plataforma SaaS (Software as a Service), whitelabel, projetad
 ## Stack Tecnológica
 
 - **Backend:** Go (Golang) com Gin Gonic
-- **Frontend:** Next.js com TypeScript (a ser desenvolvido)
+- **Frontend:** Next.js com TypeScript (em desenvolvimento, funcionalidades principais implementadas)
 - **Banco de Dados:** PostgreSQL 16
 - **ORM (Go):** GORM
-- **Autenticação:** JWT (JSON Web Tokens)
-- **UI (Frontend):** Tailwind CSS (a ser desenvolvido)
+- **Autenticação:** JWT (JSON Web Tokens), OAuth2 (Google, GitHub), MFA (TOTP, Códigos de Backup). SAML (desativado temporariamente).
+- **UI (Frontend):** Tailwind CSS
 - **Containerização:** Docker
 
 ## Ambiente de Desenvolvimento com Docker
@@ -48,17 +48,33 @@ Recomendamos usar o Wizard de Instalação via Browser para a primeira configura
         *   `POSTGRES_PASSWORD` (ex: `password123`)
         *   `POSTGRES_DB` (ex: `phoenix_grc_dev`)
         *   `POSTGRES_SSLMODE` (ex: `disable` para desenvolvimento local)
-    *   **Configurações Essenciais do Servidor:**
-        *   `JWT_SECRET_KEY`: Defina um valor longo, aleatório e seguro.
-        *   `SERVER_PORT` (opcional, padrão `8080`)
-        *   `NGINX_PORT` (opcional, padrão `80`)
-        *   `APP_ROOT_URL` (ex: `http://localhost` ou `http://localhost:80` se `NGINX_PORT` for 80, ou `http://localhost:NGINX_PORT` se customizado. Esta URL é como o backend vê a raiz da aplicação para gerar links, etc.)
-        *   `FRONTEND_BASE_URL` (ex: `http://localhost:3000` se o frontend rodar separadamente em desenvolvimento)
-    *   **Outras Configurações (Opcional nesta fase, podem ser configuradas depois via UI ou .env):**
-        *   Chaves SAML (`SAML_SP_KEY_PEM`, `SAML_SP_CERT_PEM` - podem ser geradas depois se necessário).
-        *   Configurações de GCS, AWS SES, OAuth Client IDs/Secrets. O Wizard NÃO configurará estas. Elas ainda são via `.env`.
+        *   `POSTGRES_SSLMODE_ENABLE` (bool, ex: `false` para desabilitar SSL via DSN, `true` para habilitar. Usado por `config.Cfg.EnableDBSSL`. `POSTGRES_SSLMODE` ainda é usado para construir a DSN string.)
+    *   **Configurações Essenciais do Servidor e Segurança:**
+        *   `GIN_MODE` (ex: `debug` para desenvolvimento, `release` para produção)
+        *   `SERVER_PORT` (opcional, padrão `8080`. Porta interna do container backend)
+        *   `NGINX_PORT` (opcional, padrão `80`. Porta externa exposta pelo Nginx)
+        *   `APP_ROOT_URL` (ex: `http://localhost:80` ou `http://localhost:${NGINX_PORT}`. URL base da aplicação como vista pelo backend, usada para gerar links SAML/OAuth etc.)
+        *   `FRONTEND_BASE_URL` (ex: `http://localhost:3000` em dev, ou `http://localhost:${NGINX_PORT}` se servido pelo Nginx. Usada para links em emails/notificações.)
+        *   `JWT_SECRET_KEY`: String longa, aleatória e segura para assinar tokens JWT. **OBRIGATÓRIO.**
+        *   `JWT_TOKEN_LIFESPAN_HOURS` (opcional, padrão `24`)
+        *   `ENCRYPTION_KEY_HEX`: Chave hexadecimal de 64 caracteres (32 bytes) para criptografia AES-256 (ex: segredos TOTP). **OBRIGATÓRIO PARA PRODUÇÃO.** Use um gerador seguro.
+    *   **Configurações de Autenticação Externa (Opcional, configurar via UI/variáveis após setup inicial se necessário):**
+        *   `SAML_SP_KEY_PEM`, `SAML_SP_CERT_PEM`: Chaves para SAML SP (se SAML for ativado).
+        *   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`: Para login com Google.
+        *   `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`: Para login com GitHub.
+    *   **Configurações de Armazenamento de Arquivos (Opcional):**
+        *   `FILE_STORAGE_PROVIDER` (opcional, padrão `gcs`. Pode ser `s3` ou `gcs`)
+        *   `GCS_PROJECT_ID`, `GCS_BUCKET_NAME` (se usar GCS)
+        *   `AWS_S3_BUCKET` (se usar S3, `AWS_REGION` também é necessário)
+    *   **Configurações de Email (Opcional, para notificações):**
+        *   `AWS_REGION` (se usar AWS SES)
+        *   `AWS_SES_EMAIL_SENDER` (email remetente verificado no SES)
+    *   **Outras Configurações:**
+        *   `TOTP_ISSUER_NAME` (opcional, padrão `PhoenixGRC`. Nome que aparece no app autenticador)
 
-    **Importante:** O Wizard de Instalação cuidará da criação da primeira organização e do usuário administrador. Não defina usuários admin ou organizações manualmente no `.env` antes de rodar o wizard.
+    **Importante:** O Wizard de Instalação (`/setup` no browser) ou o setup via CLI (`docker-compose run --rm backend setup`) cuidará da criação da primeira organização e do usuário administrador. Para o Wizard via browser, apenas as variáveis de conexão com o banco de dados (`POSTGRES_*`) e `JWT_SECRET_KEY`, `APP_ROOT_URL`, `FRONTEND_BASE_URL`, `ENCRYPTION_KEY_HEX` precisam ser configuradas inicialmente no arquivo `.env`. O restante pode ser configurado depois.
+
+    **Nota sobre SAML:** A funcionalidade SAML está atualmente desativada no código devido a desafios técnicos. As variáveis `SAML_SP_KEY_PEM` e `SAML_SP_CERT_PEM` são listadas para referência futura.
 
 3.  **Construa e Inicie os Containers Docker:**
     ```bash
@@ -139,12 +155,19 @@ A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autentic
         ```
     *   **Resposta (Erro):** Status `400`, `401` ou `500` com mensagem de erro.
 
-*   **SAML 2.0 Login (Iniciação pelo SP):**
-    *   **`GET /auth/saml/{idpId}/login`**: Redireciona o usuário para o IdP SAML configurado para iniciar o login. `{idpId}` é o ID do `IdentityProvider` configurado no sistema.
-*   **SAML 2.0 SP Metadata:**
-    *   **`GET /auth/saml/{idpId}/metadata`**: Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado.
-*   **SAML 2.0 Assertion Consumer Service (ACS):**
-    *   **`POST /auth/saml/{idpId}/acs`**: Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido. O backend processa a asserção, provisiona/loga o usuário e emite um token JWT do Phoenix GRC, redirecionando para `FRONTEND_SAML_CALLBACK_URL`.
+*   **Autenticação 2FA (Dois Fatores):**
+    *   Após o login com senha bem-sucedido, se o 2FA (TOTP) estiver habilitado para o usuário, a API retornará `{"2fa_required": true, "user_id": "..."}`.
+    *   O frontend deverá então solicitar o código TOTP ou um código de backup.
+    *   **`POST /auth/login/2fa/verify`**: Para verificar um código TOTP.
+    *   **`POST /auth/login/2fa/backup-code/verify`**: Para verificar um código de backup.
+    *   Ambos retornam o token JWT completo em caso de sucesso.
+
+*   **SAML 2.0 (Funcionalidade Futura / Temporariamente Desativada):**
+    *   A integração com SAML 2.0 está planejada mas encontra-se temporariamente desativada devido a desafios técnicos.
+    *   Os endpoints teóricos seriam:
+        *   `GET /auth/saml/{idpId}/login`
+        *   `GET /auth/saml/{idpId}/metadata`
+        *   `POST /auth/saml/{idpId}/acs`
 
 *   **OAuth2 Login (Exemplo Google - Iniciação pelo SP):**
     *   **`GET /auth/oauth2/google/{idpId}/login`**: Redireciona o usuário para a página de autorização do Google. `{idpId}` é o ID do `IdentityProvider` configurado para Google.
@@ -432,27 +455,29 @@ Endpoints para gerenciar o processo de aprovação para aceite de riscos.
 │   ├── internal/
 │   │   ├── auth/           # Lógica de autenticação JWT (geração, validação, middleware)
 │   │   ├── database/       # Conexão com DB e migrações GORM
-│   │   ├── handlers/       # Handlers HTTP (controladores) para Gin (auth, risks, identity providers, webhooks, audit, vulnerabilities)
-│   │   ├── models/         # Structs GORM (schema do DB, incluindo IdentityProvider, WebhookConfiguration, Audit*)
+│   │   ├── handlers/       # Handlers HTTP (controladores) para Gin (auth, risks, identity providers, webhooks, audit, vulnerabilities, user)
+│   │   ├── models/         # Structs GORM (schema do DB)
 │   │   ├── notifications/  # Lógica para Webhooks e Email (SES)
-│   │   ├── samlauth/       # Lógica específica para autenticação SAML 2.0
-│   │   ├── oauth2auth/     # Lógica específica para autenticação OAuth2 (ex: Google)
-│   │   ├── filestorage/    # Lógica para armazenamento de arquivos (ex: GCS)
+│   │   ├── samlauth/       # Lógica específica para autenticação SAML 2.0 (atualmente desativado)
+│   │   ├── oauth2auth/     # Lógica específica para autenticação OAuth2 (Google, GitHub)
+│   │   ├── filestorage/    # Lógica para armazenamento de arquivos (GCS, S3)
 │   │   ├── seeders/        # Seeders de dados (ex: AuditFrameworks)
+│   │   ├── utils/          # Utilitários gerais (ex: criptografia)
 │   │   └── ...
-│   ├── pkg/                # Pacotes Go reutilizáveis (se houver)
+│   ├── pkg/                # Pacotes Go reutilizáveis (config, logger, features)
 │   ├── go.mod
 │   └── go.sum
-├── frontend/               # Código fonte do frontend (Next.js - a ser desenvolvido)
+├── frontend/               # Código fonte do frontend (Next.js com TypeScript)
 │   └── ...
 └── docker-compose.yml      # Orquestração dos contêineres Docker
 ```
 
 ## Próximos Passos (Desenvolvimento Futuro)
 
-*   Desenvolvimento do Frontend Next.js.
-*   Implementação dos demais módulos (Vulnerabilidades, Auditoria, etc.).
-*   Testes de integração e E2E.
+*   Finalização e polimento do Frontend Next.js.
+*   Reativação e finalização da funcionalidade SAML.
+*   Implementação da funcionalidade de exclusão de arquivos no `filestorage`.
+*   Testes de integração e E2E abrangentes.
 *   Melhorias na paginação e filtros da API.
 *   Configuração de logging mais robusto.
 *   ...e muito mais!

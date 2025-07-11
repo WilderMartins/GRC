@@ -198,6 +198,7 @@ func startServer() {
 		{
 			auditRoutes.GET("/frameworks", handlers.ListFrameworksHandler)
 			auditRoutes.GET("/frameworks/:frameworkId/controls", handlers.GetFrameworkControlsHandler)
+			auditRoutes.GET("/frameworks/:frameworkId/control-families", handlers.GetControlFamiliesForFrameworkHandler) // Nova rota
 			auditRoutes.POST("/assessments", handlers.CreateOrUpdateAssessmentHandler)
 			auditRoutes.GET("/assessments/control/:controlId", handlers.GetAssessmentForControlHandler)
 			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/assessments", handlers.ListOrgAssessmentsByFrameworkHandler)
@@ -219,6 +220,12 @@ func startServer() {
 				// backupCodeRoutes.POST("/verify", handlers.VerifyBackupCodeHandler)   // TODO - parte do login 2FA
 			}
 		}
+		apiV1.GET("/me/dashboard/summary", handlers.GetUserDashboardSummaryHandler) // Rota para o sumário do dashboard do usuário
+
+		// Endpoint para lookup de usuários da organização (para filtros, dropdowns, etc.)
+		// Colocado no nível /api/v1/ pois não é específico de uma organização via path param,
+		// mas opera na organização do usuário autenticado.
+		apiV1.GET("/users/organization-lookup", handlers.OrganizationUserLookupHandler)
 	}
 
 	serverPort := os.Getenv("SERVER_PORT")

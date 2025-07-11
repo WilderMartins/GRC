@@ -75,12 +75,13 @@ func TestMain(m *testing.M) {
 }
 
 // Helper function to get a Gin engine with context prepared for authenticated requests
-func getRouterWithAuthenticatedContext(userID uuid.UUID, orgID uuid.UUID) *gin.Engine {
+func getRouterWithAuthContext(userID uuid.UUID, orgID uuid.UUID, userRole models.UserRole) *gin.Engine {
 	r := gin.Default()
-	// Middleware to inject user/org IDs into context, simulating AuthMiddleware
+	// Middleware to inject user/org IDs and role into context, simulating AuthMiddleware
 	r.Use(func(c *gin.Context) {
 		c.Set("userID", userID)
 		c.Set("organizationID", orgID)
+		c.Set("userRole", userRole)
 		// Add other claims if your handlers use them
 		c.Next()
 	})

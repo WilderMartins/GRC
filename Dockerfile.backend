@@ -18,16 +18,25 @@ COPY backend/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o /app/server ./cmd/server
 
 # Stage 2: Create the final, small image
-FROM alpine:latest
+FROM alpine:3.19 # Pin to a specific version
 
 # Add ca-certificates in case your app needs to make HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Create a non-root user and group
+RUN apk --no-cache add ca-certificates && \
+    addgroup -S appgroup && \
+    adduser -S appuser -G appgroup
 
 # Set the Current Working Directory inside the container
-WORKDIR /root/
+WORKDIR /app
 
 # Copy the Pre-built binary file from the previous stage
 COPY --from=builder /app/server .
+
+# Chown the application directory and binary to the appuser
+RUN chown -R appuser:appgroup /app
+
+# Switch to the non-root user
+USER appuser
 
 # Expose port (default 8080, or set by SERVER_PORT) to the outside world
 EXPOSE 8080

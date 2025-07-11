@@ -35,6 +35,34 @@ func ListFrameworksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, frameworks)
 }
 
+// GetControlFamiliesForFrameworkHandler lists all unique control families for a specific framework.
+func GetControlFamiliesForFrameworkHandler(c *gin.Context) {
+	frameworkIDStr := c.Param("frameworkId")
+	frameworkID, err := uuid.Parse(frameworkIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid framework ID format"})
+		return
+	}
+
+	db := database.GetDB()
+	var families []string
+	// Usar Distinct para pegar apenas famílias únicas e não nulas/vazias
+	if err := db.Model(&models.AuditControl{}).
+		Where("framework_id = ? AND family <> ''", frameworkID).
+		Distinct("family").
+		Order("family asc").
+		Pluck("family", &families).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list control families for framework: " + err.Error()})
+		return
+	}
+
+	if families == nil {
+		families = []string{} // Garantir array vazio em vez de nulo se não houver famílias
+	}
+
+	c.JSON(http.StatusOK, gin.H{"families": families})
+}
+
 // GetFrameworkControlsHandler lists all controls for a specific framework.
 func GetFrameworkControlsHandler(c *gin.Context) {
 	frameworkIDStr := c.Param("frameworkId")
@@ -319,20 +347,20 @@ func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
 	}
 
 	// Security check: Ensure the authenticated user can access this organization's assessments.
-	// For now, assume user's token orgID must match path orgId if they are not a superadmin.
-	tokenOrgID, tokenOrgExists := c.Get("organizationID")
-	userRole, roleExists := c.Get("userRole")
+	tokenAuthOrgID, tokenAuthOrgExists := c.Get("organizationID")
+	// userAuthRole, roleAuthExists := c.Get("userRole") // userRole não é usado para esta verificação específica
 
-	if !tokenOrgExists || !roleExists {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing token information"})
-		return
-	}
-	// Basic check: user must belong to the org, or be a superadmin (not implemented yet)
-	if tokenOrgID.(uuid.UUID) != targetOrgID && userRole.(models.UserRole) != models.RoleAdmin { // Simplistic admin check
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this organization's assessments"})
+	if !tokenAuthOrgExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing authentication token information"})
 		return
 	}
 
+	// User must belong to the organization they are trying to access.
+	// A future superadmin role would bypass this.
+	if tokenAuthOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to the specified organization's assessments"})
+		return
+	}
 
 	frameworkIDStr := c.Param("frameworkId")
 	frameworkID, err := uuid.Parse(frameworkIDStr)
@@ -424,15 +452,19 @@ func GetComplianceScoreHandler(c *gin.Context) {
 		return
 	}
 
-	// Security check (similar to ListOrgAssessmentsByFrameworkHandler)
-	tokenOrgID, tokenOrgExists := c.Get("organizationID")
-	userRole, roleExists := c.Get("userRole")
-	if !tokenOrgExists || !roleExists {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing token information"})
+	// Security check
+	tokenAuthOrgID, tokenAuthOrgExists := c.Get("organizationID")
+	// userAuthRole, roleAuthExists := c.Get("userRole") // userRole não é usado para esta verificação específica
+
+	if !tokenAuthOrgExists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing authentication token information"})
 		return
 	}
-	if tokenOrgID.(uuid.UUID) != targetOrgID && userRole.(models.UserRole) != models.RoleAdmin {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this organization's compliance score"})
+
+	// User must belong to the organization they are trying to access.
+	// A future superadmin role would bypass this.
+	if tokenAuthOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to the specified organization's compliance score"})
 		return
 	}
 

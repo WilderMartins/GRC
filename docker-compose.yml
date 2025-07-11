@@ -27,11 +27,11 @@ services:
       # However, for a simple compiled Go binary, this is less critical unless
       # you're rebuilding and restarting the container frequently.
       # - ./backend:/app/backend # Example for live reload tools
-      - ./backend_artifacts:/app/artifacts # Example if we had artifacts to store
+      # - ./backend_artifacts:/app/artifacts # Removed as it seems unused
     restart: unless-stopped
 
   db:
-    image: postgres:16-alpine
+    image: postgres:16.2-alpine # Pinned to a specific patch version
     container_name: phoenix_grc_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-admin}
@@ -51,14 +51,14 @@ services:
     restart: unless-stopped
 
   nginx:
-    image: nginx:alpine
+    image: nginx:1.25-alpine # Pinned to a specific version
     container_name: phoenix_grc_nginx
     ports:
       - "${NGINX_PORT:-80}:80" # Expose Nginx on port 80 (or custom via NGINX_PORT)
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # Mount custom nginx config
-      # If serving static frontend files via Nginx:
-      # - ./frontend/out:/usr/share/nginx/html:ro # Example for Next.js static export
+      # Assumindo que o build do frontend está em 'frontend/out'
+      - ./frontend/out:/usr/share/nginx/html/frontend_out:ro # Servir frontend estático
     depends_on:
       - backend
     environment:

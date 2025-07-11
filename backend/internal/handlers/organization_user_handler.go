@@ -217,6 +217,53 @@ func UpdateOrganizationUserRoleHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, newUserResponse(userToUpdate))
 }
 
+// UserLookupResponse DTO para listagens de lookup (selects, filtros)
+type UserLookupResponse struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// OrganizationUserLookupHandler retorna uma lista simplificada de usuários (ID, Nome)
+// da organização do usuário autenticado, para uso em dropdowns/filtros.
+func OrganizationUserLookupHandler(c *gin.Context) {
+	orgIDToken, orgOk := c.Get("organizationID")
+	if !orgOk {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token"})
+		return
+	}
+	organizationID := orgIDToken.(uuid.UUID)
+
+	// Qualquer usuário autenticado da organização pode acessar este lookup.
+	// Se fosse necessário restringir mais (ex: apenas admin/manager),
+	// a função checkOrgAdminOrManager poderia ser usada aqui.
+
+	db := database.GetDB()
+	var users []models.User
+	// Selecionar apenas ID e Name, e apenas usuários ativos
+	if err := db.Model(&models.User{}).
+		Select("id", "name").
+		Where("organization_id = ? AND is_active = ?", organizationID, true).
+		Order("name asc").
+		Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list users for lookup: " + err.Error()})
+		return
+	}
+
+	lookupResponses := make([]UserLookupResponse, len(users))
+	for i, u := range users {
+		lookupResponses[i] = UserLookupResponse{
+			ID:   u.ID,
+			Name: u.Name,
+		}
+	}
+
+	if lookupResponses == nil {
+		lookupResponses = []UserLookupResponse{} // Garantir array vazio em vez de nulo
+	}
+
+	c.JSON(http.StatusOK, lookupResponses)
+}
+
 // UpdateUserStatusPayload define o payload para ativar/desativar um usuário.
 type UpdateUserStatusPayload struct {
 	IsActive *bool `json:"is_active" binding:"required"` // Usar ponteiro para distinguir false de não fornecido

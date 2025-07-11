@@ -163,9 +163,13 @@ func UpdateRiskHandler(c *gin.Context) {
 		return
 	}
 	orgID, _ := c.Get("organizationID")
+	userIDToken, _ := c.Get("userID")
+	userRoleToken, _ := c.Get("userRole")
 	db := database.GetDB()
 	var risk models.Risk
 	var originalStatus models.RiskStatus
+
+	// Fetch the risk
 	if err := db.Where("id = ? AND organization_id = ?", riskID, orgID).First(&risk).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
@@ -174,6 +178,19 @@ func UpdateRiskHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk for update: " + err.Error()})
 		return
 	}
+
+	// Authorization check
+	currentUserRole := userRoleToken.(models.UserRole)
+	currentUserID := userIDToken.(uuid.UUID)
+	isOwner := risk.OwnerID == currentUserID
+	isAdmin := currentUserRole == models.RoleAdmin
+	isManager := currentUserRole == models.RoleManager
+
+	if !isOwner && !isAdmin && !isManager {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to update this risk"})
+		return
+	}
+
 	originalStatus = risk.Status
 	risk.Title = payload.Title
 	risk.Description = payload.Description
@@ -181,23 +198,36 @@ func UpdateRiskHandler(c *gin.Context) {
 	if payload.Impact != "" { risk.Impact = payload.Impact }
 	if payload.Probability != "" { risk.Probability = payload.Probability }
 	if payload.Status != "" { risk.Status = payload.Status }
+
+	// Handle OwnerID change authorization
 	if payload.OwnerID != "" {
 		parsedOwnerID, err := uuid.Parse(payload.OwnerID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OwnerID format for update"})
 			return
 		}
-		risk.OwnerID = parsedOwnerID
+		if risk.OwnerID != parsedOwnerID { // If owner is being changed
+			if isAdmin || isManager { // Only admin/manager can change owner
+				risk.OwnerID = parsedOwnerID
+			} else {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Only Admins or Managers can change the risk owner."})
+				return
+			}
+		}
 	}
+
 	if payload.Impact != "" || payload.Probability != "" {
 		risk.RiskLevel = riskutils.CalculateRiskLevel(risk.Impact, risk.Probability)
 	}
+
 	if err := db.Save(&risk).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update risk: " + err.Error()})
 		return
 	}
+
 	var updatedRisk models.Risk
-	db.Preload("Owner").Where("id = ?", risk.ID).First(&updatedRisk)
+	db.Preload("Owner").Where("id = ?", risk.ID).First(&updatedRisk) // Re-fetch to get preloaded owner if changed
+
 	if updatedRisk.Status != originalStatus {
 		go notifications.NotifyRiskEvent(updatedRisk.OrganizationID, updatedRisk, models.EventTypeRiskStatusChanged)
 		if updatedRisk.OwnerID != uuid.Nil {
@@ -219,8 +249,12 @@ func DeleteRiskHandler(c *gin.Context) {
 		return
 	}
 	orgID, _ := c.Get("organizationID")
+	userIDToken, _ := c.Get("userID")
+	userRoleToken, _ := c.Get("userRole")
 	db := database.GetDB()
 	var risk models.Risk
+
+	// Fetch the risk
 	if err := db.Where("id = ? AND organization_id = ?", riskID, orgID).First(&risk).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
@@ -229,7 +263,25 @@ func DeleteRiskHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk for deletion: " + err.Error()})
 		return
 	}
-	if err := db.Delete(&models.Risk{}, riskID).Error; err != nil {
+
+	// Authorization check
+	currentUserRole := userRoleToken.(models.UserRole)
+	currentUserID := userIDToken.(uuid.UUID)
+	isOwner := risk.OwnerID == currentUserID
+	isAdmin := currentUserRole == models.RoleAdmin
+	isManager := currentUserRole == models.RoleManager
+
+	if !isOwner && !isAdmin && !isManager {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to delete this risk"})
+		return
+	}
+
+	// Proceed with deletion
+	// Note: Consider implications of deleting a risk, e.g., related approval workflows or audit items.
+	// GORM's default behavior for Delete might not cascade unless explicitly configured with constraints
+	// or through GORM settings (e.g., Select(clause.Associations) for many2many, or manual cleanup).
+	// For now, directly deleting the risk.
+	if err := db.Delete(&risk).Error; err != nil { // Changed from db.Delete(&models.Risk{}, riskID) to db.Delete(&risk) to allow GORM hooks on the specific instance if any.
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete risk: " + err.Error()})
 		return
 	}

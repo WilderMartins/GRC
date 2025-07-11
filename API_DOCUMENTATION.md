@@ -118,6 +118,31 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
     *   **Parâmetros de Path:** `idpId`.
     *   **Respostas:** Similar ao Google Callback.
 
+*   **`POST /auth/login/2fa/backup-code/verify`**
+    *   **Descrição:** Verifica um código de backup fornecido pelo usuário como segundo fator de autenticação.
+    *   **Autenticação:** Nenhuma (parte do fluxo de login multi-etapa).
+    *   **Payload da Requisição (`application/json`):**
+        ```json
+        {
+            "user_id": "uuid-string-do-usuario", // string, obrigatório (obtido da resposta do /auth/login)
+            "backup_code": "string-codigo-backup" // string, obrigatório
+        }
+        ```
+    *   **Respostas:**
+        *   `200 OK` (Token JWT completo): Similar à resposta de `/auth/login/2fa/verify` com TOTP.
+        *   `400 Bad Request`: Payload inválido.
+        *   `401 Unauthorized`: Código de backup inválido, usuário não encontrado, ou 2FA/códigos de backup não habilitados.
+        *   `500 Internal Server Error`: Falha ao gerar token JWT ou atualizar códigos de backup.
+
+*   **Endpoints SAML 2.0 (Temporariamente Desativados / Funcionalidade Futura)**
+    *   **Nota:** A funcionalidade SAML está atualmente desativada devido a desafios técnicos na implementação e problemas com dependências. Os endpoints abaixo são placeholders e não devem ser considerados operacionais no momento.
+    *   **`GET /auth/saml/:idpId/login`**
+        *   **Descrição Teórica:** Redirecionaria o usuário para o IdP SAML configurado.
+    *   **`GET /auth/saml/:idpId/metadata`**
+        *   **Descrição Teórica:** Exporia os metadados do Service Provider (Phoenix GRC).
+    *   **`POST /auth/saml/:idpId/acs`**
+        *   **Descrição Teórica:** Endpoint para o IdP SAML redirecionar com a asserção SAML.
+
 ---
 
 ### 3. Usuário Autenticado (`/api/v1`)
@@ -139,6 +164,20 @@ Estes endpoints operam no contexto do usuário autenticado via JWT.
             }
             ```
         *   `401 Unauthorized`: Token JWT ausente ou inválido.
+
+*   **`GET /api/v1/me/dashboard/summary`**
+    *   **Descrição:** Retorna um resumo de dados para o dashboard do usuário autenticado.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Respostas:**
+        *   `200 OK`:
+            ```json
+            {
+                "assigned_risks_open_count": 5,
+                "assigned_vulnerabilities_open_count": 2, // Pode ser da organização se não houver atribuição direta
+                "pending_approval_tasks_count": 1
+            }
+            ```
+        *   `500 Internal Server Error`: Falha ao buscar dados do resumo.
 
 ---
 
@@ -219,22 +258,24 @@ Todos os endpoints nesta seção requerem autenticação JWT.
     *   **Descrição:** Atualiza um risco existente. O `RiskLevel` é recalculado se impacto/probabilidade mudarem.
     *   **Parâmetros de Path:** `riskId`.
     *   **Payload da Requisição (`application/json`):** Similar ao `POST /api/v1/risks`.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização do risco.
     *   **Respostas:**
         *   `200 OK`: Objeto `models.Risk` atualizado (com `Owner` pré-carregado).
         *   `400 Bad Request`: Payload ou `riskId` inválido.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Risco não encontrado.
         *   `500 Internal Server Error`: Falha ao atualizar.
-        *   *(TODO: Adicionar verificação de autorização - apenas owner ou admin/manager da org? Atualmente permite qualquer um da org)*
 
 *   **`DELETE /api/v1/risks/:riskId`**
     *   **Descrição:** Deleta um risco.
     *   **Parâmetros de Path:** `riskId`.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização do risco.
     *   **Respostas:**
         *   `200 OK`: `{ "message": "Risk deleted successfully" }`
         *   `400 Bad Request`: `riskId` inválido.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Risco não encontrado.
         *   `500 Internal Server Error`: Falha ao deletar.
-        *   *(TODO: Adicionar verificação de autorização)*
 
 *   **`POST /api/v1/risks/bulk-upload-csv`**
     *   **Descrição:** Upload em massa de riscos via arquivo CSV.
@@ -549,6 +590,19 @@ Gerencia usuários dentro de uma organização. Requer role de Admin ou Manager 
         *   `403 Forbidden` (ex: tentar desativar o último admin ativo).
         *   `404 Not Found`.
 
+*   **`GET /api/v1/users/organization-lookup`**
+    *   **Descrição:** Retorna uma lista simplificada de usuários (ID, Nome) da organização do usuário autenticado. Útil para preencher dropdowns ou campos de seleção de proprietário/stakeholder. Retorna apenas usuários ativos.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `UserLookupResponse`.
+            ```json
+            [
+                { "id": "uuid-user1", "name": "Nome do Usuário 1" },
+                { "id": "uuid-user2", "name": "Nome do Usuário 2" }
+            ]
+            ```
+        *   `500 Internal Server Error`: Falha ao listar usuários para lookup.
+
 ---
 
 ### 6. Gestão de Vulnerabilidades (`/api/v1/vulnerabilities`)
@@ -580,6 +634,9 @@ Todos os endpoints nesta seção requerem autenticação JWT.
         *   `page_size` (int, opcional, default: 10)
         *   `status` (string, opcional): Filtra por status.
         *   `severity` (string, opcional): Filtra por severidade.
+        *   `title_like` (string, opcional): Filtra por título (case-insensitive, partial match).
+        *   `cve_id` (string, opcional): Filtra por CVE ID (case-insensitive, exact match).
+        *   `asset_affected_like` (string, opcional): Filtra por ativo afetado (case-insensitive, partial match).
     *   **Respostas:**
         *   `200 OK`: Resposta paginada com array de `models.Vulnerability`.
         *   `500 Internal Server Error`.
@@ -597,18 +654,22 @@ Todos os endpoints nesta seção requerem autenticação JWT.
     *   **Descrição:** Atualiza uma vulnerabilidade existente.
     *   **Parâmetros de Path:** `vulnId`.
     *   **Payload da Requisição (`application/json`):** Similar ao POST.
+    *   **Autorização:** Requer que o usuário autenticado tenha a role `admin` ou `manager` na organização.
     *   **Respostas:**
         *   `200 OK`: Objeto `models.Vulnerability` atualizado.
         *   `400 Bad Request`.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`.
         *   `500 Internal Server Error`.
 
 *   **`DELETE /api/v1/vulnerabilities/:vulnId`**
     *   **Descrição:** Deleta uma vulnerabilidade.
     *   **Parâmetros de Path:** `vulnId`.
+    *   **Autorização:** Requer que o usuário autenticado tenha a role `admin` ou `manager` na organização.
     *   **Respostas:**
         *   `200 OK`: `{ "message": "Vulnerability deleted successfully" }`
         *   `400 Bad Request`.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`.
         *   `500 Internal Server Error`.
 
@@ -634,6 +695,20 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             ]
             ```
         *   `500 Internal Server Error`.
+
+*   **`GET /api/v1/audit/frameworks/:frameworkId/control-families`**
+    *   **Descrição:** Lista todas as famílias de controles únicas para um framework de auditoria específico.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Parâmetros de Path:** `frameworkId` (string UUID).
+    *   **Respostas:**
+        *   `200 OK`:
+            ```json
+            {
+                "families": ["Família de Controle 1", "Família de Controle 2"]
+            }
+            ```
+        *   `400 Bad Request`: `frameworkId` inválido.
+        *   `500 Internal Server Error`: Falha ao listar famílias de controles.
 
 *   **`GET /api/v1/audit/frameworks/:frameworkId/controls`**
     *   **Descrição:** Lista todos os controles para um framework de auditoria específico.
@@ -690,18 +765,18 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
 
 *   **`GET /api/v1/audit/organizations/:orgId/frameworks/:frameworkId/assessments`**
     *   **Descrição:** Lista todas as avaliações de uma organização específica para um determinado framework (paginado).
-    *   **Autenticação:** JWT Obrigatório. Usuário deve pertencer à `:orgId` ou ser Admin.
+    *   **Autenticação:** JWT Obrigatório. O `organization_id` no token do usuário deve corresponder ao `:orgId` no path.
     *   **Parâmetros de Path:** `orgId`, `frameworkId`.
     *   **Query Params:** `page`, `page_size`.
     *   **Respostas:**
         *   `200 OK`: Resposta paginada com array de `models.AuditAssessment` (com `AuditControl` pré-carregado).
         *   `400 Bad Request`: IDs inválidos.
-        *   `403 Forbidden`.
+        *   `403 Forbidden`: Usuário não autorizado a acessar a organização especificada.
         *   `500 Internal Server Error`.
 
 *   **`GET /api/v1/audit/organizations/:orgId/frameworks/:frameworkId/compliance-score`**
     *   **Descrição:** Calcula e retorna o score geral de conformidade para um framework dentro de uma organização.
-    *   **Autenticação:** JWT Obrigatório. Usuário deve pertencer à `:orgId` ou ser Admin.
+    *   **Autenticação:** JWT Obrigatório. O `organization_id` no token do usuário deve corresponder ao `:orgId` no path.
     *   **Parâmetros de Path:** `orgId`, `frameworkId`.
     *   **Respostas:**
         *   `200 OK`: Objeto `ComplianceScoreResponse`.
@@ -734,21 +809,22 @@ Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
 *   **`POST /api/v1/users/me/2fa/totp/setup`**
     *   **Descrição:** Inicia o processo de configuração do TOTP para o usuário autenticado. Gera um novo segredo TOTP, armazena-o (associado ao usuário, `IsTOTPEnabled` ainda é `false`) e retorna o segredo e um QR code para o usuário escanear em seu aplicativo autenticador.
     *   **Autenticação:** JWT Obrigatório.
+    *   **Nota de Segurança:** O segredo TOTP gerado é armazenado de forma segura no backend (criptografado em repouso).
     *   **Respostas:**
         *   `200 OK`:
             ```json
             {
-                "secret": "BASE32_ENCODED_SECRET_KEY",
+                "secret": "BASE32_ENCODED_SECRET_KEY", // Segredo em texto plano para o usuário configurar no app autenticador
                 "qr_code": "data:image/png;base64,BASE64_ENCODED_PNG_IMAGE_OF_QR_CODE",
                 "account": "user@example.com", // Email do usuário
                 "issuer": "PhoenixGRC",       // Nome da aplicação (configurável)
-                "backup_codes_generated": false // Será true quando os códigos de backup forem implementados e gerados nesta etapa
+                "backup_codes_generated": false // Indica se os códigos de backup foram gerados automaticamente (atualmente falso, gerados via endpoint dedicado)
             }
             ```
         *   `500 Internal Server Error`: Falha ao gerar chave TOTP, QR code, ou salvar segredo.
 
 *   **`POST /api/v1/users/me/2fa/totp/verify`**
-    *   **Descrição:** Verifica um código TOTP fornecido pelo usuário. Se for a primeira verificação após o setup, ativa o TOTP para o usuário (`IsTOTPEnabled = true`).
+    *   **Descrição:** Verifica um código TOTP fornecido pelo usuário. Se for a primeira verificação após o setup, ativa o TOTP para o usuário (`IsTOTPEnabled = true`) e pode acionar a geração de códigos de backup.
     *   **Autenticação:** JWT Obrigatório.
     *   **Payload da Requisição (`application/json`):**
         ```json
@@ -778,20 +854,32 @@ Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
         *   `401 Unauthorized`: Senha inválida.
         *   `500 Internal Server Error`: Falha ao salvar o estado do usuário.
 
-#### 8.2. Códigos de Backup (TODO)
+#### 8.2. Códigos de Backup
 
-*   **`GET /api/v1/users/me/2fa/backup-codes/generate`** (TODO)
-    *   **Descrição:** Gera um novo conjunto de códigos de backup para o usuário. Invalida quaisquer códigos anteriores. Retorna os novos códigos (apenas uma vez).
+*   **`POST /api/v1/users/me/2fa/backup-codes/generate`**
+    *   **Descrição:** Gera um novo conjunto de códigos de backup para o usuário. Invalida quaisquer códigos de backup anteriores. Os códigos retornados devem ser armazenados de forma segura pelo usuário, pois são exibidos apenas uma vez.
     *   **Autenticação:** JWT Obrigatório. Requer que TOTP esteja habilitado.
     *   **Respostas:**
-        *   `200 OK`: `{ "backup_codes": ["code1", "code2", ...] }`
-        *   *(Outros erros a definir)*
+        *   `200 OK`:
+            ```json
+            {
+                "backup_codes": ["code1-plain-text", "code2-plain-text", "..."]
+            }
+            ```
+        *   `400 Bad Request`: Se TOTP não estiver habilitado.
+        *   `500 Internal Server Error`: Falha ao gerar ou salvar os hashes dos códigos.
 
-*   **`POST /auth/login/2fa/backup-code/verify`** (TODO - parte do fluxo de login)
-    *   **Descrição:** Verifica um código de backup fornecido pelo usuário durante o login 2FA.
-    *   **Payload:** `{ "user_id": "uuid", "backup_code": "string" }`
-    *   **Respostas:** Similar ao `/auth/login/2fa/verify` com TOTP, emitindo JWT se o código for válido e não utilizado.
-    *   *(Outros erros a definir)*
+*   **`POST /auth/login/2fa/backup-code/verify`**
+    *   **Descrição:** Verifica um código de backup fornecido pelo usuário durante a etapa de 2FA do login. Se válido, o código é consumido (não pode ser reutilizado) e o login prossegue com a emissão de um token JWT.
+    *   **Autenticação:** Nenhuma (parte do fluxo de login multi-etapa).
+    *   **Payload da Requisição (`application/json`):** (Já documentado na Seção 2 - Autenticação)
+        ```json
+        {
+            "user_id": "uuid-string-do-usuario",
+            "backup_code": "string-codigo-backup"
+        }
+        ```
+    *   **Respostas:** (Já documentado na Seção 2 - Autenticação)
 
 ---
 **TODOs Gerais da Documentação:**

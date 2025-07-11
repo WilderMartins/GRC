@@ -30,6 +30,7 @@ type AppConfig struct {
 	TOTPIssuerName      string
 	AWSS3Bucket         string // Novo para S3
 	FileStorageProvider string // "gcs" ou "s3"
+	FrontendBaseURL     string // Adicionado para links em emails/notificações
 	FeatureToggles      map[string]bool
 	// Adicionar outras configurações aqui
 }
@@ -43,7 +44,7 @@ func LoadConfig() {
 		log.Println("Aviso: Arquivo .env não encontrado ou erro ao carregar:", err)
 	}
 
-	Cfg.Port = getEnv("PORT", "8080")
+	Cfg.Port = getEnv("SERVER_PORT", "8080") // Mudado de PORT para SERVER_PORT para consistência com docker-compose
 	Cfg.JWTSecret = getEnv("JWT_SECRET_KEY", "a_very_secure_secret_key_please_change_me_32_chars_long")
 	jwtLifespanHours, err := strconv.Atoi(getEnv("JWT_TOKEN_LIFESPAN_HOURS", "24"))
 	if err != nil {
@@ -52,15 +53,15 @@ func LoadConfig() {
 	}
 	Cfg.JWTTokenLifespan = time.Duration(jwtLifespanHours) * time.Hour
 
-	Cfg.DBHost = getEnv("DB_HOST", "localhost")
-	Cfg.DBPort = getEnv("DB_PORT", "5432")
-	Cfg.DBUser = getEnv("DB_USER", "phoenix_user")
-	Cfg.DBPassword = getEnv("DB_PASSWORD", "phoenix_pass")
-	Cfg.DBName = getEnv("DB_NAME", "phoenix_grc_db")
-	Cfg.DBSchema = getEnv("DB_SCHEMA", "phoenix_grc") // Esquema padrão
-	Cfg.EnableDBSSL = getEnvAsBool("DB_SSL_ENABLE", false)
+	Cfg.DBHost = getEnv("POSTGRES_HOST", "db") // Consistente com docker-compose
+	Cfg.DBPort = getEnv("POSTGRES_PORT", "5432")
+	Cfg.DBUser = getEnv("POSTGRES_USER", "admin")
+	Cfg.DBPassword = getEnv("POSTGRES_PASSWORD", "password123")
+	Cfg.DBName = getEnv("POSTGRES_DB", "phoenix_grc_dev")
+	Cfg.DBSchema = getEnv("DB_SCHEMA", "phoenix_grc") // Esquema padrão, verificar se é usado
+	Cfg.EnableDBSSL = getEnvAsBool("POSTGRES_SSLMODE_ENABLE", false) // POSTGRES_SSLMODE é string, EnableDBSSL é bool
 
-	Cfg.Environment = getEnv("ENVIRONMENT", "development")
+	Cfg.Environment = getEnv("GIN_MODE", "development") // GIN_MODE (debug/release) ou APP_ENV
 
 	Cfg.GCSProjectID = getEnv("GCS_PROJECT_ID", "")
 	Cfg.GCSBucketName = getEnv("GCS_BUCKET_NAME", "")
@@ -70,6 +71,8 @@ func LoadConfig() {
 	Cfg.TOTPIssuerName = getEnv("TOTP_ISSUER_NAME", "PhoenixGRC")
 	Cfg.AWSS3Bucket = getEnv("AWS_S3_BUCKET", "")
 	Cfg.FileStorageProvider = strings.ToLower(getEnv("FILE_STORAGE_PROVIDER", "gcs")) // Default para GCS
+	Cfg.FrontendBaseURL = getEnv("FRONTEND_BASE_URL", "http://localhost:3000")
+
 
 	// Carregar Feature Toggles
 	Cfg.FeatureToggles = make(map[string]bool)

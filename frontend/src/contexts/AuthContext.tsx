@@ -161,10 +161,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setBranding(fetchedBranding);
         localStorage.setItem('authBranding', JSON.stringify(fetchedBranding));
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to refresh user data:", error);
-      // Potencialmente fazer logout se /me falhar (token inválido)
-      // logout();
+      if (error.response && error.response.status === 401) {
+        console.log("AuthContext: Refresh user failed with 401, logging out.");
+        logout(); // Chamar logout se /me retornar 401
+      }
+      // Outros erros não necessariamente invalidam a sessão, podem ser temporários.
     } finally {
       setIsLoading(false);
     }
