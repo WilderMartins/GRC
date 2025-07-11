@@ -75,8 +75,8 @@ const AuditFrameworksPageContent = (props: InferGetStaticPropsType<typeof getSta
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {frameworks.map((framework) => (
               <Link key={framework.id} href={`/admin/audit/frameworks/${framework.id}`} legacyBehavior>
-                <a className="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 ease-in-out">
-                  <h2 className="text-xl font-semibold text-indigo-600 dark:text-indigo-400 mb-2">{framework.name}</h2>
+                <a className="block p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-primary">
+                  <h2 className="text-xl font-semibold text-brand-primary dark:text-brand-primary mb-2">{framework.name}</h2>
                   <p className="text-gray-600 dark:text-gray-400 text-sm">
                     {t('frameworks_list.card_description')}
                   </p>

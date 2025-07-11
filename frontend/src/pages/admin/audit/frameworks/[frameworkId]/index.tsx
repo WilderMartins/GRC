@@ -6,7 +6,8 @@ import { useRouter } from 'next/router';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/axios';
 import { useAuth } from '@/contexts/AuthContext';
-import AssessmentForm from '@/components/audit/AssessmentForm';
+// import AssessmentForm from '@/components/audit/AssessmentForm'; // Removido, pois o modal o encapsula
+import AssessmentFormModal from '@/components/audit/AssessmentFormModal'; // Importar o novo modal
 import PaginationControls from '@/components/common/PaginationControls';
 import {
     AuditFramework,
@@ -15,10 +16,12 @@ import {
     ControlWithAssessment,
     PaginatedResponse,
     AuditAssessmentStatusFilter,
-    ComplianceScoreResponse, // Adicionar tipo para a resposta do score
+    ComplianceScoreResponse,
+    AuditAssessmentStatus, // Certifique-se que este tipo/enum está importado se usado nas cores
 } from '@/types';
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import type { GetServerSideProps, InferGetServerSidePropsType } from 'next';
 
 
@@ -38,21 +41,66 @@ export const getServerSideProps: GetServerSideProps<Props> = async ({ locale, pa
   };
 };
 
+// Cores para os gráficos (exemplo) - Ajustar cores conforme o tema da aplicação
+const ASSESSMENT_STATUS_COLORS: { [key: string]: string } = {
+  conforme: '#10B981', // green-500
+  parcialmente_conforme: '#F59E0B', // amber-500
+  nao_conforme: '#EF4444', // red-500
+  nao_avaliado: '#A0AEC0', // slate-400
+  // nao_aplicavel pode não ser contado no score, mas se for, adicionar cor
+};
+
+// Componente para Gauge (simplificado com PieChart)
+const ScoreGaugeChart: React.FC<{ score: number }> = ({ score }) => {
+    const { t } = useTranslation('audit');
+    const data = [
+        { name: t('framework_detail.score_chart_segment_achieved', 'Concluído'), value: score, fill: ASSESSMENT_STATUS_COLORS.conforme /* ou brand-primary */ },
+        { name: t('framework_detail.score_chart_segment_remaining', 'Restante'), value: 100 - score, fill: '#E5E7EB' /* gray-200 */ },
+    ];
+
+    return (
+        <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+                <Pie
+                    data={data}
+                    cx="50%"
+                    cy="50%"
+                    startAngle={180}
+                    endAngle={0}
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={0}
+                    dataKey="value"
+                    animationDuration={800}
+                >
+                    {data.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
+                </Pie>
+                <RechartsTooltip formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, name]}/>
+                <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle" className="text-2xl font-bold fill-gray-700 dark:fill-gray-200">
+                    {`${score.toFixed(1)}%`}
+                </text>
+            </PieChart>
+        </ResponsiveContainer>
+    );
+};
+
 
 const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof getServerSideProps>) => {
   const { t } = useTranslation(['audit', 'common']);
   const router = useRouter();
-  const { frameworkId } = router.query;
+  const { frameworkId } = router.query; // Este é o frameworkId da URL
   const { user, isLoading: authIsLoading } = useAuth();
 
   const [frameworkInfo, setFrameworkInfo] = useState<Partial<AuditFramework> | null>(null);
   const [controlsWithAssessments, setControlsWithAssessments] = useState<ControlWithAssessment[]>([]);
-  const [complianceScoreData, setComplianceScoreData] = useState<ComplianceScoreResponse | null>(null); // Estado para o score
+  const [complianceScoreData, setComplianceScoreData] = useState<ComplianceScoreResponse | null>(null);
 
-  const [isLoadingData, setIsLoadingData] = useState(true); // Loading para controles/avaliações
-  const [isLoadingScore, setIsLoadingScore] = useState(true); // Loading para o score
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isLoadingScore, setIsLoadingScore] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scoreError, setScoreError] = useState<string | null>(null); // Erro específico para o score
+  const [scoreError, setScoreError] = useState<string | null>(null);
 
   const [controlsCurrentPage, setControlsCurrentPage] = useState(1);
   const [controlsPageSize, setControlsPageSize] = useState(10);
@@ -297,7 +345,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
             <div>
               <label htmlFor="filterFamily" className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t('framework_detail.filter_family_label')}</label>
               <select id="filterFamily" name="filterFamily" value={filterFamily} onChange={handleFilterFamilyChange}
-                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md disabled:opacity-50"
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm rounded-md disabled:opacity-50"
                       disabled={availableControlFamilies.length === 0 && !isLoadingData}
               >
                 <option value="">{t('framework_detail.all_families_option')}</option>
@@ -309,7 +357,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
             <div>
               <label htmlFor="filterAssessmentStatus" className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t('framework_detail.filter_assessment_status_label')}</label>
               <select id="filterAssessmentStatus" name="filterAssessmentStatus" value={filterAssessmentStatus} onChange={handleFilterAssessmentStatusChange}
-                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm rounded-md">
                 <option value="">{t('framework_detail.all_statuses_option')}</option>
                 <option value="conforme">{t('framework_detail.status_option_compliant')}</option>
                 <option value="nao_conforme">{t('framework_detail.status_option_non_compliant')}</option>
@@ -319,7 +367,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
             </div>
             <div>
               <button onClick={clearFilters}
-                      className="w-full inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-100 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                      className="w-full inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-100 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2">
                 {t('framework_detail.clear_filters_button')}
               </button>
             </div>
@@ -413,24 +461,14 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
           </div>
         )}
 
-        {showAssessmentModal && selectedControlForAssessment && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm transition-opacity duration-300 ease-in-out">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
-              <AssessmentForm
-                controlId={selectedControlForAssessment.id}
-                controlDisplayId={selectedControlForAssessment.control_id}
-                initialData={selectedControlForAssessment.assessment ? {
-                  audit_control_id: selectedControlForAssessment.assessment.audit_control_id,
-                  status: selectedControlForAssessment.assessment.status as any,
-                  score: selectedControlForAssessment.assessment.score,
-                  assessment_date: selectedControlForAssessment.assessment.assessment_date ? selectedControlForAssessment.assessment.assessment_date.split('T')[0] : new Date().toISOString().split('T')[0],
-                  evidence_url: selectedControlForAssessment.assessment.evidence_url || '',
-                } : undefined }
-                onClose={handleCloseAssessmentModal}
-                onSubmitSuccess={handleAssessmentSubmitSuccess}
-              />
-            </div>
-          </div>
+        {showAssessmentModal && selectedControlForAssessment && currentUser?.organization_id && (
+          <AssessmentFormModal
+            isOpen={showAssessmentModal}
+            onClose={handleCloseAssessmentModal}
+            organizationId={currentUser.organization_id}
+            control={selectedControlForAssessment}
+            onSubmitSuccess={handleAssessmentSubmitSuccess}
+          />
         )}
       </div>
     </AdminLayout>

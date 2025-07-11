@@ -328,7 +328,7 @@ const UserSecurityPageContent = (props: InferGetStaticPropsType<typeof getStatic
                       value={disablePassword}
                       onChange={(e) => setDisablePassword(e.target.value)}
                       required
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2" // Mantém foco vermelho para ação de perigo
                     />
                   </div>
                   {disableError && <p className="text-sm text-red-500 mt-2">{disableError}</p>}
@@ -336,7 +336,7 @@ const UserSecurityPageContent = (props: InferGetStaticPropsType<typeof getStatic
                     <button
                       type="button"
                       onClick={() => setShowDisableModal(false)}
-                      className="px-4 py-2 text-sm rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
+                      className="px-4 py-2 text-sm rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary transition-colors"
                       disabled={isDisabling}
                     >
                       {t('common:cancel_button')}

@@ -57,9 +57,10 @@ export default function ForgotPasswordPage(props: InferGetStaticPropsType<typeof
       <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 dark:bg-gray-900">
         <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-xl dark:bg-gray-800">
           <div className="mb-8 text-center">
-            <div className="mb-4 inline-block rounded-full bg-indigo-500 p-3 text-white">
+            <div className="mb-4 inline-block rounded-full bg-brand-primary p-3 text-white">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-8 w-8">
-                    <path d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm4.28 13.43a.75.75 0 0 1-.976.02l-3.573-2.68a.75.75 0 0 0-.976 0l-3.573 2.68a.75.75 0 0 1-.976-.02l-1.141-.856a.75.75 0 0 1 .02-1.263l2.68-2.01a.75.75 0 0 0 0-1.264l-2.68-2.01a.75.75 0 0 1-.02-1.263l1.141-.856a.75.75 0 0 1 .976.02l3.573 2.68a.75.75 0 0 0 .976 0l3.573 2.68a.75.75 0 0 1 .976.02l1.141.856a.75.75 0 0 1-.02 1.263l-2.68 2.01a.75.75 0 0 0 0-1.264l2.68 2.01a.75.75 0 0 1 .02 1.263l-1.141-.856Z" />
+                    {/* Usando um ícone de chave ou cadeado para "esqueci senha" pode ser mais temático */}
+                    <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3A5.25 5.25 0 0012 1.5zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
                 </svg>
             </div>
             <h1 className="text-3xl font-bold text-gray-800 dark:text-white">{t('forgot_password.title')}</h1>
@@ -90,7 +91,7 @@ export default function ForgotPasswordPage(props: InferGetStaticPropsType<typeof
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
                 placeholder={t('forgot_password.email_placeholder')}
                 disabled={isLoading || isSuccess}
               />
@@ -99,7 +100,7 @@ export default function ForgotPasswordPage(props: InferGetStaticPropsType<typeof
               <button
                 type="submit"
                 disabled={isLoading || isSuccess}
-                className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-gray-800"
+                className="flex w-full justify-center rounded-md border border-transparent bg-brand-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-gray-800"
               >
                 {isLoading ? (
                   <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

@@ -6,7 +6,17 @@ import apiClient from '@/lib/axios';
 import { useNotifier } from '@/hooks/useNotifier';
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
-import type { GetStaticProps, InferGetStaticPropsType } from 'next'; // getStaticProps para páginas sem data dinâmica na URL
+import type { GetStaticProps, InferGetStaticPropsType } from 'next';
+import PasswordStrengthIndicator from '@/components/auth/PasswordStrengthIndicator';
+
+// Interface para o estado de força da senha (copiada de register.tsx, idealmente seria um tipo compartilhado)
+interface PasswordStrengthCriteria {
+  minLength: boolean;
+  uppercase: boolean;
+  lowercase: boolean;
+  number: boolean;
+  specialChar: boolean;
+}
 
 type Props = {
   // Props from getStaticProps
@@ -28,8 +38,42 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null); // Renomeado de 'error'
+  const [formError, setFormError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  // Estado para os critérios de força da senha
+  const [passwordStrength, setPasswordStrength] = useState<PasswordStrengthCriteria>({
+    minLength: false,
+    uppercase: false,
+    lowercase: false,
+    number: false,
+    specialChar: false,
+  });
+  const [showPasswordCriteria, setShowPasswordCriteria] = useState(false);
+
+  // Função para validar a força da senha e atualizar o estado
+  const validatePasswordStrength = (password: string): boolean => {
+    const newStrength = {
+      minLength: password.length >= 8,
+      uppercase: /[A-Z]/.test(password),
+      lowercase: /[a-z]/.test(password),
+      number: /[0-9]/.test(password),
+      specialChar: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password),
+    };
+    setPasswordStrength(newStrength);
+    return Object.values(newStrength).every(Boolean);
+  };
+
+  const handleNewPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const currentNewPassword = e.target.value;
+    setNewPassword(currentNewPassword);
+    if (currentNewPassword || showPasswordCriteria) {
+      setShowPasswordCriteria(true);
+      validatePasswordStrength(currentNewPassword);
+    } else {
+      setShowPasswordCriteria(false);
+    }
+  };
 
   useEffect(() => {
     if (router.isReady) {
@@ -39,10 +83,10 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
       } else {
         const errMsg = t('reset_password.error_token_invalid_or_missing');
         setFormError(errMsg);
-        notify.error(errMsg);
+        // notify.error(errMsg); // Pode ser muito intrusivo se a página carregar sem token intencionalmente primeiro
       }
     }
-  }, [router.isReady, router.query, notify, t]);
+  }, [router.isReady, router.query, t]); // Removido notify da dependência aqui para evitar múltiplos toasts
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -61,11 +105,17 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
     }
     if (!token) {
       setFormError(t('reset_password.error_token_invalid_or_missing'));
+      notify.error(t('reset_password.error_token_invalid_or_missing')); // Notificar aqui se tentar submeter sem token
       setIsLoading(false);
       return;
     }
 
-    // TODO: Adicionar validação de força da senha no frontend (opcional, mas bom UX) e traduzir mensagens
+    if (!validatePasswordStrength(newPassword)) {
+      setFormError(t('register.error_password_not_strong', 'A senha não atende a todos os critérios de força.'));
+      setShowPasswordCriteria(true); // Garantir que os critérios sejam mostrados
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const response = await apiClient.post('/auth/reset-password', {
@@ -96,9 +146,11 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
       <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 dark:bg-gray-900">
         <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-xl dark:bg-gray-800">
           <div className="mb-8 text-center">
-            <div className="mb-4 inline-block rounded-full bg-indigo-500 p-3 text-white">
+            <div className="mb-4 inline-block rounded-full bg-brand-primary p-3 text-white">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-8 w-8">
-                    <path d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm4.28 13.43a.75.75 0 0 1-.976.02l-3.573-2.68a.75.75 0 0 0-.976 0l-3.573 2.68a.75.75 0 0 1-.976-.02l-1.141-.856a.75.75 0 0 1 .02-1.263l2.68-2.01a.75.75 0 0 0 0-1.264l-2.68-2.01a.75.75 0 0 1-.02-1.263l1.141-.856a.75.75 0 0 1 .976.02l3.573 2.68a.75.75 0 0 0 .976 0l3.573 2.68a.75.75 0 0 1 .976.02l1.141.856a.75.75 0 0 1-.02 1.263l-2.68 2.01a.75.75 0 0 0 0-1.264l2.68 2.01a.75.75 0 0 1 .02 1.263l-1.141-.856Z" />
+                    {/* Ícone de chave ou refresh para resetar senha */}
+                    <path fillRule="evenodd" d="M15.75 7.5a3 3 0 00-3-3h-1.5a3 3 0 00-3 3V9a.75.75 0 001.5 0V7.5a1.5 1.5 0 011.5-1.5h1.5a1.5 1.5 0 011.5 1.5V9a.75.75 0 001.5 0V7.5z" clipRule="evenodd" />
+                    <path fillRule="evenodd" d="M5.055 8.478A3.752 3.752 0 018.25 4.5h7.5a3.752 3.752 0 013.195 3.978C18.061 9.579 17.25 10.5 17.25 10.5V15a3 3 0 01-3 3h-1.5V16.5a.75.75 0 00-1.5 0V18h-3V16.5a.75.75 0 00-1.5 0V18h-1.5a3 3 0 01-3-3v-4.5c0-.93.537-1.436.994-2.142A2.246 2.246 0 005.054 8.478zM15 15.75a.75.75 0 00.75-.75v-3a.75.75 0 00-.75-.75h-6a.75.75 0 00-.75.75v3a.75.75 0 00.75.75h6z" clipRule="evenodd" />
                 </svg>
             </div>
             <h1 className="text-3xl font-bold text-gray-800 dark:text-white">{t('reset_password.title')}</h1>
@@ -110,7 +162,7 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
               {formError.includes(t('reset_password.error_token_invalid_or_missing_check', 'Token de redefinição inválido ou não fornecido')) && (
                 <p className="mt-2 text-sm">
                   <Link href="/auth/forgot-password">
-                    <span className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300">
+                    <span className="font-medium text-brand-primary hover:text-brand-primary/80 dark:text-brand-primary dark:hover:text-brand-primary/70 transition-colors">
                       {t('common:request_new_link', 'Solicitar novo link de redefinição')}
                     </span>
                   </Link>
@@ -142,11 +194,21 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
                   type="password"
                   required
                   value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
+                  onChange={handleNewPasswordChange}
+                  onFocus={() => setShowPasswordCriteria(true)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
                   placeholder={t('reset_password.new_password_placeholder')}
                   disabled={isLoading}
                 />
+                {showPasswordCriteria && (
+                  <div className="mt-2 space-y-1 text-sm">
+                    <PasswordStrengthIndicator isValid={passwordStrength.minLength} textKey="register.strength_min_length" />
+                    <PasswordStrengthIndicator isValid={passwordStrength.uppercase} textKey="register.strength_uppercase" />
+                    <PasswordStrengthIndicator isValid={passwordStrength.lowercase} textKey="register.strength_lowercase" />
+                    <PasswordStrengthIndicator isValid={passwordStrength.number} textKey="register.strength_number" />
+                    <PasswordStrengthIndicator isValid={passwordStrength.specialChar} textKey="register.strength_special_char" />
+                  </div>
+                )}
               </div>
               <div>
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-200">
@@ -159,7 +221,7 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm p-2"
                   placeholder={t('reset_password.confirm_password_placeholder')}
                   disabled={isLoading}
                 />
@@ -167,8 +229,8 @@ export default function ResetPasswordPage(props: InferGetStaticPropsType<typeof 
               <div>
                 <button
                   type="submit"
-                  disabled={isLoading}
-                  className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-gray-800"
+                  disabled={isLoading || !Object.values(passwordStrength).every(Boolean)}
+                  className="flex w-full justify-center rounded-md border border-transparent bg-brand-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-gray-800"
                 >
                   {isLoading ? (
                     <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

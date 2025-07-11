@@ -13,6 +13,7 @@ export interface User {
   role: UserRole | string; // string para acomodar roles não previstas no enum, se vier da API
   organization_id: string;
   is_active?: boolean;      // Comum em listagens de usuários
+  is_totp_enabled?: boolean; // Adicionado para status de MFA
   created_at?: string;      // Timestamps são opcionais em alguns contextos de formulário
   updated_at?: string;
 }

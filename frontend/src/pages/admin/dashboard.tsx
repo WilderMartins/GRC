@@ -141,7 +141,7 @@ const AdminDashboardContent = (props: InferGetStaticPropsType<typeof getStaticPr
                 <li key={activity.id} className="border-b border-gray-200 dark:border-gray-700 pb-3 last:border-b-0">
                   <div className="flex justify-between items-start">
                     <div>
-                      <span className="font-semibold text-indigo-600 dark:text-indigo-400">{activity.actor_name}</span>
+                      <span className="font-semibold text-brand-primary dark:text-brand-primary">{activity.actor_name}</span>
                       <span className="text-gray-600 dark:text-gray-300"> {activity.action_description}</span>
                     </div>
                     <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap ml-2">
@@ -150,7 +150,7 @@ const AdminDashboardContent = (props: InferGetStaticPropsType<typeof getStaticPr
                   </div>
                   {activity.target_link && (
                     <Link href={activity.target_link} legacyBehavior>
-                      <a className="text-sm text-indigo-500 hover:underline dark:text-indigo-300 mt-1 inline-block">
+                      <a className="text-sm text-brand-primary hover:text-brand-primary/80 dark:hover:text-brand-primary/70 mt-1 inline-block transition-colors">
                         {t('admin.view_details_link')}
                       </a>
                     </Link>

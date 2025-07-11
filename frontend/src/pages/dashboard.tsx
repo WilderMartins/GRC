@@ -63,11 +63,21 @@ const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticPro
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center">
-                <Link href="/dashboard" legacyBehavior>
-                  <a className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
-                    {appName}
-                  </a>
-                </Link>
+                {/* Usar imagem do branding se disponível no AuthContext, ou fallback */}
+                { authContext.branding?.logoUrl ? (
+                    <Link href="/dashboard" legacyBehavior>
+                        <a className="flex items-center space-x-2">
+                            <img src={authContext.branding.logoUrl} alt={appName} className="h-8 w-auto" />
+                            {/* <span className="font-bold text-xl text-gray-800 dark:text-white">{appName}</span> */}
+                        </a>
+                    </Link>
+                ) : (
+                    <Link href="/dashboard" legacyBehavior>
+                    <a className="font-bold text-xl text-brand-primary dark:text-brand-primary">
+                        {appName}
+                    </a>
+                    </Link>
+                )}
               </div>
               <div className="flex items-center">
                 {user && (
@@ -77,7 +87,7 @@ const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticPro
                 )}
                 <button
                   onClick={logout}
-                  className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                  className="rounded-md bg-brand-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-primary"
                 >
                   {t('common:logout_button')}
                 </button>
@@ -97,7 +107,7 @@ const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticPro
                 title={t('user.summary_assigned_risks_open')}
                 value={summary?.assigned_risks_open_count ?? '-'}
                 isLoading={isLoadingSummary}
-                linkTo="/admin/risks" // TODO: Link para riscos do usuário, não admin
+                linkTo={user?.id ? `/admin/risks?owner_id=${user.id}&status=aberto` : '/admin/risks'}
                 error={summaryError && summary?.assigned_risks_open_count === undefined ? t('common:error_loading_specific') : null}
               />
               <StatCard
@@ -150,10 +160,10 @@ const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticPro
                 <p className="text-gray-700 dark:text-gray-300">
                   {t('user.admin_panel_link_text', {
                       adminDashboardLink: (
-                          <Link href="/admin/dashboard">
-                            <span className="text-indigo-600 hover:underline dark:text-indigo-400">
+                          <Link href="/admin/dashboard" legacyBehavior>
+                            <a className="text-brand-primary hover:text-brand-primary/80 dark:hover:text-brand-primary/70 underline">
                                 {t('user.admin_dashboard_link_name')}
-                            </span>
+                            </a>
                           </Link>
                       )
                   })}

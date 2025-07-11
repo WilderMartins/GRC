@@ -163,7 +163,7 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
             <div>
               <label htmlFor="filterSeverity" className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t('list.filter_severity_label')}</label>
               <select id="filterSeverity" value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value as VulnerabilitySeverity)}
-                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm rounded-md">
                 <option value="">{t('common:all_option')}</option>
                 <option value="Crítico">{t('severity_options.Critical', { ns: 'vulnerabilities' })}</option>
                 <option value="Alto">{t('severity_options.High', { ns: 'vulnerabilities' })}</option>
@@ -174,7 +174,7 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
             <div>
               <label htmlFor="filterStatus" className="block text-sm font-medium text-gray-700 dark:text-gray-200">{t('list.filter_status_label')}</label>
               <select id="filterStatus" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as VulnerabilityStatus)}
-                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                      className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm rounded-md">
                 <option value="">{t('common:all_option')}</option>
                 <option value="descoberta">{t('status_options.descoberta', { ns: 'vulnerabilities' })}</option>
                 <option value="em_correcao">{t('status_options.em_correcao', { ns: 'vulnerabilities' })}</option>

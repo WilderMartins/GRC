@@ -41,6 +41,7 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
   const [isVerifyingTwoFactor, setIsVerifyingTwoFactor] = useState(false);
+  const [intendingToUseBackupCode, setIntendingToUseBackupCode] = useState(false); // Novo estado
 
 
   useEffect(() => {
@@ -119,35 +120,44 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
     setTwoFactorError(null);
 
     if (!twoFactorUserId || !twoFactorCode.trim()) {
-      setTwoFactorError(t('login_page.error_2fa_code_required')); // Usar uma chave de tradução mais específica
+      setTwoFactorError(t('login.error_2fa_code_required', 'Código 2FA é obrigatório.'));
       setIsVerifyingTwoFactor(false);
       return;
     }
 
-    // Heurística simples para tipo de código (melhorar com UI explícita no futuro)
-    const isLikelyTotp = /^\d{6}$/.test(twoFactorCode.trim());
-    const endpoint = isLikelyTotp ? '/auth/login/2fa/verify' : '/auth/login/2fa/backup-code/verify';
-    const payload = isLikelyTotp
-        ? { user_id: twoFactorUserId, token: twoFactorCode.trim() }
-        : { user_id: twoFactorUserId, backup_code: twoFactorCode.trim() };
+    let endpoint = '';
+    let payload = {};
+    const currentCode = twoFactorCode.trim();
 
-    if (!isLikelyTotp && endpoint.includes('backup-code')) {
-        // Temporariamente avisar que backup code não está implementado no backend (se for o caso)
-        // Em um cenário real, só permitiria se o backend suportasse.
-        // notify.info(t('login_page.info_backup_codes_experimental'));
+    if (intendingToUseBackupCode) {
+      endpoint = '/auth/login/2fa/backup-code/verify';
+      payload = { user_id: twoFactorUserId, backup_code: currentCode };
+    } else {
+      const isLikelyTotp = /^\d{6}$/.test(currentCode);
+      if (isLikelyTotp) {
+        endpoint = '/auth/login/2fa/verify';
+        payload = { user_id: twoFactorUserId, token: currentCode };
+      } else {
+        // Se não parece TOTP, e o usuário não clicou em "usar backup", tenta como backup.
+        endpoint = '/auth/login/2fa/backup-code/verify';
+        payload = { user_id: twoFactorUserId, backup_code: currentCode };
+      }
     }
 
     try {
       const response = await apiClient.post(endpoint, payload);
-      // API deve retornar token e user data completos após verificação 2FA
       await authContext.login(response.data, response.data.token);
-      // Resetar estados 2FA
       setIsTwoFactorStep(false);
       setTwoFactorUserId(null);
       setTwoFactorCode('');
+      setIntendingToUseBackupCode(false); // Resetar intenção
     } catch (err: any) {
       console.error("2FA verification failed:", err);
-      const apiError = err.response?.data?.error || t('login_page.error_2fa_verification_failed');
+      let apiError = err.response?.data?.error || t('login.error_2fa_verification_failed', 'Falha na verificação 2FA.');
+
+      if (endpoint.includes('/2fa/verify') && !intendingToUseBackupCode) {
+        apiError += ` ${t('login.try_backup_code_suggestion', 'Se o problema persistir, tente usar um código de backup.')}`;
+      }
       setTwoFactorError(apiError);
     } finally {
       setIsVerifyingTwoFactor(false);
@@ -294,11 +304,29 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
                     required
                     value={twoFactorCode}
                     onChange={(e) => setTwoFactorCode(e.target.value.replace(/\s/g, ''))}
-                    placeholder={t('login.placeholder_2fa_code')}
+                    placeholder={intendingToUseBackupCode ? t('login.placeholder_backup_code', 'Código de Backup') : t('login.placeholder_2fa_code')}
                     className="appearance-none block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-brand-primary focus:border-brand-primary sm:text-sm dark:bg-gray-700 dark:text-white"
                   />
                 </div>
-                {/* TODO: Adicionar link "Usar código de backup" ou radio buttons para tipo de código para melhor UX */}
+                {!intendingToUseBackupCode && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIntendingToUseBackupCode(true);
+                      setTwoFactorError(null); // Limpar erro anterior
+                      // Opcional: focar no input
+                      document.getElementById('twoFactorCode')?.focus();
+                    }}
+                    className="mt-2 text-sm text-brand-primary hover:text-brand-primary/80 dark:hover:text-brand-primary/70 transition-colors"
+                  >
+                    {t('login.use_backup_code_link', 'Usar um código de backup')}
+                  </button>
+                )}
+                 {intendingToUseBackupCode && (
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    {t('login.info_insert_backup_code', 'Insira um dos seus códigos de backup não utilizados.')}
+                  </p>
+                )}
               </div>
               <div>
                 <button
@@ -312,7 +340,14 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
               <div className="text-center">
                 <button
                     type="button"
-                    onClick={() => {setIsTwoFactorStep(false); setTwoFactorUserId(null); setPassword(''); setFormError(null); setTwoFactorError(null);}}
+                    onClick={() => {
+                      setIsTwoFactorStep(false);
+                      setTwoFactorUserId(null);
+                      setPassword(''); // Limpar senha se ainda estiver no estado
+                      setFormError(null);
+                      setTwoFactorError(null);
+                      setIntendingToUseBackupCode(false); // Resetar intenção
+                    }}
                     className="text-sm font-medium text-brand-primary hover:text-brand-primary/80 dark:hover:text-brand-primary/70 transition-colors"
                     disabled={isVerifyingTwoFactor}
                 >

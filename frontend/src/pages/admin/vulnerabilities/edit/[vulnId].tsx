@@ -80,10 +80,10 @@ const EditVulnerabilityPageContent = (props: InferGetServerSidePropsType<typeof 
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
-            {t('form.edit_page_header_prefix')} <span className="text-indigo-600 dark:text-indigo-400">{initialData?.title}</span>
+            {t('form.edit_page_header_prefix')} <span className="text-brand-primary dark:text-brand-primary">{initialData?.title}</span>
           </h1>
           <Link href="/admin/vulnerabilities" legacyBehavior>
-            <a className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-200">
+            <a className="text-brand-primary hover:text-brand-primary/80 dark:text-brand-primary dark:hover:text-brand-primary/70 transition-colors">
               &larr; {t('form.back_to_list_link')}
             </a>
           </Link>

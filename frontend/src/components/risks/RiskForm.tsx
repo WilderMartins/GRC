@@ -145,20 +145,20 @@ const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onS
       <div>
         <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.field_title_label')}</label>
         <input type="text" name="title" id="title" value={formData.title} onChange={handleChange} required minLength={3} maxLength={255}
-               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
       </div>
 
       <div>
         <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.field_description_label')}</label>
         <textarea name="description" id="description" value={formData.description} onChange={handleChange} rows={4}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <label htmlFor="category" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.field_category_label')}</label>
           <select name="category" id="category" value={formData.category} onChange={handleChange}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
             <option value="" disabled>{t('common_placeholders.select_category')}</option>
             <option value="tecnologico">{t('form.option_category_tech')}</option>
             <option value="operacional">{t('form.option_category_op')}</option>
@@ -168,7 +168,7 @@ const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onS
         <div>
           <label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.field_status_label')}</label>
           <select name="status" id="status" value={formData.status} onChange={handleChange}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
             {/* <option value="" disabled>{t('common_placeholders.select_status')}</option> */}
             <option value="aberto">{t('form.option_status_open')}</option>
             <option value="em_andamento">{t('form.option_status_in_progress')}</option>
@@ -182,7 +182,7 @@ const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onS
         <div>
           <label htmlFor="impact" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.field_impact_label')}</label>
           <select name="impact" id="impact" value={formData.impact} onChange={handleChange} required
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
             <option value="" disabled>{t('form.option_select_impact')}</option>
             <option value="Baixo">{t('form.option_impact_low')}</option>
             <option value="Médio">{t('form.option_impact_medium')}</option>
@@ -193,7 +193,7 @@ const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onS
         <div>
           <label htmlFor="probability" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.field_probability_label')}</label>
           <select name="probability" id="probability" value={formData.probability} onChange={handleChange} required
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
             <option value="" disabled>{t('form.option_select_probability')}</option>
             <option value="Baixo">{t('form.option_probability_low')}</option>
             <option value="Médio">{t('form.option_probability_medium')}</option>
@@ -220,7 +220,7 @@ const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onS
             value={formData.owner_id}
             onChange={handleChange}
             required
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2 disabled:opacity-50"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2 disabled:opacity-50"
             disabled={isLoadingUsers || (usersError && organizationUsers.length === 0 && !user)} // Desabilitar se erro E não há fallback para user logado
         >
             <option value="" disabled>{t('form.select_owner_placeholder')}</option>
