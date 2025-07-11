@@ -21,7 +21,42 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `200 OK`: `{ "status": "ok", "database": "connected" }`
         *   `503 Service Unavailable`: Se o banco de dados não estiver acessível.
 
-### 2. Autenticação (`/auth`)
+---
+
+### 2. Endpoints Públicos Adicionais
+
+*   **`GET /api/public/social-identity-providers`**
+    *   **Descrição:** Lista todos os provedores de identidade OAuth2 configurados que podem ser usados para login social. Isso inclui provedores globais (usando credenciais de todo o aplicativo) e provedores específicos da organização que foram marcados como públicos. Este endpoint é destinado a ser usado pela tela de login para exibir dinamicamente as opções de login social.
+    *   **Autenticação:** Nenhuma.
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `PublicIdentityProviderResponse`.
+            ```json
+            [
+                {
+                    "id": "global", // Ou UUID para IdP específico da organização
+                    "name": "Google (Global)", // Nome amigável
+                    "type": "oauth2_google", // Tipo do provedor (oauth2_google, oauth2_github)
+                    "provider_slug": "google", // Slug para construir URLs de login (ex: google, github)
+                    "icon_url": "/path/to/google_icon.svg" // URL para um ícone (opcional, pode ser gerenciado pelo frontend)
+                },
+                {
+                    "id": "uuid-org-idp-github",
+                    "name": "GitHub (Organização Acme)",
+                    "type": "oauth2_github",
+                    "provider_slug": "github",
+                    "icon_url": "/path/to/github_icon.svg"
+                }
+            ]
+            ```
+            *   **Campos da Resposta:**
+                *   `id` (string): O identificador do provedor. Será "global" para IdPs globais, ou o UUID do `IdentityProvider` para IdPs de organização. Este `id` deve ser usado no path `{idpId}` das rotas de login OAuth2.
+                *   `name` (string): Nome amigável do provedor (ex: "Google", "GitHub da Empresa X").
+                *   `type` (string): O tipo técnico do provedor (ex: `oauth2_google`, `oauth2_github`).
+                *   `provider_slug` (string): Um slug curto identificando o tipo de provedor (ex: `google`, `github`). Usado para construir as URLs de login como `/auth/oauth2/{provider_slug}/{id}/login`.
+                *   `icon_url` (string, opcional): Uma URL para um ícone representando o provedor.
+        *   `500 Internal Server Error`: Falha ao buscar os provedores de identidade.
+
+### 3. Autenticação (`/auth`)
 
 *   **`POST /auth/login`**
     *   **Descrição:** Realiza o login de um usuário com email e senha. Pode requerer um segundo fator se o 2FA estiver habilitado.
@@ -85,38 +120,54 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `500 Internal Server Error`: Falha ao gerar token JWT.
 
 *   **`GET /auth/oauth2/google/:idpId/login`**
-    *   **Descrição:** Inicia o fluxo de login OAuth2 com Google para o provedor de identidade (`idpId`) configurado. Redireciona o usuário para a página de autorização do Google.
+    *   **Descrição:** Inicia o fluxo de login OAuth2 com Google. Redireciona o usuário para a página de autorização do Google.
+        *   Se `{idpId}` for um UUID, usa a configuração do `IdentityProvider` específico da organização.
+        *   Se `{idpId}` for a string `"global"`, usa as credenciais OAuth2 globais do Google configuradas nas variáveis de ambiente do backend.
     *   **Autenticação:** Nenhuma.
     *   **Parâmetros de Path:**
-        *   `idpId` (string UUID): ID do `IdentityProvider` configurado para Google.
+        *   `idpId` (string): UUID do `IdentityProvider` da organização OU a string `"global"`.
     *   **Respostas:**
         *   `302 Found`: Redirecionamento para o Google.
-        *   `404 Not Found`: Configuração do IdP não encontrada.
-        *   `500 Internal Server Error`: Falha ao configurar OAuth2 ou gerar estado.
+        *   `404 Not Found`: Configuração do IdP (para UUID) não encontrada ou inativa.
+        *   `500 Internal Server Error`: Falha ao configurar OAuth2 (ex: credenciais globais ausentes para `"global"`, `APP_ROOT_URL` não configurado, ou erro ao gerar estado).
 
 *   **`GET /auth/oauth2/google/:idpId/callback`**
-    *   **Descrição:** Endpoint de callback para o Google após autorização do usuário. Processa o código, obtém informações do usuário, provisiona/loga o usuário no Phoenix GRC, gera um token JWT e redireciona para o frontend.
+    *   **Descrição:** Endpoint de callback para o Google após autorização do usuário. Processa o código de autorização, obtém informações do usuário do Google, e então:
+        *   Provisiona um novo usuário no Phoenix GRC ou loga um usuário existente.
+        *   Para IdPs globais (`idpId="global"`):
+            *   Se `ALLOW_GLOBAL_SSO_USER_CREATION` for `true`, novos usuários são criados.
+            *   Se `DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO` estiver configurado, novos usuários globais são associados a essa organização; caso contrário, são criados sem organização inicial.
+            *   Usuários globais existentes são logados.
+        *   Para IdPs de organização (UUID): Usuários são provisionados/logados dentro da organização do IdP.
+        *   Gera um token JWT para o usuário.
+        *   Redireciona para o frontend. A URL exata de redirecionamento do frontend é construída usando `APP_ROOT_URL` (configurado no backend) e um path padrão como `/oauth2/callback`. O resultado final será algo como: `[APP_ROOT_URL]/oauth2/callback?token=[JWT_TOKEN]&sso_success=true&provider=google`. O frontend deve estar preparado para lidar com esta rota e extrair o token.
     *   **Autenticação:** Nenhuma.
     *   **Parâmetros de Path:**
-        *   `idpId` (string UUID): ID do `IdentityProvider`.
+        *   `idpId` (string): UUID do `IdentityProvider` OU a string `"global"`.
     *   **Query Params (enviados pelo Google):** `code`, `state`.
     *   **Respostas:**
-        *   `302 Found`: Redirecionamento para `FRONTEND_OAUTH2_CALLBACK_URL` com o token JWT.
-        *   `400 Bad Request`: Estado inválido, email não fornecido pelo Google.
-        *   `401 Unauthorized`: Código de autorização não encontrado.
-        *   `500 Internal Server Error`: Falha na troca de token, obtenção de user info, criação/atualização de usuário, ou geração de token JWT.
+        *   `302 Found`: Redirecionamento para o frontend com token JWT.
+        *   `400 Bad Request`: Estado OAuth inválido, email não fornecido pelo Google.
+        *   `401 Unauthorized`: Código de autorização não encontrado/inválido.
+        *   `403 Forbidden`: Se a criação de usuário global estiver desabilitada (`ALLOW_GLOBAL_SSO_USER_CREATION=false`) e um novo usuário global tentar se registrar.
+        *   `500 Internal Server Error`: Falha na troca de token, obtenção de user info, criação/atualização de usuário no DB, ou geração de token JWT.
 
 *   **`GET /auth/oauth2/github/:idpId/login`**
-    *   **Descrição:** Inicia o fluxo de login OAuth2 com GitHub. Similar ao Google.
+    *   **Descrição:** Inicia o fluxo de login OAuth2 com GitHub. Similar ao Google Login, usando configurações de IdP de organização (para UUID) ou credenciais globais do GitHub (para `idpId="global"`).
     *   **Autenticação:** Nenhuma.
-    *   **Parâmetros de Path:** `idpId`.
-    *   **Respostas:** Similar ao Google Login.
+    *   **Parâmetros de Path:**
+        *   `idpId` (string): UUID do `IdentityProvider` da organização OU a string `"global"`.
+    *   **Respostas:** Similar ao Google Login (`404` se IdP de org não encontrado, `500` para falhas de config/estado).
 
 *   **`GET /auth/oauth2/github/:idpId/callback`**
-    *   **Descrição:** Callback para GitHub. Similar ao Google Callback.
+    *   **Descrição:** Callback para GitHub. Similar ao Google Callback, mas obtendo informações do usuário do GitHub.
+        *   Provisiona/loga usuários, respeitando `ALLOW_GLOBAL_SSO_USER_CREATION` e `DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO` para IdPs globais.
+        *   Redireciona para o frontend. A URL exata de redirecionamento do frontend é construída usando `APP_ROOT_URL` (configurado no backend) e um path padrão como `/oauth2/callback`. O resultado final será algo como: `[APP_ROOT_URL]/oauth2/callback?token=[JWT_TOKEN]&sso_success=true&provider=github`. O frontend deve estar preparado para lidar com esta rota e extrair o token.
     *   **Autenticação:** Nenhuma.
-    *   **Parâmetros de Path:** `idpId`.
-    *   **Respostas:** Similar ao Google Callback.
+    *   **Parâmetros de Path:**
+        *   `idpId` (string): UUID do `IdentityProvider` OU a string `"global"`.
+    *   **Query Params (enviados pelo GitHub):** `code`, `state`.
+    *   **Respostas:** Similar ao Google Callback (`302` para sucesso, `400` para estado/email inválido, `401` para código inválido, `403` para criação global desabilitada, `500` para outras falhas).
 
 *   **`POST /auth/login/2fa/backup-code/verify`**
     *   **Descrição:** Verifica um código de backup fornecido pelo usuário como segundo fator de autenticação.
@@ -932,4 +983,49 @@ Endpoints para operações relacionadas a arquivos, como obter URLs de acesso se
 *   Expandir exemplos de payloads de requisição e resposta onde for útil.
 *   Detalhar a estrutura exata do `config_json` para cada `provider_type` de IdentityProvider.
 *   Adicionar uma seção sobre códigos de erro comuns e seus significados.
+
+---
+
+## Configuração do Backend (Variáveis de Ambiente Relevantes)
+
+A seguir, uma lista de variáveis de ambiente importantes para configurar o comportamento do backend, especialmente para funcionalidades como OAuth2 global e comportamento de provisionamento.
+
+*   **`APP_ROOT_URL`**
+    *   **Descrição:** A URL raiz da aplicação frontend. Usada para construir URIs de redirecionamento corretos para fluxos OAuth2 e SAML, e em links enviados em emails/notificações. Deve ser a URL base que o usuário acessa no navegador.
+    *   **Exemplo:** `http://localhost:3000` (para desenvolvimento local com frontend na porta 3000) ou `https://app.suaempresa.com`.
+
+*   **`GOOGLE_CLIENT_ID`**
+    *   **Descrição:** O Client ID fornecido pelo Google Cloud Console para o seu projeto OAuth2. Necessário se o login global com Google estiver habilitado via `/api/public/social-identity-providers`.
+    *   **Exemplo:** `xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com`
+
+*   **`GOOGLE_CLIENT_SECRET`**
+    *   **Descrição:** O Client Secret fornecido pelo Google Cloud Console. Necessário se o login global com Google estiver habilitado.
+    *   **Exemplo:** `GOCSPX-xxxxxxxxxxxxxxxxxxxxxxx`
+
+*   **`GITHUB_CLIENT_ID`**
+    *   **Descrição:** O Client ID do seu aplicativo OAuth do GitHub. Necessário se o login global com GitHub estiver habilitado via `/api/public/social-identity-providers`.
+    *   **Exemplo:** `Iv1.xxxxxxxxxxxxxxxx`
+
+*   **`GITHUB_CLIENT_SECRET`**
+    *   **Descrição:** O Client Secret do seu aplicativo OAuth do GitHub. Necessário se o login global com GitHub estiver habilitado.
+    *   **Exemplo:** `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+
+*   **`ALLOW_GLOBAL_SSO_USER_CREATION`**
+    *   **Descrição:** Um booleano (`true` ou `false`) que determina se novos usuários podem ser criados no sistema quando eles fazem login pela primeira vez através de um provedor de identidade OAuth2 global (identificado como `"global"`).
+    *   **Default:** `false` (o comportamento exato se não definido pode depender da função `getEnvAsBool`, mas é recomendado definir explicitamente).
+    *   **Exemplo:** `true`
+
+*   **`DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO`**
+    *   **Descrição:** O UUID de uma organização existente para a qual novos usuários, criados via SSO global (quando `ALLOW_GLOBAL_SSO_USER_CREATION` é `true`), serão automaticamente associados. Se esta variável estiver definida com um UUID válido, os novos usuários globais pertencerão a esta organização. Se estiver vazia ou inválida, os novos usuários globais serão criados sem associação direta a uma organização (terão `OrganizationID` nulo no banco de dados).
+    *   **Exemplo:** `a1b2c3d4-e5f6-7890-1234-567890abcdef`
+
+*   **`ENCRYPTION_KEY_HEX`**
+    *   **Descrição:** Chave de criptografia de 32 bytes (representada como 64 caracteres hexadecimais) usada para criptografar dados sensíveis em repouso, como o segredo TOTP dos usuários. **Esta chave é crítica para a segurança. Deve ser gerada de forma segura (ex: usando um gerador de números aleatórios criptograficamente seguro) e mantida em segredo.** Não deve ser commitada no repositório de código.
+    *   **Exemplo:** `your_super_secret_and_randomly_generated_64_hex_characters_long_key`
+
+*   **`FRONTEND_BASE_URL`** (Nota: `APP_ROOT_URL` é preferível para consistência)
+    *   **Descrição:** URL base do frontend. Usada em alguns contextos para construir links, como em notificações de webhook. É recomendado usar `APP_ROOT_URL` de forma consistente para todos os casos de URLs base do frontend.
+    *   **Exemplo:** `http://localhost:3000`
+
+Outras variáveis de ambiente para configuração de banco de dados (ex: `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`), JWT (`JWT_SECRET_KEY`, `JWT_TOKEN_LIFESPAN_HOURS`), provedores de armazenamento de arquivos (ex: `GCS_PROJECT_ID`, `AWS_S3_BUCKET`), etc., também são cruciais e geralmente definidas no arquivo `.env` (para desenvolvimento) ou no ambiente de implantação.
 ```
