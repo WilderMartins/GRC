@@ -145,7 +145,7 @@ const OrgWebhooksPageContent = () => {
           {/* O botão pode abrir um Modal */}
           <button
             onClick={handleAddNewWebhook}
-            className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+            className="inline-flex items-center justify-center rounded-md border border-transparent bg-brand-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition-colors"
           >
             Adicionar Novo Webhook
           </button>
@@ -194,8 +194,8 @@ const OrgWebhooksPageContent = () => {
                             </span>
                           </td>
                           <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6 space-x-2">
-                            <button onClick={() => handleEditWebhook(webhook)} className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200" disabled={isLoadingData}>Editar</button>
-                            <button onClick={() => handleDeleteWebhook(webhook.id, webhook.name)} className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-200" disabled={isLoadingData}>Deletar</button>
+                            <button onClick={() => handleEditWebhook(webhook)} className="text-brand-primary hover:text-brand-primary/80 dark:text-brand-primary dark:hover:text-brand-primary/80 transition-colors" disabled={isLoadingData}>Editar</button>
+                            <button onClick={() => handleDeleteWebhook(webhook.id, webhook.name)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors" disabled={isLoadingData}>Deletar</button>
                           </td>
                         </tr>
                       ))}

@@ -25,56 +25,92 @@ Este projeto utiliza Docker e Docker Compose para facilitar a configuração do 
 
 ### Configuração Inicial e Setup
 
+Recomendamos usar o Wizard de Instalação via Browser para a primeira configuração.
+
+#### Método 1: Wizard de Instalação via Browser (Recomendado)
+
 1.  **Clone o Repositório:**
     ```bash
     git clone <url_do_repositorio>
     cd phoenix-grc # Ou o nome do diretório do projeto
     ```
 
-2.  **Configure as Variáveis de Ambiente:**
+2.  **Configure as Variáveis de Ambiente Essenciais:**
     Copie o arquivo de exemplo `.env.example` para `.env`.
     ```bash
     cp .env.example .env
     ```
-    Edite o arquivo `.env` e **certifique-se de definir `JWT_SECRET_KEY`, `SAML_SP_KEY_PEM`, e `SAML_SP_CERT_PEM` com valores seguros e únicos**. Ajuste `APP_ROOT_URL` para o endereço base da sua aplicação (ex: `http://localhost:8080` para desenvolvimento local). Configure também as URLs de callback do frontend (`FRONTEND_SAML_CALLBACK_URL`, `FRONTEND_OAUTH2_CALLBACK_URL`), as configurações do GCS (`GCS_PROJECT_ID`, `GCS_BUCKET_NAME`, `GOOGLE_APPLICATION_CREDENTIALS` se necessário), as configurações do AWS SES (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `EMAIL_SENDER_ADDRESS`) e as demais configurações do banco de dados e servidor conforme necessário.
+    Edite o arquivo `.env` e configure **inicialmente APENAS as seguintes seções**:
+    *   **Conexão com o Banco de Dados:**
+        *   `POSTGRES_HOST` (ex: `db` se usando o docker-compose padrão, ou `localhost` se o DB estiver rodando no host)
+        *   `POSTGRES_PORT` (ex: `5432`)
+        *   `POSTGRES_USER` (ex: `admin`)
+        *   `POSTGRES_PASSWORD` (ex: `password123`)
+        *   `POSTGRES_DB` (ex: `phoenix_grc_dev`)
+        *   `POSTGRES_SSLMODE` (ex: `disable` para desenvolvimento local)
+    *   **Configurações Essenciais do Servidor:**
+        *   `JWT_SECRET_KEY`: Defina um valor longo, aleatório e seguro.
+        *   `SERVER_PORT` (opcional, padrão `8080`)
+        *   `NGINX_PORT` (opcional, padrão `80`)
+        *   `APP_ROOT_URL` (ex: `http://localhost` ou `http://localhost:80` se `NGINX_PORT` for 80, ou `http://localhost:NGINX_PORT` se customizado. Esta URL é como o backend vê a raiz da aplicação para gerar links, etc.)
+        *   `FRONTEND_BASE_URL` (ex: `http://localhost:3000` se o frontend rodar separadamente em desenvolvimento)
+    *   **Outras Configurações (Opcional nesta fase, podem ser configuradas depois via UI ou .env):**
+        *   Chaves SAML (`SAML_SP_KEY_PEM`, `SAML_SP_CERT_PEM` - podem ser geradas depois se necessário).
+        *   Configurações de GCS, AWS SES, OAuth Client IDs/Secrets. O Wizard NÃO configurará estas. Elas ainda são via `.env`.
 
-    **Geração de Chaves SAML SP:**
-    Para `SAML_SP_KEY_PEM` e `SAML_SP_CERT_PEM`, você precisará de um par de chave privada e certificado X.509 para o seu Service Provider (Phoenix GRC). Você pode gerá-los usando OpenSSL:
+    **Importante:** O Wizard de Instalação cuidará da criação da primeira organização e do usuário administrador. Não defina usuários admin ou organizações manualmente no `.env` antes de rodar o wizard.
+
+3.  **Construa e Inicie os Containers Docker:**
     ```bash
-    # 1. Gerar chave privada RSA de 2048 bits
-    openssl genpkey -algorithm RSA -out saml_sp_private.key -pkeyopt rsa_keygen_bits:2048
-    # 2. Gerar um certificado público auto-assinado a partir da chave privada (válido por 10 anos)
-    openssl req -new -x509 -key saml_sp_private.key -out saml_sp_public.crt -days 3650 -subj "/CN=PhoenixGRC_SP_Local"
+    docker-compose build
+    docker-compose up -d # O -d executa em segundo plano
     ```
-    Copie o conteúdo de `saml_sp_private.key` para a variável `SAML_SP_KEY_PEM` e o conteúdo de `saml_sp_public.crt` para `SAML_SP_CERT_PEM` no seu arquivo `.env`. Certifique-se de formatar corretamente as strings PEM multi-linha no arquivo `.env` (geralmente substituindo novas linhas por `\n` ou usando aspas apropriadas se o seu parser `.env` suportar).
+    Aguarde alguns instantes para os serviços iniciarem.
 
-3.  **Construa as Imagens Docker:**
-    Este comando irá construir a imagem Docker para o backend.
+4.  **Acesse o Wizard de Instalação no Navegador:**
+    Abra seu navegador e acesse a URL base da sua aplicação frontend (normalmente `http://localhost:PORTA_DO_FRONTEND` se rodando o frontend localmente, ou `http://localhost:NGINX_PORT` se o Nginx estiver configurado para servir o frontend ou se o frontend e backend estiverem na mesma porta via proxy).
+    *   Se o sistema detectar que a configuração inicial não foi concluída, você deverá ser redirecionado para o wizard de instalação (ex: `/setup`) ou verá um link para iniciá-lo.
+    *   Siga as instruções na tela:
+        *   **Bem-vindo:** Introdução ao processo.
+        *   **Verificação da Configuração do Banco de Dados:** O wizard confirmará que o backend conseguiu se conectar ao banco de dados usando as configurações do seu arquivo `.env`. Se houver erro, revise seu `.env` e **REINICIE os containers (`docker-compose restart backend` ou `docker-compose down && docker-compose up -d`)** para que o backend carregue as novas variáveis.
+        *   **Executar Migrações:** Um botão para criar as tabelas no banco de dados.
+        *   **Criar Administrador:** Formulário para definir o nome da sua organização e criar a primeira conta de administrador.
+        *   **Conclusão:** Confirmação e link para a página de login.
+
+5.  **Após o Wizard:**
+    *   Acesse a página de login e utilize as credenciais do administrador criadas durante o wizard.
+    *   Você pode então configurar o restante das variáveis no arquivo `.env` (SAML, GCS, SES, etc.) conforme necessário e reiniciar os containers para que as novas configurações tenham efeito.
+
+#### Método 2: Setup via Linha de Comando (CLI) - Para Usuários Avançados
+
+Este método permite configurar o sistema interativamente através do terminal. Certifique-se de ter configurado **TODAS** as variáveis de ambiente necessárias no seu arquivo `.env` primeiro, incluindo as de banco de dados e `JWT_SECRET_KEY`.
+
+1.  **Clone o Repositório e Configure o `.env` Completo:** (Conforme passos 1 e 2 do método do Wizard, mas preenchendo todas as variáveis relevantes do `.env.example`).
+
+2.  **Construa as Imagens Docker:**
     ```bash
     docker-compose build
     ```
 
-4.  **Execute o Script de Instalação Interativo (Primeira Vez):**
-    O script de instalação configura o banco de dados, executa migrações e cria o primeiro usuário administrador.
-    Execute o seguinte comando para rodar o setup de forma interativa:
+3.  **Execute o Script de Instalação Interativo via CLI:**
     ```bash
     docker-compose run --rm backend setup
     ```
-    Siga as instruções no terminal:
-    *   **Database Host:** `db` (nome do serviço PostgreSQL no `docker-compose.yml`)
-    *   **Database Port:** `5432` (porta padrão do PostgreSQL)
-    *   **Database User:** O valor de `POSTGRES_USER` do seu `.env` (padrão: `admin`)
-    *   **Database Password:** O valor de `POSTGRES_PASSWORD` do seu `.env` (padrão: `password123`)
-    *   **Database Name:** O valor de `POSTGRES_DB` do seu `.env` (padrão: `phoenix_grc_dev`)
-    *   **Database SSL Mode:** `disable` (para desenvolvimento local)
+    Siga as instruções no terminal. Você será solicitado a fornecer:
+    *   Credenciais do banco de dados (mesmo que já estejam no `.env`, o script CLI pode pedi-las novamente para confirmar ou se o script não ler diretamente todas as vars do .env para este fluxo específico).
     *   Nome para a primeira organização.
     *   Nome, email e senha para o usuário administrador.
 
     O contêiner `backend` finalizará após o script de setup.
 
-### Iniciando o Servidor Backend
+4.  **Inicie os Servidores:**
+    ```bash
+    docker-compose up
+    ```
 
-Após o setup inicial, você pode iniciar o servidor backend e o banco de dados com:
+### Iniciando a Aplicação (Após Setup)
+
+Se o setup (via Wizard ou CLI) foi concluído com sucesso, para iniciar a aplicação normalmente:
 
 ```bash
 docker-compose up

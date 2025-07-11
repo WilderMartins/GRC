@@ -15,6 +15,7 @@ import {
     ControlWithAssessment,
     PaginatedResponse,
     AuditAssessmentStatusFilter,
+    ComplianceScoreResponse, // Adicionar tipo para a resposta do score
 } from '@/types';
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
@@ -46,9 +47,12 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
 
   const [frameworkInfo, setFrameworkInfo] = useState<Partial<AuditFramework> | null>(null);
   const [controlsWithAssessments, setControlsWithAssessments] = useState<ControlWithAssessment[]>([]);
+  const [complianceScoreData, setComplianceScoreData] = useState<ComplianceScoreResponse | null>(null); // Estado para o score
 
-  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true); // Loading para controles/avaliações
+  const [isLoadingScore, setIsLoadingScore] = useState(true); // Loading para o score
   const [error, setError] = useState<string | null>(null);
+  const [scoreError, setScoreError] = useState<string | null>(null); // Erro específico para o score
 
   const [controlsCurrentPage, setControlsCurrentPage] = useState(1);
   const [controlsPageSize, setControlsPageSize] = useState(10);
@@ -64,7 +68,8 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
 
   useEffect(() => {
     if (frameworkId && typeof frameworkId === 'string' && !authIsLoading && user) {
-      setIsLoadingData(true);
+      // Fetch Framework Info (Name)
+      setIsLoadingData(true); // Pode ser combinado com isLoadingScore ou mantido separado
       apiClient.get<AuditFramework[]>('/audit/frameworks')
         .then(response => {
           const currentFramework = response.data.find(f => f.id === frameworkId);
@@ -75,6 +80,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
           setError(prev => prev ? prev + `; ${t('framework_detail.error_loading_framework_info')}` : t('framework_detail.error_loading_framework_info'));
         });
 
+      // Fetch Control Families
       apiClient.get<ControlFamiliesResponse>(`/audit/frameworks/${frameworkId}/control-families`)
         .then(response => {
           setAvailableControlFamilies(response.data?.families?.sort() || []);
@@ -97,6 +103,26 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
                 setError(prev => prev ? prev + `; ${t('framework_detail.error_loading_family_filters')}` : t('framework_detail.error_loading_family_filters'));
             });
         });
+
+      // Fetch Compliance Score
+      if (user.organization_id) {
+        setIsLoadingScore(true);
+        setScoreError(null);
+        apiClient.get<ComplianceScoreResponse>(`/audit/organizations/${user.organization_id}/frameworks/${frameworkId}/compliance-score`)
+          .then(response => {
+            setComplianceScoreData(response.data);
+          })
+          .catch(err => {
+            console.error(t('framework_detail.error_fetching_score_console'), err);
+            setScoreError(err.response?.data?.error || t('framework_detail.error_loading_score'));
+          })
+          .finally(() => {
+            setIsLoadingScore(false);
+          });
+      } else {
+        setIsLoadingScore(false);
+        setScoreError(t('common:error_org_id_missing_for_score'));
+      }
     }
   }, [frameworkId, authIsLoading, user, t]);
 
@@ -108,6 +134,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
       return;
     }
     setIsLoadingData(true);
+    // setError(null); // Reset error for this specific fetch, or manage errors more granularly
 
     try {
       const controlsParams: { page: number; page_size: number; family?: string } = {
@@ -249,7 +276,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="sm:flex sm:items-center sm:justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+            <h1 className="text-3xl font-bold tracking-tight text-brand-primary dark:text-brand-primary">
               {frameworkInfo ? frameworkInfo.name : t('common:loading_ellipsis')}
             </h1>
             <p className="mt-2 text-sm text-gray-700 dark:text-gray-400">
@@ -258,7 +285,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
           </div>
           <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
             <Link href="/admin/audit/frameworks" legacyBehavior>
-                <a className="inline-flex items-center rounded-md border border-transparent bg-gray-200 dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                <a className="inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 transition-colors">
                 &larr; {t('framework_detail.back_to_frameworks_link')}
                 </a>
             </Link>
@@ -350,7 +377,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
                           <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                             <button
                               onClick={() => handleOpenAssessmentModal(item)}
-                              className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-200"
+                              className="text-brand-primary hover:text-brand-primary/80 dark:text-brand-primary dark:hover:text-brand-primary/80 transition-colors"
                             >
                               {item.assessment ? t('framework_detail.action_edit_assessment') : t('framework_detail.action_assess')}
                             </button>
@@ -359,7 +386,7 @@ const FrameworkDetailPageContent = (props: InferGetServerSidePropsType<typeof ge
                                   href={item.assessment.evidence_url}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="ml-3 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-200"
+                                  className="ml-3 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
                                   title={item.assessment.evidence_url}
                               >
                                   {t('framework_detail.action_view_evidence')}

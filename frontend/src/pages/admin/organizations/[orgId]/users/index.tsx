@@ -81,11 +81,11 @@ const EditRoleModal: React.FC<EditRoleModalProps> = ({ userToEdit, onClose, onSu
                     </select>
                     <div className="mt-4 flex justify-end space-x-2">
                         <button type="button" onClick={onClose} disabled={isLoadingModal}
-                                className="px-4 py-2 text-sm rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500">
+                                className="px-4 py-2 text-sm rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors">
                                     {t('common:cancel_button')}
                         </button>
                         <button type="submit" disabled={isLoadingModal || !newRole}
-                                className="px-4 py-2 text-sm rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
+                                className="px-4 py-2 text-sm rounded-md text-white bg-brand-primary hover:bg-brand-primary/90 focus:ring-brand-primary disabled:opacity-50 transition-colors">
                             {isLoadingModal ? t('common:saving_button') : t('edit_role_modal.save_role_button')}
                         </button>
                     </div>

@@ -16,7 +16,7 @@ import (
 	"phoenixgrc/backend/internal/notifications"
 	// "strings" // No longer needed for setup here
 
-	// "phoenixgrc/backend/cmd/setup" // Temporarily removed to fix compilation - setup is called via main() logic
+	"phoenixgrc/backend/cmd/setup" // Descomentado para permitir a chamada do setup
 	// "phoenixgrc/backend/cmd/setup" // Comentado para permitir compilação do server isoladamente. Refatorar setup.
 
 	"github.com/gin-gonic/gin"
@@ -234,9 +234,13 @@ func startServer() {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
 		// Call RunSetup from the setup package
-		// setup.RunSetup() // Comentado para permitir compilação. Necessita refatoração da lógica de setup.
-		log.Println("AVISO: Funcionalidade de setup via 'go run ./cmd/server/main.go setup' está temporariamente desabilitada devido à refatoração pendente do pacote setup.")
-		log.Println("Use 'go run ./cmd/setup/main.go' para executar o setup.")
+		// A função RunSetup agora é pública no pacote setup e pode ser chamada.
+		// O pacote setup precisa ser ajustado para que main.go possa ser importado,
+		// ou a lógica de RunSetup movida para um pacote internal/setupUtils e chamada por ambos os cmd.
+		// Assumindo que phoenixgrc/backend/cmd/setup pode ser importado e RunSetup é acessível:
+		log.Println("Starting Phoenix GRC setup...")
+		setup.RunSetup() // Descomentado para habilitar o setup via ./server setup
+		log.Println("Phoenix GRC setup finished.")
 	} else {
 		startServer()
 	}

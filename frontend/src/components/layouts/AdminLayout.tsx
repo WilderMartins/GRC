@@ -1,15 +1,26 @@
 import Head from 'next/head';
 import Link from 'next/link';
+import Image from 'next/image';
 import { ReactNode } from 'react';
-import { useAuth } from '@/contexts/AuthContext'; // Importar useAuth
+import { useAuth } from '@/contexts/AuthContext';
+import ThemeSwitcher from '@/components/common/ThemeSwitcher';
+import { useFeatureToggles } from '@/contexts/FeatureToggleContext'; // Importar hook de feature toggles
 
 type AdminLayoutProps = {
   children: ReactNode;
   title?: string;
 };
 
+// Define o caminho para o logo padrão do Phoenix GRC
+const PHOENIX_DEFAULT_LOGO_PATH = '/logos/phoenix-grc-logo-default.svg'; // Exemplo de caminho, ajuste conforme necessário
+
 export default function AdminLayout({ children, title = 'Painel Administrativo - Phoenix GRC' }: AdminLayoutProps) {
-  const { user, logout } = useAuth(); // Obter usuário para orgId e função de logout
+  const { user, logout, branding, isLoading: authIsLoading } = useAuth(); // Obter branding e isLoading
+
+  // Define o logo a ser usado: o da organização ou o padrão.
+  // Considera também um estado de carregamento para evitar piscar o logo padrão rapidamente.
+  const logoToDisplay = !authIsLoading && branding.logoUrl ? branding.logoUrl : PHOENIX_DEFAULT_LOGO_PATH;
+  const organizationName = user?.organization?.name || 'Phoenix GRC'; // Assume que user.organization.name pode existir
 
   return (
     <>
@@ -17,41 +28,56 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
         <title>{title}</title>
       </Head>
       <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
-        {/* Sidebar (Placeholder) */}
+        {/* Sidebar */}
         <aside className="w-64 bg-white p-6 shadow-md dark:bg-gray-800 hidden md:block">
           <div className="mb-8 text-center">
-            <Link href="/admin/dashboard">
-              <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-500">
-                Phoenix GRC
-              </span>
+            <Link href="/admin/dashboard" passHref>
+              <div className="cursor-pointer inline-block"> {/* Div para o cursor pointer */}
+                {authIsLoading ? (
+                  <div className="h-10 w-auto animate-pulse bg-gray-300 dark:bg-gray-700 rounded"></div> // Placeholder enquanto carrega
+                ) : branding.logoUrl ? (
+                  <img
+                    src={branding.logoUrl}
+                    alt={`${organizationName} Logo`}
+                    className="h-10 w-auto mx-auto object-contain" // Ajuste de altura e centralização
+                  />
+                ) : (
+                  // Fallback para o logo padrão SVG ou texto
+                  <img
+                    src={PHOENIX_DEFAULT_LOGO_PATH}
+                    alt="Phoenix GRC Default Logo"
+                    className="h-10 w-auto mx-auto object-contain"
+                  />
+                )}
+              </div>
             </Link>
           </div>
           <nav>
             <ul className="space-y-2">
               <li>
                 <Link href="/admin/dashboard">
-                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
+                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-brand-primary hover:text-white dark:text-gray-300 dark:hover:bg-brand-primary dark:hover:text-gray-100">
                     Dashboard
                   </span>
                 </Link>
               </li>
               <li>
                 <Link href="/admin/audit/frameworks">
-                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
+                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-brand-primary hover:text-white dark:text-gray-300 dark:hover:bg-brand-primary dark:hover:text-gray-100">
                     Auditoria & Conformidade
                   </span>
                 </Link>
               </li>
               <li>
                 <Link href="/admin/risks">
-                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
+                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-brand-primary hover:text-white dark:text-gray-300 dark:hover:bg-brand-primary dark:hover:text-gray-100">
                     Gestão de Riscos
                   </span>
                 </Link>
               </li>
               <li>
                 <Link href="/admin/vulnerabilities">
-                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
+                  <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-brand-primary hover:text-white dark:text-gray-300 dark:hover:bg-brand-primary dark:hover:text-gray-100">
                     Gestão de Vulnerabilidades
                   </span>
                 </Link>
@@ -60,14 +86,14 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
                 <>
                   <li>
                     <Link href={`/admin/organizations/${user.organization_id}/identity-providers`}>
-                      <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
+                      <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-brand-primary hover:text-white dark:text-gray-300 dark:hover:bg-brand-primary dark:hover:text-gray-100">
                         Provedores de Identidade
                       </span>
                     </Link>
                   </li>
                   <li>
                     <Link href={`/admin/organizations/${user.organization_id}/webhooks`}>
-                      <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-indigo-500 hover:text-white dark:text-gray-300 dark:hover:bg-indigo-600">
+                      <span className="block rounded-md px-4 py-2 text-gray-700 hover:bg-brand-primary hover:text-white dark:text-gray-300 dark:hover:bg-brand-primary dark:hover:text-gray-100">
                         Webhooks
                       </span>
                     </Link>
@@ -103,8 +129,9 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
               <h1 className="text-xl font-semibold text-gray-800 dark:text-white">
                 {title}
               </h1>
-              <div className="flex items-center space-x-3">
-                <span className="text-gray-600 dark:text-gray-400">{user?.name || user?.email}</span>
+              <div className="flex items-center space-x-4">
+                <ThemeSwitcher />
+                <span className="text-gray-600 dark:text-gray-400 hidden sm:inline">{user?.name || user?.email}</span>
                 <button
                   onClick={logout}
                   title="Logout"
@@ -119,6 +146,13 @@ export default function AdminLayout({ children, title = 'Painel Administrativo -
 
           {/* Page Content */}
           <main className="flex-1 overflow-y-auto p-6">
+            {/* Exemplo de uso do Feature Toggle */}
+            {isFeatureEnabled('displayExperimentalBanner') && !isLoadingToggles && (
+              <div className="mb-4 p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 dark:bg-yellow-700/30 dark:text-yellow-300 dark:border-yellow-600 rounded">
+                <p className="font-bold">Modo Experimental Ativo!</p>
+                <p>Você está vendo funcionalidades experimentais.</p>
+              </div>
+            )}
             {children}
           </main>
         </div>
