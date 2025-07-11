@@ -12,7 +12,7 @@ Para acessar o Phoenix GRC, você precisará fornecer suas credenciais na págin
     *   **Senha:** Sua senha pessoal.
 *   **Link "Esqueci minha senha":** Se você esqueceu sua senha, utilize este link para iniciar o processo de recuperação (esta funcionalidade depende da configuração do servidor de email).
 
-[SCREENSHOT: Página de Login com campos de email e senha]
+[SCREENSHOT: Página de Login do Phoenix GRC com campos de Email, Senha e link "Esqueci minha senha"]
 
 ### Login com Provedores Externos (SSO/Social Login)
 
@@ -22,7 +22,7 @@ Se sua organização configurou Single Sign-On (SSO) com SAML ou login social (G
 *   Você será redirecionado para a página de autenticação do provedor externo.
 *   Após autenticar-se com sucesso no provedor externo, você será redirecionado de volta ao Phoenix GRC e logado automaticamente.
 
-[SCREENSHOT: Página de Login exibindo botões de SSO/Social Login, se houver]
+[SCREENSHOT: Página de Login do Phoenix GRC com exemplos de botões de SSO (ex: "Login com Google", "Login com SAML Corporativo")]
 
 ## 2. Autenticação de Múltiplos Fatores (MFA)
 
@@ -33,40 +33,40 @@ Recomendamos fortemente a ativação do MFA para adicionar uma camada extra de s
 1.  Após o login, procure por um link ou menu com seu nome de usuário ou ícone de perfil (geralmente no canto superior direito do `AdminLayout`).
 2.  Navegue até a seção "Segurança" ou "Autenticação de Dois Fatores". (Ex: `http://sua-instancia/user/security`)
 
-[SCREENSHOT: Menu do usuário apontando para a página de Segurança/2FA]
+[SCREENSHOT: Exemplo de menu de usuário no AdminLayout, com item "Segurança" ou "Perfil" destacado, levando à página /user/security]
 
 ### Habilitando TOTP (Time-based One-Time Password)
 
 Se o TOTP ainda não estiver ativo para sua conta:
 
 1.  Na página de Configurações de Segurança, você verá uma opção para "Habilitar Autenticação TOTP". Clique neste botão.
-    [SCREENSHOT: Página de Segurança mostrando TOTP Inativo e botão "Habilitar"]
+    [SCREENSHOT: Seção de 2FA na página /user/security, mostrando status "TOTP Inativo" e o botão "Habilitar Autenticação TOTP"]
 2.  **Configurar Aplicativo Autenticador:**
     *   Aparecerá um QR Code e um segredo em formato de texto.
     *   Abra seu aplicativo autenticador preferido (Google Authenticator, Authy, etc.).
     *   Escaneie o QR Code. Se não puder escanear, adicione a conta manualmente usando o segredo de texto fornecido.
-    [SCREENSHOT: Tela de setup do TOTP com QR Code e segredo]
+    [SCREENSHOT: Interface de configuração do TOTP na página /user/security, exibindo o QR Code, o segredo em texto e o campo para o código de verificação]
 3.  **Verificar e Ativar:**
     *   Seu aplicativo autenticador agora gerará códigos de 6 dígitos que mudam a cada 30-60 segundos.
     *   Insira o código atual gerado pelo seu aplicativo no campo "Código de Verificação" na página do Phoenix GRC.
     *   Clique em "Verificar e Ativar".
-    [SCREENSHOT: Campo para inserir o código de verificação TOTP]
-4.  **Sucesso:** Se o código estiver correto, o TOTP será ativado para sua conta. Você receberá uma notificação de sucesso.
+    [SCREENSHOT: Detalhe do campo "Código de Verificação" preenchido e o botão "Verificar e Ativar"]
+4.  **Sucesso:** Se o código estiver correto, o TOTP será ativado para sua conta. Você receberá uma notificação de sucesso. (A página deve atualizar mostrando TOTP como ativo).
 
 ### Gerenciando Códigos de Backup
 
 Imediatamente após ativar o TOTP com sucesso, ou a qualquer momento enquanto o TOTP estiver ativo, você pode (e deve) gerar e salvar seus códigos de backup. Esses códigos permitem que você acesse sua conta caso perca o acesso ao seu aplicativo autenticador.
 
 1.  Na página de Configurações de Segurança (com TOTP ativo), clique no botão "Gerenciar Códigos de Backup" (ou "Gerar Novos Códigos de Backup").
-    [SCREENSHOT: Botão "Gerenciar Códigos de Backup" na página de segurança]
+    [SCREENSHOT: Página /user/security com TOTP ativo, destacando o botão "Gerenciar Códigos de Backup"]
 2.  Você pode ser solicitado a confirmar esta ação, pois gerar novos códigos invalida quaisquer códigos antigos.
 3.  **Salve seus Códigos:**
-    *   Uma lista de códigos de backup será exibida. **Estes códigos são mostrados apenas uma vez.**
+    *   Uma lista de códigos de backup será exibida em um modal. **Estes códigos são mostrados apenas uma vez.**
     *   **Copie** os códigos para um local seguro (ex: gerenciador de senhas, arquivo impresso em local seguro).
     *   Você também pode **baixar** os códigos como um arquivo `.txt`.
     *   **Trate esses códigos como senhas. Qualquer um com acesso a um código de backup pode contornar seu TOTP.**
-    [SCREENSHOT: Modal exibindo a lista de códigos de backup, com botões Copiar e Baixar]
-4.  Clique em "Fechar" ou "Entendi, guardei meus códigos" após salvá-los.
+    [SCREENSHOT: Modal exibindo a lista de códigos de backup gerados, com os botões "Copiar Códigos", "Baixar Códigos (.txt)" e "Entendi, guardei meus códigos"]
+4.  Clique em "Entendi, guardei meus códigos" após salvá-los para fechar o modal.
 
 ### Fazendo Login com TOTP
 
@@ -74,9 +74,9 @@ Com o TOTP ativo, o processo de login terá uma etapa adicional:
 
 1.  Insira seu email e senha normalmente na página de login.
 2.  Se as credenciais estiverem corretas, você será solicitado a fornecer seu "Código de Autenticação" (ou similar).
-    [SCREENSHOT: Página de Login na etapa 2FA, pedindo código TOTP]
+    [SCREENSHOT: Página de Login do Phoenix GRC, segunda etapa, solicitando o "Código de Autenticação" após senha correta]
 3.  Abra seu aplicativo autenticador, obtenha o código atual para sua conta Phoenix GRC e insira-o.
-4.  Clique em "Verificar" (ou similar).
+4.  Clique em "Verificar Código" (ou similar).
 
 ### Fazendo Login com um Código de Backup
 
@@ -93,11 +93,11 @@ Se desejar desabilitar o TOTP (o que reduzirá a segurança da sua conta):
 
 1.  Vá para a página de Configurações de Segurança.
 2.  Clique no botão "Desabilitar Autenticação TOTP".
-    [SCREENSHOT: Botão "Desabilitar TOTP" na página de segurança]
-3.  Você será solicitado a confirmar sua identidade inserindo sua **senha atual** da conta Phoenix GRC.
-    [SCREENSHOT: Modal pedindo senha para confirmar desativação do TOTP]
+[SCREENSHOT: Página /user/security com TOTP ativo, destacando o botão "Desabilitar TOTP"]
+3.  Você será solicitado a confirmar sua identidade inserindo sua **senha atual** da conta Phoenix GRC em um modal.
+    [SCREENSHOT: Modal de confirmação para desabilitar TOTP, com campo para senha atual e botão "Confirmar Desativação"]
 4.  Insira sua senha e clique em "Confirmar Desativação".
-5.  Se a senha estiver correta, o TOTP será desabilitado.
+5.  Se a senha estiver correta, o TOTP será desabilitado, e a página de segurança refletirá este novo estado.
 
 ## 3. (Opcional) Alteração de Senha
 
@@ -108,7 +108,7 @@ Se desejar desabilitar o TOTP (o que reduzirá a segurança da sua conta):
 3.  Você geralmente precisará fornecer sua senha atual e, em seguida, a nova senha (com confirmação).
 4.  Siga as instruções na tela.
 
-[SCREENSHOT: Formulário de alteração de senha, se existir]
+[SCREENSHOT: Exemplo de formulário de alteração de senha dentro de uma seção de perfil ou segurança do usuário, se esta funcionalidade for implementada]
 
 ---
 

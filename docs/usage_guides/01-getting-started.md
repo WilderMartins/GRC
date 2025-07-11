@@ -9,7 +9,7 @@ Após a conclusão do [Wizard de Instalação](./../../README.md#método-1-wizar
 *   **URL de Acesso:** Abra seu navegador e acesse a URL que você configurou para a aplicação (normalmente `http://localhost` ou `http://localhost:PORTA_NGINX` para ambientes de desenvolvimento local, ou a URL de produção da sua instância).
 *   Você será direcionado para a **Página de Login**.
 
-[SCREENSHOT: Página de Login do Phoenix GRC]
+[SCREENSHOT: Página de Login do Phoenix GRC - Campos de Email e Senha visíveis]
 
 ## 2. Realizando o Primeiro Login
 
@@ -24,7 +24,7 @@ Após inserir suas credenciais, clique em "Login" (ou o texto equivalente no bot
 
 Após o login bem-sucedido, você será direcionado para o Dashboard Principal do Phoenix GRC.
 
-[SCREENSHOT: Dashboard Principal do Phoenix GRC - Visão Geral]
+[SCREENSHOT: Dashboard Principal do Phoenix GRC - Visão Geral com menu de navegação e área de conteúdo principal]
 
 O dashboard é projetado para fornecer uma visão geral e acesso rápido às principais funcionalidades da plataforma. Aqui você poderá encontrar (dependendo das suas permissões e features ativadas):
 
