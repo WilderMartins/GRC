@@ -514,4 +514,254 @@ func TestCreateOrUpdateAssessmentHandler_InvalidMimeType(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), "is not allowed")
 	assert.NoError(t, sqlMock.ExpectationsWereMet())
 }
+
+
+func TestCreateOrUpdateAssessmentHandler_WithC2M2Fields(t *testing.T) {
+	setupTestEnvironment(t)
+
+	mockFileProvider := &MockFileStorageProvider{} // Não vamos fazer upload de arquivo neste teste
+	originalFileStorageProvider := filestorage.DefaultFileStorageProvider
+	filestorage.DefaultFileStorageProvider = mockFileProvider
+	defer func() { filestorage.DefaultFileStorageProvider = originalFileStorageProvider }()
+
+	router := getRouterWithAuthContext(testUserID, testOrgID, models.RoleAdmin)
+	router.POST("/assessments", CreateOrUpdateAssessmentHandler)
+
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+
+	controlID := uuid.New()
+	c2m2Level := 2
+	c2m2DateStr := "2024-03-10"
+	c2m2Comments := "C2M2 assessment comments here."
+
+	assessmentDataPayload := AssessmentPayload{
+		AuditControlID:    controlID.String(),
+		Status:            models.ControlStatusPartiallyConformant,
+		Score:             pointyInt(60),
+		AssessmentDate:    "2024-03-15",
+		Comments:          pointyStr("Main assessment comments."),
+		C2M2MaturityLevel: &c2m2Level,
+		C2M2AssessmentDate: &c2m2DateStr,
+		C2M2Comments:      &c2m2Comments,
+	}
+	jsonData, _ := json.Marshal(assessmentDataPayload)
+	_ = writer.WriteField("data", string(jsonData))
+	// Nenhum arquivo "evidence_file" neste teste
+	writer.Close()
+
+	sqlMock.ExpectBegin()
+	// Regex adaptado para incluir as novas colunas C2M2 no INSERT e no DO UPDATE SET
+	// A ordem exata das colunas no GORM pode variar, então o regex precisa ser flexível ou
+	// você pode precisar logar a query real do GORM para ajustar.
+	// Este regex assume que as novas colunas são adicionadas ao final da lista de colunas do INSERT
+	// e também no DO UPDATE SET.
+	// Simplificando a query para focar nos campos que queremos verificar o valor.
+	// GORM pode gerar nomes de coluna entre aspas.
+
+	// Upsert Query Mocking:
+	// A query exata do GORM pode ser complexa de adivinhar.
+	// O importante é que os valores corretos sejam passados e a cláusula OnConflict esteja correta.
+	// Para o RETURNING "id", o sqlmock espera ExpectQuery.
+	// A cláusula SET precisa incluir as novas colunas.
+	// A ordem dos $1, $2, etc. deve corresponder à ordem no VALUES e depois os EXCLUDED.
+	// No GORM, a struct inteira é passada para Create, então todos os campos são candidatos.
+
+	// Vamos assumir que o GORM inclui todos os campos não nulos no payload no INSERT
+	// e todos os campos listados em AssignmentColumns no UPDATE.
+	// A lista de AssignmentColumns no handler é:
+	// "status", "evidence_url", "score", "assessment_date", "comments",
+	// "c2m2_maturity_level", "c2m2_assessment_date", "c2m2_comments", "updated_at"
+
+	parsedMainDate, _ := time.Parse("2006-01-02", "2024-03-15")
+	parsedC2M2Date, _ := time.Parse("2006-01-02", "2024-03-10")
+
+	// Mock para a query de upsert
+	// A query exata pode variar, mas o importante são os argumentos e a lógica.
+	// Se o RETURNING "id" for usado, é uma Query. Senão, é Exec. GORM usa RETURNING.
+	sqlMock.ExpectQuery(regexp.QuoteMeta(
+		`INSERT INTO "audit_assessments" ("id","organization_id","audit_control_id","status","evidence_url","score","assessment_date","comments","c2m2_maturity_level","c2m2_assessment_date","c2m2_comments","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT ("organization_id","audit_control_id") DO UPDATE SET "status"=EXCLUDED."status","evidence_url"=EXCLUDED."evidence_url","score"=EXCLUDED."score","assessment_date"=EXCLUDED."assessment_date","comments"=EXCLUDED."comments","c2m2_maturity_level"=EXCLUDED."c2m2_maturity_level","c2m2_assessment_date"=EXCLUDED."c2m2_assessment_date","c2m2_comments"=EXCLUDED."c2m2_comments","updated_at"=EXCLUDED."updated_at" RETURNING "id"`)).
+		WithArgs(
+			sqlmock.AnyArg(), // id
+			testOrgID,        // organization_id
+			controlID,        // audit_control_id
+			assessmentDataPayload.Status,
+			"", // evidence_url (vazio pois não houve upload nem URL no payload)
+			*assessmentDataPayload.Score,
+			parsedMainDate,
+			*assessmentDataPayload.Comments,
+			*assessmentDataPayload.C2M2MaturityLevel,
+			parsedC2M2Date,
+			*assessmentDataPayload.C2M2Comments,
+			AnyTime{}, // created_at
+			AnyTime{}, // updated_at
+		).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+	sqlMock.ExpectCommit()
+
+	// Mock para a query de re-fetch
+	fetchedAssessmentID := uuid.New()
+	rows := sqlmock.NewRows([]string{"id", "organization_id", "audit_control_id", "status", "score", "assessment_date", "comments", "c2m2_maturity_level", "c2m2_assessment_date", "c2m2_comments"}).
+		AddRow(fetchedAssessmentID, testOrgID, controlID, assessmentDataPayload.Status, *assessmentDataPayload.Score, parsedMainDate, *assessmentDataPayload.Comments, *assessmentDataPayload.C2M2MaturityLevel, parsedC2M2Date, *assessmentDataPayload.C2M2Comments)
+	sqlMock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id = $2 ORDER BY "audit_assessments"."id" LIMIT 1`)).
+		WithArgs(testOrgID, controlID).
+		WillReturnRows(rows)
+
+	req, _ := http.NewRequest(http.MethodPost, "/assessments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code, "Response code should be OK. Body: %s", rr.Body.String())
+
+	var responseAssessment models.AuditAssessment
+	err := json.Unmarshal(rr.Body.Bytes(), &responseAssessment)
+	assert.NoError(t, err, "Failed to unmarshal response")
+	assert.Equal(t, assessmentDataPayload.Status, responseAssessment.Status)
+	assert.NotNil(t, responseAssessment.Score)
+	assert.Equal(t, *assessmentDataPayload.Score, *responseAssessment.Score)
+	assert.NotNil(t, responseAssessment.Comments)
+	assert.Equal(t, *assessmentDataPayload.Comments, *responseAssessment.Comments)
+
+	assert.NotNil(t, responseAssessment.C2M2MaturityLevel)
+	assert.Equal(t, *assessmentDataPayload.C2M2MaturityLevel, *responseAssessment.C2M2MaturityLevel)
+	assert.NotNil(t, responseAssessment.C2M2AssessmentDate)
+	assert.True(t, parsedC2M2Date.Equal(*responseAssessment.C2M2AssessmentDate), "C2M2AssessmentDate mismatch")
+	assert.NotNil(t, responseAssessment.C2M2Comments)
+	assert.Equal(t, *assessmentDataPayload.C2M2Comments, *responseAssessment.C2M2Comments)
+
+
+	if errDbMock := sqlMock.ExpectationsWereMet(); errDbMock != nil {
+		t.Errorf("SQL mock expectations not met: %s", errDbMock)
+	}
+}
+
+func TestGetC2M2MaturitySummaryHandler_Success(t *testing.T) {
+	setupTestEnvironment(t)
+	orgID := testOrgID // Usar testOrgID globalmente definido nos testes
+	frameworkID := uuid.New()
+	frameworkName := "Test NIST CSF for C2M2"
+
+	router := getRouterWithAuthContext(testUserID, orgID, models.RoleUser)
+	router.GET("/audit/organizations/:orgId/frameworks/:frameworkId/c2m2-maturity-summary", GetC2M2MaturitySummaryHandler)
+
+	// Mock Framework
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_frameworks" WHERE id = $1 ORDER BY "audit_frameworks"."id" LIMIT 1`)).
+		WithArgs(frameworkID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(frameworkID, frameworkName))
+
+	// Mock Controls
+	ctrl1ID, ctrl2ID, ctrl3ID, ctrl4ID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	ctrlRows := sqlmock.NewRows([]string{"id", "framework_id", "control_id", "family"}).
+		AddRow(ctrl1ID, frameworkID, "ID.AM-1", "Identify (ID.AM)"). // Função Identify
+		AddRow(ctrl2ID, frameworkID, "PR.IP-1", "Protect (PR.IP)"). // Função Protect
+		AddRow(ctrl3ID, frameworkID, "ID.RA-1", "Identify (ID.RA)"). // Função Identify
+		AddRow(ctrl4ID, frameworkID, "DE.CM-1", "Detect (DE.CM)")   // Função Detect (sem avaliação C2M2)
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_controls" WHERE framework_id = $1 ORDER BY control_id asc`)).
+		WithArgs(frameworkID).
+		WillReturnRows(ctrlRows)
+
+	// Mock Assessments (apenas para controles com C2M2MaturityLevel)
+	mil1, mil2, mil3 := 1, 2, 3
+	assessRows := sqlmock.NewRows([]string{"audit_control_id", "c2m2_maturity_level"}).
+		AddRow(ctrl1ID, &mil2). // ID.AM-1 -> MIL 2
+		AddRow(ctrl2ID, &mil3). // PR.IP-1 -> MIL 3
+		AddRow(ctrl3ID, &mil1)  // ID.RA-1 -> MIL 1
+		// ctrl4ID (Detect) não tem assessment C2M2
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id IN ($2,$3,$4,$5) AND c2m2_maturity_level IS NOT NULL`)).
+		WithArgs(orgID, ctrl1ID, ctrl2ID, ctrl3ID, ctrl4ID). // A ordem dos IDs pode variar
+		WillReturnRows(assessRows)
+
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/audit/organizations/%s/frameworks/%s/c2m2-maturity-summary", orgID, frameworkID), nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code, "Response code. Body: %s", rr.Body.String())
+
+	var response C2M2MaturityFrameworkSummaryResponse
+	err := json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.NoError(t, err, "Failed to unmarshal response")
+
+	assert.Equal(t, frameworkID, response.FrameworkID)
+	assert.Equal(t, frameworkName, response.FrameworkName)
+	assert.Equal(t, orgID, response.OrganizationID)
+	assert.Len(t, response.SummaryByFunction, 3, "Deveria haver sumários para 3 funções com avaliações C2M2 (Identify, Protect, Detect - embora Detect não tenha avaliações, deve aparecer com 0)")
+
+	foundIdentify := false
+	foundProtect := false
+	foundDetect := false
+
+	for _, summary := range response.SummaryByFunction {
+		if summary.NISTComponentName == "Identify" {
+			foundIdentify = true
+			assert.Equal(t, "Function", summary.NISTComponentType)
+			// Controles: ID.AM-1 (MIL2), ID.RA-1 (MIL1). Total 2. Avaliados 2.
+			// Moda: MIL2 (ocorre 1 vez), MIL1 (ocorre 1 vez). Desempate pelo maior: MIL2
+			assert.Equal(t, 2, summary.AchievedMIL)
+			assert.Equal(t, 2, summary.EvaluatedControls)
+			assert.Equal(t, 2, summary.TotalControls) // ctrl1, ctrl3
+			assert.Equal(t, 0, summary.MILDistribution.MIL0)
+			assert.Equal(t, 1, summary.MILDistribution.MIL1)
+			assert.Equal(t, 1, summary.MILDistribution.MIL2)
+			assert.Equal(t, 0, summary.MILDistribution.MIL3)
+		} else if summary.NISTComponentName == "Protect" {
+			foundProtect = true
+			assert.Equal(t, "Function", summary.NISTComponentType)
+			// Controles: PR.IP-1 (MIL3). Total 1. Avaliados 1.
+			// Moda: MIL3
+			assert.Equal(t, 3, summary.AchievedMIL)
+			assert.Equal(t, 1, summary.EvaluatedControls)
+			assert.Equal(t, 1, summary.TotalControls) // ctrl2
+			assert.Equal(t, 0, summary.MILDistribution.MIL0)
+			assert.Equal(t, 0, summary.MILDistribution.MIL1)
+			assert.Equal(t, 0, summary.MILDistribution.MIL2)
+			assert.Equal(t, 1, summary.MILDistribution.MIL3)
+		} else if summary.NISTComponentName == "Detect" {
+			foundDetect = true
+			assert.Equal(t, "Function", summary.NISTComponentType)
+			// Controles: DE.CM-1 (sem avaliação C2M2). Total 1. Avaliados 0.
+			// Moda: default MIL0
+			assert.Equal(t, 0, summary.AchievedMIL)
+			assert.Equal(t, 0, summary.EvaluatedControls)
+			assert.Equal(t, 1, summary.TotalControls) // ctrl4
+			assert.Equal(t, 0, summary.MILDistribution.MIL0)
+			assert.Equal(t, 0, summary.MILDistribution.MIL1)
+			assert.Equal(t, 0, summary.MILDistribution.MIL2)
+			assert.Equal(t, 0, summary.MILDistribution.MIL3)
+		}
+	}
+	assert.True(t, foundIdentify, "Sumário para Função 'Identify' não encontrado")
+	assert.True(t, foundProtect, "Sumário para Função 'Protect' não encontrado")
+	assert.True(t, foundDetect, "Sumário para Função 'Detect' não encontrado")
+
+
+	if errDbMock := sqlMock.ExpectationsWereMet(); errDbMock != nil {
+		t.Errorf("SQL mock expectations not met: %s", errDbMock)
+	}
+}
+
+func TestGetC2M2MaturitySummaryHandler_FrameworkNotFound(t *testing.T) {
+	setupTestEnvironment(t)
+	orgID := testOrgID
+	frameworkID := uuid.New()
+
+	router := getRouterWithAuthContext(testUserID, orgID, models.RoleUser)
+	router.GET("/audit/organizations/:orgId/frameworks/:frameworkId/c2m2-maturity-summary", GetC2M2MaturitySummaryHandler)
+
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_frameworks" WHERE id = $1 ORDER BY "audit_frameworks"."id" LIMIT 1`)).
+		WithArgs(frameworkID).
+		WillReturnError(gorm.ErrRecordNotFound)
+
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/audit/organizations/%s/frameworks/%s/c2m2-maturity-summary", orgID, frameworkID), nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Framework not found")
+
+	if errDbMock := sqlMock.ExpectationsWereMet(); errDbMock != nil {
+		t.Errorf("SQL mock expectations not met: %s", errDbMock)
+	}
+}
+
 // Ensure newline at end of file

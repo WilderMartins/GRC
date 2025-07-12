@@ -246,6 +246,7 @@ func startServer() {
 			auditRoutes.DELETE("/assessments/:assessmentId/evidence", handlers.DeleteAssessmentEvidenceHandler) // Nova rota para deletar evidência
 			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/assessments", handlers.ListOrgAssessmentsByFrameworkHandler)
 			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/compliance-score", handlers.GetComplianceScoreHandler)
+			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/c2m2-maturity-summary", handlers.GetC2M2MaturitySummaryHandler) // Novo endpoint C2M2
 		}
 
 		// MFA Routes (operam no usuário autenticado - /me)

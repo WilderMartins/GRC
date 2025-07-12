@@ -784,7 +784,11 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
                         "Status": "conforme",
                         "EvidenceURL": "objectName/ou/urlExterna", // Contém objectName ou URL externa
                         "Score": 100,
-                        "AssessmentDate": "timestamp"
+                        "AssessmentDate": "timestamp",
+                        "Comments": "Comentários da avaliação principal",
+                        "c2m2_maturity_level": 2, // Exemplo, pode ser null/omitido
+                        "c2m2_assessment_date": "timestamp", // Exemplo, pode ser null/omitido
+                        "c2m2_comments": "Comentários da avaliação C2M2" // Exemplo, pode ser null/omitido
                         // ... outros campos de AuditAssessment
                     }
                 }
@@ -803,20 +807,25 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             ```json
             {
                 "audit_control_id": "uuid-do-audit-control", // string UUID, obrigatório
-                "status": "string (obrigatório, um de: conforme, nao_conforme, parcialmente_conforme)",
-                "evidence_url": "string (opcional, URL externa)", // Usado se evidence_file não for enviado e for uma URL externa. Se um arquivo for carregado, este campo é ignorado.
-                "score": "integer (opcional, 0-100, default baseado no status)",
-                "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)"
+            "status": "string (obrigatório, um de: conforme, nao_conforme, parcialmente_conforme, nao_aplicavel)",
+            "evidence_url": "string (opcional, URL externa)",
+            "score": "integer (opcional, 0-100)",
+            "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)",
+            "comments": "string (opcional, comentários da avaliação principal)",
+            // Campos C2M2 (opcionais)
+            "c2m2_maturity_level": "integer (opcional, 0-3)",
+            "c2m2_assessment_date": "string (opcional, YYYY-MM-DD)",
+            "c2m2_comments": "string (opcional, comentários da avaliação C2M2)"
             }
             ```
         *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, o `objectName` do arquivo armazenado será salvo no campo `EvidenceURL` do modelo `AuditAssessment`.
     *   **Respostas:**
-        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado. O campo `EvidenceURL` conterá o `objectName` (se um arquivo foi carregado) ou a URL externa fornecida. Para acessar arquivos carregados, use o endpoint `GET /api/v1/files/signed-url`.
-        *   `400 Bad Request`: Formulário/JSON inválido, `audit_control_id` inválido, data inválida, arquivo muito grande ou tipo não permitido.
+        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado, podendo incluir campos C2M2. O campo `EvidenceURL` conterá o `objectName` (se um arquivo foi carregado) ou a URL externa fornecida. Para acessar arquivos carregados, use o endpoint `GET /api/v1/files/signed-url`.
+        *   `400 Bad Request`: Formulário/JSON inválido, `audit_control_id` inválido, data inválida, `c2m2_maturity_level` fora do range, arquivo muito grande ou tipo não permitido.
         *   `500 Internal Server Error`: Falha no upload ou ao salvar no banco.
 
 *   **`GET /api/v1/audit/assessments/control/:controlId`**
-    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado. O campo `EvidenceURL` conterá o `objectName` (se aplicável) ou uma URL externa.
+    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado. A resposta pode incluir campos C2M2. O campo `EvidenceURL` conterá o `objectName` (se aplicável) ou uma URL externa.
     *   **Autenticação:** JWT Obrigatório.
     *   **Parâmetros de Path:** `controlId` (string UUID).
     *   **Respostas:**
@@ -867,6 +876,41 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             ```
         *   `400 Bad Request`: IDs inválidos.
         *   `403 Forbidden`.
+        *   `404 Not Found`: Framework não encontrado.
+        *   `500 Internal Server Error`.
+
+*   **`GET /api/v1/audit/organizations/:orgId/frameworks/:frameworkId/c2m2-maturity-summary`**
+    *   **Descrição:** Calcula e retorna um sumário da maturidade C2M2 para um framework específico dentro de uma organização, agregado por Função NIST.
+    *   **Autenticação:** JWT Obrigatório. O `organization_id` no token do usuário deve corresponder ao `:orgId` no path.
+    *   **Parâmetros de Path:** `orgId` (UUID da organização), `frameworkId` (UUID do framework).
+    *   **Respostas:**
+        *   `200 OK`: Objeto `C2M2MaturityFrameworkSummaryResponse`.
+            ```json
+            {
+                "framework_id": "uuid-framework",
+                "framework_name": "NIST Cybersecurity Framework 2.0",
+                "organization_id": "uuid-org",
+                "summary_by_function": [
+                    {
+                        "nist_component_type": "Function",
+                        "nist_component_name": "Identify",
+                        "achieved_mil": 2, // Nível C2M2 (0-3) agregado para esta função (ex: moda dos MILs dos controles)
+                        "evaluated_controls": 10, // Número de controles NIST com C2M2MaturityLevel preenchido nesta função
+                        "total_controls": 15,     // Número total de controles NIST nesta função
+                        "mil_distribution": {    // Distribuição dos MILs dos controles avaliados
+                            "mil0": 1,
+                            "mil1": 2,
+                            "mil2": 5,
+                            "mil3": 2
+                        }
+                    }
+                    // ... Outras Funções NIST (Protect, Detect, Respond, Recover, Govern)
+                ]
+                // "summary_by_category": [] // Opcional, pode ser adicionado no futuro se necessário
+            }
+            ```
+        *   `400 Bad Request`: IDs inválidos.
+        *   `403 Forbidden`: Acesso negado à organização.
         *   `404 Not Found`: Framework não encontrado.
         *   `500 Internal Server Error`.
 

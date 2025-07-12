@@ -37,6 +37,38 @@ O frontend precisará de algumas configurações para interagir corretamente com
         "password": "yourpassword"
     }
     ```
+
+#### 5.3.9. Obter Sumário de Maturidade C2M2 por Função NIST
+
+*   **Endpoint:** `GET /audit/organizations/{orgId}/frameworks/{frameworkId}/c2m2-maturity-summary`
+*   **Descrição:** Calcula e retorna um sumário da maturidade C2M2 para um framework específico dentro de uma organização, agregado por Função NIST (Identify, Protect, Detect, Respond, Recover, Govern).
+*   **Resposta de Sucesso (200 OK):**
+    ```json
+    {
+        "framework_id": "uuid-framework",
+        "framework_name": "NIST Cybersecurity Framework 2.0",
+        "organization_id": "uuid-org",
+        "summary_by_function": [
+            {
+                "nist_component_type": "Function",
+                "nist_component_name": "Identify",
+                "achieved_mil": 2, // Nível C2M2 (0-3) agregado (ex: moda dos MILs dos controles da função)
+                "evaluated_controls": 10, // Controles com C2M2MaturityLevel preenchido nesta função
+                "total_controls": 15,     // Total de controles NIST nesta função
+                "mil_distribution": {    // Distribuição dos MILs dos controles avaliados
+                    "mil0": 1,
+                    "mil1": 2,
+                    "mil2": 5,
+                    "mil3": 2
+                }
+            }
+            // ... Outras Funções NIST ...
+        ]
+    }
+    ```
+*   **Notas Frontend:**
+    *   Usar estes dados para construir visualizações (gráficos, tabelas) da postura de maturidade C2M2 da organização em relação às Funções do NIST CSF.
+    *   O `achieved_mil` é uma agregação simplificada (moda). A lógica exata de como um MIL é "alcançado" para uma função inteira pode ser mais complexa no C2M2 e pode ser refinada no backend no futuro.
 *   **Resposta de Sucesso (200 OK - 2FA não habilitado):**
     ```json
     {
@@ -487,14 +519,17 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
                 "EvidenceURL": "objectName-ou-urlExterna", // Usar com GET /files/signed-url se for objectName
                 "Score": 100,
                 "AssessmentDate": "timestamp",
-                "Comments": "Comentários da avaliação..."
+                "Comments": "Comentários da avaliação principal...",
+                "c2m2_maturity_level": 2, // Exemplo, pode ser null/omitido
+                "c2m2_assessment_date": "timestamp", // Exemplo, pode ser null/omitido
+                "c2m2_comments": "Comentários da avaliação C2M2..." // Exemplo, pode ser null/omitido
                 // ...
             }
         }
     ]
     ```
 *   **Notas Frontend:**
-    *   A UI deve permitir ao usuário ver o status da avaliação de cada controle.
+    *   A UI deve permitir ao usuário ver o status da avaliação e os dados de maturidade C2M2 de cada controle.
     *   Se `assessment.EvidenceURL` for um `objectName` (não uma URL http/https), o frontend precisa chamar `GET /files/signed-url?objectKey={assessment.EvidenceURL}` para obter uma URL de download/visualização temporária.
 
 #### 5.3.4. Criar/Atualizar Avaliação de Controle
@@ -507,10 +542,14 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
         {
             "audit_control_id": "uuid-do-audit-control", // Obrigatório
             "status": "string (conforme, nao_conforme, parcialmente_conforme, nao_aplicavel)", // Obrigatório
-            "evidence_url": "string (URL externa, opcional)", // Usar se não houver upload de arquivo
+            "evidence_url": "string (URL externa, opcional)",
             "score": "integer (0-100, opcional)",
             "assessment_date": "string (YYYY-MM-DD, opcional, default: hoje)",
-            "comments": "string (opcional)"
+            "comments": "string (opcional)",
+            // Campos C2M2 (opcionais)
+            "c2m2_maturity_level": "integer (0-3, opcional)",
+            "c2m2_assessment_date": "string (YYYY-MM-DD, opcional)",
+            "c2m2_comments": "string (opcional)"
         }
         ```
     *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência. Se fornecido, seu `objectName` será armazenado em `EvidenceURL`.
@@ -556,6 +595,38 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
         // ... outras contagens de status
     }
     ```
+
+#### 5.3.9. Obter Sumário de Maturidade C2M2 por Função NIST
+
+*   **Endpoint:** `GET /audit/organizations/{orgId}/frameworks/{frameworkId}/c2m2-maturity-summary`
+*   **Descrição:** Calcula e retorna um sumário da maturidade C2M2 para um framework específico dentro de uma organização, agregado por Função NIST (Identify, Protect, Detect, Respond, Recover, Govern).
+*   **Resposta de Sucesso (200 OK):**
+    ```json
+    {
+        "framework_id": "uuid-framework",
+        "framework_name": "NIST Cybersecurity Framework 2.0",
+        "organization_id": "uuid-org",
+        "summary_by_function": [
+            {
+                "nist_component_type": "Function",
+                "nist_component_name": "Identify",
+                "achieved_mil": 2, // Nível C2M2 (0-3) agregado (ex: moda dos MILs dos controles da função)
+                "evaluated_controls": 10, // Controles com C2M2MaturityLevel preenchido nesta função
+                "total_controls": 15,     // Total de controles NIST nesta função
+                "mil_distribution": {    // Distribuição dos MILs dos controles avaliados
+                    "mil0": 1,
+                    "mil1": 2,
+                    "mil2": 5,
+                    "mil3": 2
+                }
+            }
+            // ... Outras Funções NIST ...
+        ]
+    }
+    ```
+*   **Notas Frontend:**
+    *   Usar estes dados para construir visualizações (gráficos, tabelas) da postura de maturidade C2M2 da organização em relação às Funções do NIST CSF.
+    *   O `achieved_mil` é uma agregação simplificada (moda). A lógica exata de como um MIL é "alcançado" para uma função inteira pode ser mais complexa no C2M2 e pode ser refinada no backend no futuro.
 
 ### 5.4. Administração da Organização (`/organizations/{orgId}/...`)
 
