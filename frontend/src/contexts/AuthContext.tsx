@@ -93,8 +93,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
       setIsLoading(false);
     };
-    loadStoredData();
-  }, []);
+
+    const initializeAuth = async () => {
+      await loadStoredData();
+      // Após carregar do localStorage, se houver token, tentar atualizar os dados do usuário
+      // para garantir que estão sincronizados com o backend (ex: status do TOTP).
+      if (localStorage.getItem('authToken')) {
+        // Não precisa definir isLoading aqui, pois refreshUser já o faz.
+        // Apenas chamamos, e o estado de loading geral será gerenciado por refreshUser.
+        await refreshUser(); // refreshUser já lida com isLoading
+      }
+    };
+
+    initializeAuth();
+  }, []); // Nota: refreshUser não deve ser uma dependência direta aqui para evitar loops.
 
   const login = async (apiUserData: any, newToken: string) => { // apiUserData da API pode não ter todos os campos de User type
     setIsLoading(true);
