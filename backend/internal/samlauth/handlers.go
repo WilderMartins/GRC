@@ -76,96 +76,6 @@ func MetadataHandler(c *gin.Context) {
 	middleware.ServeMetadata(c.Writer, c.Request)
 }
 
-func ACSHandler(c *gin.Context) {
-	idpIDStr := c.Param("idpId")
-	idpID, err := uuid.Parse(idpIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IdP ID format"})
-		return
-	}
-
-	middleware, idpModel, err := getSAMLServiceProvider(c, idpID)
-	if err != nil {
-		phxlog.L.Error("Error getting SAML SP for ACS",
-			zap.String("idpID", idpIDStr),
-			zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to configure SAML service provider for ACS."})
-		return
-	}
-
-	// Parse a requisição SAML (Assertion)
-	// O middleware.RequireAccount já faz isso e popula c.Request.Context com a asserção
-	// se a autenticação SAML for bem-sucedida.
-	// No entanto, para obter a asserção diretamente para provisionamento de usuário,
-	// podemos precisar de uma abordagem um pouco diferente ou usar os dados já processados.
-
-	// Para este exemplo, vamos assumir que queremos processar a asserção e, em seguida,
-	// redirecionar ou emitir um token JWT da nossa aplicação.
-	// A biblioteca crewjam/saml pode ser um pouco complexa aqui.
-	// A forma mais simples com `samlsp.Middleware` é que ele tem seu próprio session handler.
-	// Se quisermos integrar com nosso JWT, precisamos pegar os atributos da asserção.
-
-	// O middleware.RequireAccount protege o handler. Se chegar aqui, o usuário foi autenticado pelo IdP.
-	// A asserção pode ser recuperada do contexto da requisição.
-	// s, err := middleware.Session.GetSession(c.Request)
-	// if err != nil {
-	// 	 c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get SAML session"})
-	// 	 return
-	// }
-	// assertion := s.(samlsp.SessionWithAttributes).GetAttributes()
-	// email := assertion.Get("email") // Ajustar nome do atributo conforme mapeamento
-
-	// TODO: Implementar a lógica real do ACS:
-	// 1. Validar a asserção SAML (o middleware já faz grande parte disso).
-	// 2. Extrair atributos do usuário (email, nome, etc.) da asserção.
-	//    O mapeamento de atributos pode ser configurado no `idpModel.AttributeMappingJSON`.
-	// 3. Procurar o usuário no banco de dados pelo email ou outro identificador único.
-	// 4. Se o usuário não existir, provisioná-lo (criá-lo) na organização associada ao `idpModel.OrganizationID`.
-	//    Garantir que a organização exista e seja a correta.
-	// 5. Se o usuário existir, atualizar seus dados se necessário.
-	// 6. Gerar um token JWT da aplicação Phoenix GRC para o usuário.
-	// 7. Redirecionar o usuário para o frontend com o token JWT.
-	//    (ex: appCfg.Cfg.FrontendBaseURL + "/auth/saml/callback?token=" + jwtToken)
-
-	phxlog.L.Info("SAML ACSHandler invoked - Placeholder for full implementation.",
-		zap.String("idpID", idpModel.ID.String()),
-		zap.String("idpName", idpModel.Name))
-	// Exemplo de como obter atributos (requer que o middleware já tenha processado):
-	// samlSession, _ := middleware.Session.GetSession(c.Request)
-	// if samlSession != nil {
-	//    attrs := samlSession.(samlsp.SessionWithAttributes).GetAttributes()
-	//    phxlog.L.Debug("SAML Attributes received", zap.Any("attributes", attrs))
-	// }
-
-	// Tentativa de obter a sessão SAML (que conteria a asserção processada pelo middleware)
-	// O middleware.RequireAccount deveria ter sido aplicado a esta rota para que isto funcione.
-	// Se não, c.Request.Context() pode não ter a asserção.
-	// Por agora, o foco é no placeholder.
-	var samlAssertionAttributes samlsp.Attributes
-	session, errSession := middleware.Session.GetSession(c.Request)
-	if errSession == nil && session != nil {
-		if s, ok := session.(samlsp.SessionWithAttributes); ok {
-			samlAssertionAttributes = s.GetAttributes()
-			phxlog.L.Info("SAML assertion attributes received by ACS (placeholder)",
-				zap.String("idpID", idpModel.ID.String()),
-				zap.String("idpName", idpModel.Name),
-				zap.Any("attributes", samlAssertionAttributes),
-			)
-		}
-	} else if errSession != nil {
-		phxlog.L.Warn("Could not get SAML session in ACS handler", zap.Error(errSession), zap.String("idpID", idpModel.ID.String()))
-	}
-
-
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"message":                       "SAML ACS logic is partially implemented. Assertion may have been received by SP.",
-		"status":                        "pending_full_user_processing_and_jwt_issuance",
-		"idp_id":                        idpModel.ID.String(),
-		"idp_name":                      idpModel.Name,
-		"received_attributes_example":   samlAssertionAttributes, // Pode ser nil
-		"next_steps":                    "Backend needs to fully process assertion, provision user, and issue Phoenix GRC JWT.",
-	})
-}
 
 // ACSAttributeMapping define a estrutura esperada para o AttributeMappingJSON
 type ACSAttributeMapping struct {
@@ -270,7 +180,13 @@ func ACSHandler(c *gin.Context) {
 	err = db.Where("email = ? AND organization_id = ?", email, idpModel.OrganizationID).First(&user).Error
 
 	if err == gorm.ErrRecordNotFound { // Usuário não existe, provisionar
-		if !appConfig.Cfg.AllowSAMLUserCreation { // Usar a nova config
+		allowUserCreation, err := models.GetSystemSetting(db, "ALLOW_SAML_USER_CREATION")
+		if err != nil {
+			// Se a configuração não existir, assuma um padrão seguro (não permitir criação)
+			allowUserCreation = "false"
+		}
+
+		if allowUserCreation != "true" {
 			phxlog.L.Warn("SAML user creation disabled, user not provisioned",
 				zap.String("email", email), zap.String("idpName", idpModel.Name))
 			c.JSON(http.StatusForbidden, gin.H{"error": "New user registration via this SAML provider is disabled."})

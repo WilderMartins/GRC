@@ -58,7 +58,38 @@ func SeedInitialData(db *gorm.DB) error {
 		return err
 	}
 
+	if err := seedSystemSettings(db); err != nil {
+		log.Error("Failed to seed system settings", zap.Error(err))
+		return err
+	}
+
 	log.Info("Initial data seeding completed successfully.")
+	return nil
+}
+
+// seedSystemSettings garante que as configurações padrão do sistema existam no banco.
+func seedSystemSettings(db *gorm.DB) error {
+	settings := []models.SystemSetting{
+		{
+			Key:         "ALLOW_SAML_USER_CREATION",
+			Value:       "true", // Por padrão, permitir a criação de usuários via SAML
+			Description: "Se 'true', novos usuários serão provisionados automaticamente no primeiro login via SAML.",
+			IsEncrypted: false,
+			ExposedToUI: true,
+		},
+		// Adicione outras configurações padrão aqui
+	}
+
+	for _, setting := range settings {
+		// Tenta encontrar a configuração pela chave para evitar duplicatas
+		var existing models.SystemSetting
+		if err := db.Where("key = ?", setting.Key).First(&existing).Error; err == gorm.ErrRecordNotFound {
+			// Se não existir, cria
+			if err := db.Create(&setting).Error; err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
