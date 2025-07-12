@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io" // Mantido para io.EOF na leitura do buffer do arquivo
-	"log"
 	// "mime/multipart" // Removido - não usado diretamente aqui, o Gin lida com isso
 	"net/http"
 	"path/filepath"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/filestorage"
 	"phoenixgrc/backend/internal/models"
@@ -110,7 +111,9 @@ func UpdateOrganizationBrandingHandler(c *gin.Context) {
 		}
 
 		if filestorage.DefaultFileStorageProvider == nil {
-			log.Println("Tentativa de upload de logo, mas FileStorageProvider não configurado.")
+			phxlog.L.Error("Attempted logo upload, but FileStorageProvider not configured.",
+				zap.String("organizationID", targetOrgID.String()),
+				zap.Any("actingUserID", actingUserID))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Serviço de armazenamento de arquivos não configurado."})
 			return
 		}
@@ -122,11 +125,17 @@ func UpdateOrganizationBrandingHandler(c *gin.Context) {
 		// UploadFile agora retorna objectName
 		objectNameReturned, errUpload := filestorage.DefaultFileStorageProvider.UploadFile(c.Request.Context(), targetOrgID.String(), objectName, file)
 		if errUpload != nil {
-			log.Printf("Falha ao fazer upload do logo para org %s por usuário %s: %v", targetOrgID, actingUserID, errUpload)
+			phxlog.L.Error("Failed to upload logo",
+				zap.String("organizationID", targetOrgID.String()),
+				zap.Any("actingUserID", actingUserID),
+				zap.Error(errUpload))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao fazer upload do logo: " + errUpload.Error()})
 			return
 		}
-		log.Printf("Logo para organização %s atualizado por usuário %s. ObjectName: %s", targetOrgID, actingUserID, objectNameReturned)
+		phxlog.L.Info("Logo updated for organization",
+			zap.String("organizationID", targetOrgID.String()),
+			zap.Any("actingUserID", actingUserID),
+			zap.String("objectName", objectNameReturned))
 		organization.LogoURL = objectNameReturned // Armazena o objectName
 	} else if errFile != http.ErrMissingFile {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Erro ao processar arquivo de logo: " + errFile.Error()})

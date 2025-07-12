@@ -236,13 +236,19 @@ type AuditAssessment struct {
 	OrganizationID uuid.UUID          `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
 	// Storing AuditControl's UUID for a more robust FK relationship
 	AuditControlID uuid.UUID          `gorm:"type:uuid;not null"` // FK to AuditControl's ID
-	Status         AuditControlStatus `gorm:"type:varchar(30)"`
-	EvidenceURL    string             `gorm:"size:255"`
-	Score          int                // Integer score
-	AssessmentDate time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	AuditControl   AuditControl       `gorm:"foreignKey:AuditControlID;constraint:OnDelete:CASCADE;"` // Se o AuditControl for deletado
+	Status         AuditControlStatus `gorm:"type:varchar(30)" json:"status"`
+	EvidenceURL    string             `gorm:"size:255" json:"evidence_url"`
+	Score          *int               `json:"score,omitempty"` // Integer score, ponteiro para ser omitempty
+	AssessmentDate *time.Time         `gorm:"type:timestamptz" json:"assessment_date,omitempty"` // Ponteiro para ser omitempty
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+
+	// Campos para Maturidade C2M2
+	C2M2MaturityLevel *int       `gorm:"index" json:"c2m2_maturity_level,omitempty"`    // Nível de Maturidade C2M2 (0-3), ponteiro para ser nullable
+	C2M2AssessmentDate *time.Time `gorm:"type:timestamptz" json:"c2m2_assessment_date,omitempty"` // Data da avaliação de maturidade C2M2
+	C2M2Comments      *string    `gorm:"type:text" json:"c2m2_comments,omitempty"`         // Comentários da avaliação C2M2
+
+	AuditControl   AuditControl       `gorm:"foreignKey:AuditControlID;constraint:OnDelete:CASCADE;" json:"audit_control,omitempty"` // Se o AuditControl for deletado
 	// A OrganizationID também é uma FK. Se a Organization for deletada, as Assessments devem ser deletadas.
 	// Isso será tratado na definição da relação em Organization struct.
 }

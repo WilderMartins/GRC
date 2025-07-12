@@ -2,10 +2,11 @@ package samlauth
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"phoenixgrc/backend/internal/models"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	// "phoenixgrc/backend/internal/auth" // Para gerar token JWT da aplicação
 	// "phoenixgrc/backend/internal/database" // Para buscar/criar usuário
 	// "phoenixgrc/backend/pkg/config" // Para FRONTEND_SAML_CALLBACK_URL
@@ -63,7 +64,9 @@ func MetadataHandler(c *gin.Context) {
 
 	middleware, _, err := getSAMLServiceProvider(c, idpID)
 	if err != nil {
-		log.Printf("Error getting SAML SP for metadata (IdP ID: %s): %v\n", idpIDStr, err)
+		phxlog.L.Error("Error getting SAML SP for metadata",
+			zap.String("idpID", idpIDStr),
+			zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to configure SAML service provider for metadata."})
 		return
 	}
@@ -80,7 +83,9 @@ func ACSHandler(c *gin.Context) {
 
 	middleware, idpModel, err := getSAMLServiceProvider(c, idpID)
 	if err != nil {
-		log.Printf("Error getting SAML SP for ACS (IdP ID: %s): %v\n", idpIDStr, err)
+		phxlog.L.Error("Error getting SAML SP for ACS",
+			zap.String("idpID", idpIDStr),
+			zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to configure SAML service provider for ACS."})
 		return
 	}
@@ -119,12 +124,14 @@ func ACSHandler(c *gin.Context) {
 	// 7. Redirecionar o usuário para o frontend com o token JWT.
 	//    (ex: appCfg.Cfg.FrontendBaseURL + "/auth/saml/callback?token=" + jwtToken)
 
-	log.Printf("SAML ACSHandler for IdP %s (IdP Name: %s) - Placeholder for full implementation.", idpModel.ID, idpModel.Name)
+	phxlog.L.Info("SAML ACSHandler invoked - Placeholder for full implementation.",
+		zap.String("idpID", idpModel.ID.String()),
+		zap.String("idpName", idpModel.Name))
 	// Exemplo de como obter atributos (requer que o middleware já tenha processado):
 	// samlSession, _ := middleware.Session.GetSession(c.Request)
 	// if samlSession != nil {
 	//    attrs := samlSession.(samlsp.SessionWithAttributes).GetAttributes()
-	//    log.Printf("SAML Attributes: %v", attrs)
+	//    phxlog.L.Debug("SAML Attributes received", zap.Any("attributes", attrs))
 	// }
 
 	// c.JSON(http.StatusNotImplemented, gin.H{"message": "SAML ACS logic is not fully implemented yet."})
@@ -141,7 +148,14 @@ func SAMLLoginHandler(c *gin.Context) {
 
 	middleware, idpModel, err := getSAMLServiceProvider(c, idpID)
 	if err != nil {
-		log.Printf("Error getting SAML SP for Login (IdP ID: %s, Name: %s): %v\n", idpIDStr, idpModel.Name, err)
+		idpName := "N/A"
+		if idpModel != nil { // idpModel pode ser nil se getSAMLServiceProvider falhar muito cedo
+			idpName = idpModel.Name
+		}
+		phxlog.L.Error("Error getting SAML SP for Login",
+			zap.String("idpID", idpIDStr),
+			zap.String("idpName", idpName),
+			zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to configure SAML service provider for Login."})
 		return
 	}

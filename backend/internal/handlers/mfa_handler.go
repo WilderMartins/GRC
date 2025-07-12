@@ -3,16 +3,19 @@ package handlers
 import (
 	"bytes"
 	"crypto/rand" // Adicionado para gerar códigos de backup
+	"bytes"
+	"crypto/rand" // Adicionado para gerar códigos de backup
 	"encoding/base64"
 	"encoding/json" // Adicionado para Marshal/Unmarshal de backup codes
 	"fmt"
 	"image/png"
 	"net/http"
-	"log"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	"phoenixgrc/backend/internal/utils"       // Added for crypto utils
 	appConfig "phoenixgrc/backend/pkg/config" // Alias para o pacote de configuração
+	phxlog "phoenixgrc/backend/pkg/log"        // Importar o logger zap
+	"go.uber.org/zap"                         // Importar zap
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -67,7 +70,7 @@ func SetupTOTPHandler(c *gin.Context) {
 	// IMPORTANT: In a real application, consider encrypting this secret at rest in the database.
 	encryptedSecret, err := utils.Encrypt(key.Secret())
 	if err != nil {
-		log.Printf("ERROR: Failed to encrypt TOTP secret for user %s: %v", user.ID, err)
+		phxlog.L.Error("Failed to encrypt TOTP secret", zap.String("userID", user.ID.String()), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to secure TOTP secret"})
 		return
 	}
@@ -158,7 +161,7 @@ func VerifyTOTPHandler(c *gin.Context) {
 
 	decryptedSecret, err := utils.Decrypt(user.TOTPSecret)
 	if err != nil {
-		log.Printf("ERROR: Failed to decrypt TOTP secret for user %s: %v", user.ID, err)
+		phxlog.L.Error("Failed to decrypt TOTP secret", zap.String("userID", user.ID.String()), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process TOTP secret"})
 		return
 	}

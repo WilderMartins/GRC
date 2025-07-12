@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"phoenixgrc/backend/pkg/config" // Para acessar config.Cfg
+	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -26,8 +27,8 @@ func ListGlobalSocialIdentityProvidersHandler(c *gin.Context) {
 	appRootURL := config.Cfg.AppRootURL
 	if appRootURL == "" {
 		appRootURL = "http://localhost:8080" // Fallback para desenvolvimento se não configurado via .env
-		// Em produção, APP_ROOT_URL deve ser obrigatório e configurado corretamente.
-		log.Printf("AVISO: APP_ROOT_URL não está configurado. As URLs de login social podem usar um fallback inseguro: %s", appRootURL)
+		phxlog.L.Warn("APP_ROOT_URL is not configured. Social login URLs may use an insecure fallback.",
+			zap.String("fallback_url", appRootURL))
 	}
 	// Remover quaisquer barras extras do final para evitar // no path
 	appRootURL = strings.TrimSuffix(appRootURL, "/")
