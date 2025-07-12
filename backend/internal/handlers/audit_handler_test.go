@@ -541,71 +541,73 @@ func TestCreateOrUpdateAssessmentHandler_WithC2M2Fields(t *testing.T) {
 		Score:             pointyInt(60),
 		AssessmentDate:    "2024-03-15",
 		Comments:          pointyStr("Main assessment comments."),
-		C2M2MaturityLevel: &c2m2Level,
+		// C2M2MaturityLevel é calculado, então não enviamos mais
 		C2M2AssessmentDate: &c2m2DateStr,
 		C2M2Comments:      &c2m2Comments,
+		C2M2PracticeEvaluations: map[string]string{ // Enviar avaliações de práticas
+			practice1_mil1.ID.String(): models.PracticeStatusFullyImplemented,
+			practice2_mil1.ID.String(): models.PracticeStatusFullyImplemented,
+			practice1_mil2.ID.String(): models.PracticeStatusPartiallyImplemented,
+		},
 	}
 	jsonData, _ := json.Marshal(assessmentDataPayload)
 	_ = writer.WriteField("data", string(jsonData))
-	// Nenhum arquivo "evidence_file" neste teste
 	writer.Close()
 
+	// --- Mock DB ---
+
+	// 1. Upsert do Assessment principal
 	sqlMock.ExpectBegin()
-	// Regex adaptado para incluir as novas colunas C2M2 no INSERT e no DO UPDATE SET
-	// A ordem exata das colunas no GORM pode variar, então o regex precisa ser flexível ou
-	// você pode precisar logar a query real do GORM para ajustar.
-	// Este regex assume que as novas colunas são adicionadas ao final da lista de colunas do INSERT
-	// e também no DO UPDATE SET.
-	// Simplificando a query para focar nos campos que queremos verificar o valor.
-	// GORM pode gerar nomes de coluna entre aspas.
-
-	// Upsert Query Mocking:
-	// A query exata do GORM pode ser complexa de adivinhar.
-	// O importante é que os valores corretos sejam passados e a cláusula OnConflict esteja correta.
-	// Para o RETURNING "id", o sqlmock espera ExpectQuery.
-	// A cláusula SET precisa incluir as novas colunas.
-	// A ordem dos $1, $2, etc. deve corresponder à ordem no VALUES e depois os EXCLUDED.
-	// No GORM, a struct inteira é passada para Create, então todos os campos são candidatos.
-
-	// Vamos assumir que o GORM inclui todos os campos não nulos no payload no INSERT
-	// e todos os campos listados em AssignmentColumns no UPDATE.
-	// A lista de AssignmentColumns no handler é:
-	// "status", "evidence_url", "score", "assessment_date", "comments",
-	// "c2m2_maturity_level", "c2m2_assessment_date", "c2m2_comments", "updated_at"
-
-	parsedMainDate, _ := time.Parse("2006-01-02", "2024-03-15")
-	parsedC2M2Date, _ := time.Parse("2006-01-02", "2024-03-10")
-
-	// Mock para a query de upsert
-	// A query exata pode variar, mas o importante são os argumentos e a lógica.
-	// Se o RETURNING "id" for usado, é uma Query. Senão, é Exec. GORM usa RETURNING.
-	sqlMock.ExpectQuery(regexp.QuoteMeta(
-		`INSERT INTO "audit_assessments" ("id","organization_id","audit_control_id","status","evidence_url","score","assessment_date","comments","c2m2_maturity_level","c2m2_assessment_date","c2m2_comments","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT ("organization_id","audit_control_id") DO UPDATE SET "status"=EXCLUDED."status","evidence_url"=EXCLUDED."evidence_url","score"=EXCLUDED."score","assessment_date"=EXCLUDED."assessment_date","comments"=EXCLUDED."comments","c2m2_maturity_level"=EXCLUDED."c2m2_maturity_level","c2m2_assessment_date"=EXCLUDED."c2m2_assessment_date","c2m2_comments"=EXCLUDED."c2m2_comments","updated_at"=EXCLUDED."updated_at" RETURNING "id"`)).
-		WithArgs(
-			sqlmock.AnyArg(), // id
-			testOrgID,        // organization_id
-			controlID,        // audit_control_id
-			assessmentDataPayload.Status,
-			"", // evidence_url (vazio pois não houve upload nem URL no payload)
-			*assessmentDataPayload.Score,
-			parsedMainDate,
-			*assessmentDataPayload.Comments,
-			*assessmentDataPayload.C2M2MaturityLevel,
-			parsedC2M2Date,
-			*assessmentDataPayload.C2M2Comments,
-			AnyTime{}, // created_at
-			AnyTime{}, // updated_at
-		).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+	// O upsert inicial não incluirá C2M2MaturityLevel se não estiver no payload, ou será nulo.
+	// A lógica do handler agora o calcula depois.
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "audit_assessments"`)).
+		WithArgs(sqlmock.AnyArg(), testOrgID, controlID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 	sqlMock.ExpectCommit()
 
-	// Mock para a query de re-fetch
+	// 2. Re-fetch do Assessment para obter o ID
 	fetchedAssessmentID := uuid.New()
-	rows := sqlmock.NewRows([]string{"id", "organization_id", "audit_control_id", "status", "score", "assessment_date", "comments", "c2m2_maturity_level", "c2m2_assessment_date", "c2m2_comments"}).
-		AddRow(fetchedAssessmentID, testOrgID, controlID, assessmentDataPayload.Status, *assessmentDataPayload.Score, parsedMainDate, *assessmentDataPayload.Comments, *assessmentDataPayload.C2M2MaturityLevel, parsedC2M2Date, *assessmentDataPayload.C2M2Comments)
-	sqlMock.ExpectQuery(regexp.QuoteMeta(
-		`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id = $2 ORDER BY "audit_assessments"."id" LIMIT 1`)).
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id = $2`)).
 		WithArgs(testOrgID, controlID).
-		WillReturnRows(rows)
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(fetchedAssessmentID))
+
+	// 3. Upsert das PracticeEvaluations
+	sqlMock.ExpectBegin()
+	// sqlmock não lida bem com múltiplos inserts em uma única query (Create(&evalsToUpsert)).
+	// GORM pode fazer isso com uma query longa ou em um loop. Vamos mockar como um loop para ser seguro.
+	// Ou, se GORM usar um INSERT ... VALUES (...), (...), (...), podemos mockar isso.
+	// Vamos assumir uma query de upsert em lote para ser mais otimista.
+	sqlMock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "c2m2_practice_evaluations"`)).
+		WillReturnResult(sqlmock.NewResult(3, 3)) // 3 linhas afetadas
+	sqlMock.ExpectCommit()
+
+	// 4. Lógica de Cálculo de MIL (chamada dentro do handler)
+	// 4a. Buscar todas as práticas C2M2
+	practiceRows := sqlmock.NewRows([]string{"id", "code", "target_mil"}).
+		AddRow(practice1_mil1.ID, "RM.1.1", 1).
+		AddRow(practice2_mil1.ID, "SA.1.1", 1).
+		AddRow(practice1_mil2.ID, "RM.2.1", 2)
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "c2m2_practices"`)).WillReturnRows(practiceRows)
+	// 4b. Buscar as avaliações de práticas para este assessment
+	evalRows := sqlmock.NewRows([]string{"practice_id", "status"}).
+		AddRow(practice1_mil1.ID, models.PracticeStatusFullyImplemented).
+		AddRow(practice2_mil1.ID, models.PracticeStatusFullyImplemented).
+		AddRow(practice1_mil2.ID, models.PracticeStatusPartiallyImplemented)
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "c2m2_practice_evaluations" WHERE audit_assessment_id = $1`)).
+		WithArgs(fetchedAssessmentID).WillReturnRows(evalRows)
+	// 4c. Atualizar o C2M2MaturityLevel no assessment
+	expectedCalculatedMIL := 1
+	sqlMock.ExpectBegin()
+	sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "audit_assessments" SET "c2m2_maturity_level"=$1,"updated_at"=$2 WHERE id = $3`)).
+		WithArgs(expectedCalculatedMIL, sqlmock.AnyArg(), fetchedAssessmentID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	sqlMock.ExpectCommit()
+
+	// 5. Re-fetch final para a resposta
+	finalRows := sqlmock.NewRows([]string{"id", "c2m2_maturity_level"}).AddRow(fetchedAssessmentID, expectedCalculatedMIL)
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE "audit_assessments"."id" = $1`)).
+		WithArgs(fetchedAssessmentID).WillReturnRows(finalRows)
+
 
 	req, _ := http.NewRequest(http.MethodPost, "/assessments", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())

@@ -247,6 +247,12 @@ func startServer() {
 			auditRoutes.GET("/organizations/:orgId/frameworks/:frameworkId/c2m2-maturity-summary", handlers.GetC2M2MaturitySummaryHandler) // Novo endpoint C2M2
 		}
 
+		c2m2Routes := apiV1.Group("/c2m2")
+		{
+			c2m2Routes.GET("/domains", handlers.ListC2M2DomainsHandler)
+			c2m2Routes.GET("/domains/:domainId/practices", handlers.ListC2M2PracticesByDomainHandler)
+		}
+
 		// MFA Routes (operam no usuário autenticado - /me)
 		mfaRoutes := apiV1.Group("/users/me/2fa")
 		{

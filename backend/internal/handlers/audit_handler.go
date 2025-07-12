@@ -20,6 +20,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause" // Para Upsert
+	"phoenixgrc/backend/internal/c2m2logic" // Importar a nova lógica de cálculo
 )
 
 // --- Framework and Control Handlers ---
@@ -142,9 +143,12 @@ type AssessmentPayload struct {
 	Comments       *string                   `json:"comments,omitempty"`                               // Comentários da avaliação principal
 
 	// Campos C2M2
-	C2M2MaturityLevel *int    `json:"c2m2_maturity_level,omitempty" binding:"omitempty,min=0,max=3"` // 0-3
+	C2M2MaturityLevel *int    `json:"c2m2_maturity_level,omitempty" binding:"omitempty,min=0,max=3"` // 0-3 // Este campo será calculado pelo backend, mas pode ser mantido para override manual
 	C2M2AssessmentDate *string `json:"c2m2_assessment_date,omitempty" binding:"omitempty,datetime=2006-01-02"` // YYYY-MM-DD
 	C2M2Comments      *string `json:"c2m2_comments,omitempty"`
+
+	// Novo campo para receber as avaliações detalhadas das práticas C2M2
+	C2M2PracticeEvaluations map[string]string `json:"c2m2_practice_evaluations,omitempty"` // map[practiceID] -> status
 }
 
 const (
@@ -409,6 +413,70 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve created/updated assessment: " + err.Error()})
         return
 	}
+
+	// Processar avaliações de práticas C2M2, se houver
+	if payload.C2M2PracticeEvaluations != nil && len(payload.C2M2PracticeEvaluations) > 0 {
+		var evalsToUpsert []models.C2M2PracticeEvaluation
+		for practiceIDStr, status := range payload.C2M2PracticeEvaluations {
+			practiceID, errParse := uuid.Parse(practiceIDStr)
+			if errParse != nil {
+				// Poderia coletar todos os erros e retornar, mas por agora vamos falhar no primeiro
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid practice ID format in c2m2_practice_evaluations: %s", practiceIDStr)})
+				return
+			}
+			// Validar status
+			validStatuses := map[string]bool{
+				models.PracticeStatusNotImplemented:      true,
+				models.PracticeStatusPartiallyImplemented: true,
+				models.PracticeStatusFullyImplemented:    true,
+			}
+			if !validStatuses[status] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid status '%s' for practice ID %s", status, practiceIDStr)})
+				return
+			}
+
+			eval := models.C2M2PracticeEvaluation{
+				AuditAssessmentID: resultAssessment.ID, // Associar com o assessment principal
+				PracticeID:        practiceID,
+				Status:            status,
+			}
+			evalsToUpsert = append(evalsToUpsert, eval)
+		}
+
+		if len(evalsToUpsert) > 0 {
+			// Upsert das avaliações de práticas
+			tx := db.Begin()
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "audit_assessment_id"}, {Name: "practice_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"status", "updated_at"}),
+			}).Create(&evalsToUpsert).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save C2M2 practice evaluations: " + err.Error()})
+				return
+			}
+			tx.Commit()
+		}
+	}
+
+	// Calcular e atualizar o nível de maturidade C2M2 com base nas práticas salvas.
+	// O `C2M2MaturityLevel` enviado no payload é ignorado em favor do cálculo.
+	calculatedMIL, errCalc := c2m2logic.CalculateAndUpdateMaturityLevel(resultAssessment.ID, db)
+	if errCalc != nil {
+		// Logar o erro, mas não falhar a requisição, pois os dados principais foram salvos.
+		phxlog.L.Error("Failed to calculate and update C2M2 maturity level after saving evaluations",
+			zap.String("assessmentID", resultAssessment.ID.String()),
+			zap.Error(errCalc))
+	} else {
+		// Atualizar o objeto de resposta com o nível recém-calculado.
+		resultAssessment.C2M2MaturityLevel = &calculatedMIL
+	}
+
+	// Re-fetch final para incluir as practice evaluations se foram criadas/atualizadas
+	if err := db.Preload("C2M2PracticeEvaluations").First(&resultAssessment, resultAssessment.ID).Error; err != nil {
+		phxlog.L.Warn("Failed to re-fetch assessment with practice evaluations", zap.String("assessmentID", resultAssessment.ID.String()), zap.Error(err))
+		// Não falhar a requisição por isso, retornar o que temos.
+	}
+
 
 	c.JSON(http.StatusOK, resultAssessment) // OK for both create and update via upsert
 }

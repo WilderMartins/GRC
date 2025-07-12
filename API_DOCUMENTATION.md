@@ -837,10 +837,14 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             "score": "integer (opcional, 0-100)",
             "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)",
             "comments": "string (opcional, comentários da avaliação principal)",
-            // Campos C2M2 (opcionais)
-            "c2m2_maturity_level": "integer (opcional, 0-3)",
+            // Campos C2M2 (opcionais). O backend calculará o c2m2_maturity_level com base nas avaliações de práticas.
             "c2m2_assessment_date": "string (opcional, YYYY-MM-DD)",
-            "c2m2_comments": "string (opcional, comentários da avaliação C2M2)"
+            "c2m2_comments": "string (opcional, comentários da avaliação C2M2)",
+            "c2m2_practice_evaluations": {
+                "uuid-da-pratica-1": "fully_implemented",
+                "uuid-da-pratica-2": "partially_implemented",
+                "uuid-da-pratica-3": "not_implemented"
+            }
             }
             ```
         *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, o `objectName` do arquivo armazenado será salvo no campo `EvidenceURL` do modelo `AuditAssessment`.
@@ -941,7 +945,52 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
 
 ---
 
-### 8. Autenticação de Múltiplos Fatores (MFA) (`/api/v1/users/me/2fa`)
+### 8. Estrutura C2M2 (`/api/v1/c2m2`)
+
+Endpoints para obter a estrutura de domínios e práticas do C2M2, úteis para construir formulários de avaliação no frontend.
+
+*   **`GET /api/v1/c2m2/domains`**
+    *   **Descrição:** Lista todos os domínios C2M2 pré-carregados no sistema.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `models.C2M2Domain`.
+            ```json
+            [
+                {
+                    "id": "uuid-domain-1",
+                    "name": "Risk Management",
+                    "code": "RM",
+                    "created_at": "timestamp",
+                    "updated_at": "timestamp"
+                }
+            ]
+            ```
+*   **`GET /api/v1/c2m2/domains/:domainId/practices`**
+    *   **Descrição:** Lista todas as práticas C2M2 para um domínio específico.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Parâmetros de Path:** `domainId` (UUID do domínio C2M2).
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `models.C2M2Practice`.
+            ```json
+            [
+                {
+                    "id": "uuid-practice-1",
+                    "domain_id": "uuid-domain-1",
+                    "code": "RM.1.1",
+                    "description": "Establish and maintain a risk management strategy...",
+                    "target_mil": 1,
+                    "created_at": "timestamp",
+                    "updated_at": "timestamp"
+                }
+            ]
+            ```
+        *   `400 Bad Request`: `domainId` inválido.
+        *   `404 Not Found`: Domínio não encontrado.
+        *   `500 Internal Server Error`.
+
+---
+
+### 9. Autenticação de Múltiplos Fatores (MFA) (`/api/v1/users/me/2fa`)
 
 Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
 

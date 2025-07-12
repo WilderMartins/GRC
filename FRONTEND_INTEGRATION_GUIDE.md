@@ -581,14 +581,17 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
             "score": "integer (0-100, opcional)",
             "assessment_date": "string (YYYY-MM-DD, opcional, default: hoje)",
             "comments": "string (opcional)",
-            // Campos C2M2 (opcionais)
-            "c2m2_maturity_level": "integer (0-3, opcional)",
+            // Campos para avaliação C2M2
             "c2m2_assessment_date": "string (YYYY-MM-DD, opcional)",
-            "c2m2_comments": "string (opcional)"
+            "c2m2_comments": "string (opcional)",
+            "c2m2_practice_evaluations": { // Obrigatório para cálculo de maturidade
+                "uuid-da-pratica-c2m2-1": "fully_implemented",
+                "uuid-da-pratica-c2m2-2": "partially_implemented"
+            }
         }
         ```
     *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência. Se fornecido, seu `objectName` será armazenado em `EvidenceURL`.
-*   **Resposta de Sucesso (200 OK):** Objeto `AuditAssessment` criado/atualizado.
+*   **Resposta de Sucesso (200 OK):** Objeto `AuditAssessment` criado/atualizado, com o `c2m2_maturity_level` calculado pelo backend e a lista de `c2m2_practice_evaluations` salvas.
 *   **Notas Frontend:**
     *   Permitir upload de arquivo ou input de URL externa para evidência.
     *   Lembre-se que `EvidenceURL` na resposta conterá o `objectName` se um arquivo foi carregado.
@@ -818,6 +821,22 @@ Estes endpoints fornecem funcionalidades de apoio para a UI.
 *   **Notas Frontend:**
     *   Sempre que um campo de modelo (ex: `AuditAssessment.EvidenceURL`) contiver um `objectName` (e não uma URL `http://` ou `https://` completa), o frontend deve usar este endpoint para obter uma URL temporária para exibir ou permitir o download do arquivo.
     *   Se `EvidenceURL` já for uma URL externa completa (ex: fornecida manualmente pelo usuário), ela pode ser usada diretamente.
+
+### 6.3. Estrutura C2M2
+
+Para construir os formulários de avaliação de maturidade C2M2, o frontend precisa buscar a lista de domínios e práticas.
+
+*   **Listar Domínios C2M2:** `GET /api/v1/c2m2/domains`
+    *   **Descrição:** Retorna todos os domínios C2M2 (ex: Risk Management, Threat and Vulnerability Management).
+    *   **Resposta (200 OK):** Array de `C2M2Domain` (`{id, name, code, ...}`).
+*   **Listar Práticas de um Domínio:** `GET /api/v1/c2m2/domains/{domainId}/practices`
+    *   **Descrição:** Retorna todas as práticas para um domínio C2M2 específico.
+    *   **Resposta (200 OK):** Array de `C2M2Practice` (`{id, domain_id, code, description, target_mil, ...}`).
+*   **Notas Frontend:**
+    *   A UI deve primeiro permitir que o usuário selecione um domínio (buscado de `/c2m2/domains`).
+    *   Em seguida, buscar as práticas para esse domínio (`/c2m2/domains/{domainId}/practices`).
+    *   Para cada prática, apresentar um seletor com as opções de status: "not_implemented", "partially_implemented", "fully_implemented".
+    *   Coletar as respostas (mapa de `practiceID` -> `status`) para enviar no payload de `POST /api/v1/audit/assessments`.
 
 ## 7. Tratamento de Erros da API
 
