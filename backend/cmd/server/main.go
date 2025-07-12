@@ -27,14 +27,63 @@ import (
 	"github.com/gin-gonic/gin"
 	// "golang.org/x/crypto/bcrypt" // Moved to setup package
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o novo pacote de logger
+	"crypto/rand"
+	"encoding/hex"
 	"github.com/prometheus/client_golang/prometheus/promhttp" // Para expor métricas
 )
 
-// runSetup() function is now removed from here and exists in backend/cmd/setup/main.go
+// checkAndGenerateKeys verifica as chaves de segurança essenciais.
+// Se elas estiverem ausentes ou com os valores padrão, gera novas chaves
+// e encerra a aplicação com instruções para o usuário.
+func checkAndGenerateKeys() {
+	log := phxlog.L.Named("KeyCheck")
+	jwtKey := os.Getenv("JWT_SECRET_KEY")
+	encryptionKey := os.Getenv("ENCRYPTION_KEY_HEX")
+
+	jwtDefault := "mudar_esta_chave_em_producao_com_um_valor_aleatorio_longo"
+	encryptionKeyDefault := "mudar_para_64_caracteres_hexadecimais_em_producao"
+
+	if jwtKey == "" || jwtKey == jwtDefault || encryptionKey == "" || encryptionKey == encryptionKeyDefault {
+		log.Warn("Chaves de segurança ausentes ou padrão detectadas. Gerando novas chaves.")
+
+		// Gerar nova JWT_SECRET_KEY (64 bytes, codificado em base64)
+		jwtBytes := make([]byte, 64)
+		if _, err := rand.Read(jwtBytes); err != nil {
+			log.Fatal("Falha ao gerar a chave JWT.", zap.Error(err))
+		}
+		newJwtKey := hex.EncodeToString(jwtBytes) // Usando hex para simplicidade de string
+
+		// Gerar nova ENCRYPTION_KEY_HEX (32 bytes, 64 caracteres hex)
+		encBytes := make([]byte, 32)
+		if _, err := rand.Read(encBytes); err != nil {
+			log.Fatal("Falha ao gerar a chave de criptografia.", zap.Error(err))
+		}
+		newEncKey := hex.EncodeToString(encBytes)
+
+		// Exibe as novas chaves e encerra.
+		// Não tentamos escrever no .env para evitar problemas de permissão e
+		// para garantir que o usuário esteja ciente da alteração.
+		fmt.Println("------------------------------------------------------------------")
+		fmt.Println("ATENÇÃO: As chaves de segurança não foram configuradas.")
+		fmt.Println("Por favor, adicione as seguintes linhas ao seu arquivo .env:")
+		fmt.Println("------------------------------------------------------------------")
+		fmt.Printf("JWT_SECRET_KEY=%s\n", newJwtKey)
+		fmt.Printf("ENCRYPTION_KEY_HEX=%s\n", newEncKey)
+		fmt.Println("------------------------------------------------------------------")
+		fmt.Println("A aplicação será encerrada. Após atualizar o arquivo .env, inicie-a novamente.")
+
+		// Encerra a aplicação para forçar o usuário a atualizar as chaves.
+		os.Exit(1)
+	}
+}
 
 func startServer() {
 	// Inicializar o logger global zap primeiro
 	// Usar config.Cfg.Environment (carregado de APP_ENV) e LOG_LEVEL.
+	phxlog.Init(os.Getenv("LOG_LEVEL"), os.Getenv("APP_ENV")) // Simplificado
+
+	// Verificar chaves de segurança ANTES de qualquer outra coisa
+	checkAndGenerateKeys()
 	// A função Init do pacote log já lê LOG_LEVEL e APP_ENV em seu próprio init(),
 	// mas chamá-la aqui explicitamente com os valores da config garante que
 	// a configuração carregada por LoadConfig() seja usada.
