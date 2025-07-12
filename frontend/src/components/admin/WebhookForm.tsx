@@ -31,7 +31,6 @@ interface WebhookFormProps {
   organizationId: string; // Necessário para construir a URL da API
   initialData?: WebhookConfigForForm;
   isEditing?: boolean;
-  onClose: () => void;
   onSubmitSuccess: (webhookData: any) => void;
 }
 
@@ -39,7 +38,6 @@ const WebhookForm: React.FC<WebhookFormProps> = ({
   organizationId,
   initialData,
   isEditing = false,
-  onClose,
   onSubmitSuccess,
 }) => {
   const [formData, setFormData] = useState<WebhookFormData>({
@@ -108,12 +106,12 @@ const WebhookForm: React.FC<WebhookFormProps> = ({
     try {
       let response;
       if (isEditing && initialData?.id) {
-        response = await apiClient.put(`/organizations/${organizationId}/webhooks/${initialData.id}`, payload);
+        response = await apiClient.put(`/api/v1/organizations/${organizationId}/webhooks/${initialData.id}`, payload);
       } else {
-        response = await apiClient.post(`/organizations/${organizationId}/webhooks`, payload);
+        response = await apiClient.post(`/api/v1/organizations/${organizationId}/webhooks`, payload);
       }
       onSubmitSuccess(response.data);
-      onClose();
+      // A prop onClose foi removida para adequar o uso em página inteira
     } catch (err: any) {
       console.error("Erro ao salvar webhook:", err);
       setError(err.response?.data?.error || err.message || "Falha ao salvar webhook.");
@@ -171,13 +169,10 @@ const WebhookForm: React.FC<WebhookFormProps> = ({
         <label htmlFor="is_active_webhook" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">Ativo</label>
       </div>
 
-      <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
-        <button type="button" onClick={onClose} disabled={isLoading}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white dark:bg-gray-600 dark:text-gray-200 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors">
-          Cancelar
-        </button>
+      <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
+        {/* O botão de cancelar foi removido. O usuário pode usar o link "Voltar para a lista" no layout da página. */}
         <button type="submit" disabled={isLoading || formData.event_types.length === 0}
-                className="px-4 py-2 text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:ring-brand-primary rounded-md shadow-sm disabled:opacity-50 flex items-center transition-colors">
+                className="px-4 py-2 text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 rounded-md shadow-sm disabled:opacity-50 flex items-center transition-colors">
           {isLoading && (
             <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>

@@ -44,7 +44,7 @@ const WebhooksPageContent = (props: InferGetStaticPropsType<typeof getStaticProp
     try {
       const params = { page: currentPage, page_size: pageSize };
       const response = await apiClient.get<PaginatedResponse<WebhookConfiguration>>(
-        `/organizations/${currentUser.organization_id}/webhooks`,
+        `/api/v1/organizations/${currentUser.organization_id}/webhooks`,
         { params }
       );
       // A API retorna event_types como string JSON, precisamos parsear ou tratar no componente de exibição
@@ -77,7 +77,7 @@ const WebhooksPageContent = (props: InferGetStaticPropsType<typeof getStaticProp
     if (!currentUser?.organization_id) return;
     if (window.confirm(t('list.confirm_delete_message', { webhookName }))) {
       try {
-        await apiClient.delete(`/organizations/${currentUser.organization_id}/webhooks/${webhookId}`);
+        await apiClient.delete(`/api/v1/organizations/${currentUser.organization_id}/webhooks/${webhookId}`);
         notify.success(t('list.delete_success_message', { webhookName }));
         fetchWebhooks(); // Re-fetch
       } catch (err: any) {

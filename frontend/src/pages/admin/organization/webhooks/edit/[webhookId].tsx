@@ -38,7 +38,7 @@ const EditWebhookPageContent = (props: InferGetServerSidePropsType<typeof getSer
     setError(null);
     try {
       const response = await apiClient.get<WebhookConfiguration>(
-        `/organizations/${currentUser.organization_id}/webhooks/${currentWebhookId}`
+        `/api/v1/organizations/${currentUser.organization_id}/webhooks/${currentWebhookId}`
       );
       setInitialData(response.data);
     } catch (err: any) {

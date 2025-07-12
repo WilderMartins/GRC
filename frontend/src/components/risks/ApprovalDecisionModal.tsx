@@ -37,7 +37,7 @@ const ApprovalDecisionModal: React.FC<ApprovalDecisionModalProps> = ({
     setFormError(null);
 
     try {
-      await apiClient.post(`/risks/${riskId}/approval/${approvalId}/decide`, {
+      await apiClient.post(`/api/v1/risks/${riskId}/approval/${approvalId}/decide`, {
         decision,
         comments,
       });

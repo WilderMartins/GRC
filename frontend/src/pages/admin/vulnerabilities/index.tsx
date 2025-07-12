@@ -62,7 +62,7 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
       if (filterStatus) params.status = filterStatus;
       if (debouncedSearchAsset) params.asset_affected_like = debouncedSearchAsset;
 
-      const response = await apiClient.get<PaginatedResponse<Vulnerability>>('/vulnerabilities', { params });
+      const response = await apiClient.get<PaginatedResponse<Vulnerability>>('/api/v1/vulnerabilities', { params });
       setVulnerabilities(response.data.items || []);
       setTotalItems(response.data.total_items);
       setTotalPages(response.data.total_pages);
@@ -116,7 +116,7 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
     if (window.confirm(t('list.confirm_delete_message', { vulnTitle }))) {
       setIsLoading(true);
       try {
-        await apiClient.delete(`/vulnerabilities/${vulnId}`);
+        await apiClient.delete(`/api/v1/vulnerabilities/${vulnId}`);
         notify.success(t('list.delete_success_message', { vulnTitle }));
         if (vulnerabilities.length === 1 && currentPage > 1) {
             setCurrentPage(currentPage - 1);
