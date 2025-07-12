@@ -53,7 +53,7 @@ const OrganizationUsersPageContent = (props: InferGetStaticPropsType<typeof getS
     try {
       const params = { page: currentPage, page_size: pageSize };
       const response = await apiClient.get<PaginatedResponse<User>>( // Alterado para User
-        `/organizations/${currentUser.organization_id}/users`,
+        `/api/v1/organizations/${currentUser.organization_id}/users`,
         { params }
       );
       setUsers(response.data.items || []);
@@ -91,7 +91,7 @@ const OrganizationUsersPageContent = (props: InferGetStaticPropsType<typeof getS
     }
     // Adicionar um estado de loading específico para esta ação se desejado
     try {
-      await apiClient.put(`/organizations/${currentUser.organization_id}/users/${userId}/status`, { is_active: isActive });
+      await apiClient.put(`/api/v1/organizations/${currentUser.organization_id}/users/${userId}/status`, { is_active: isActive });
       notify.success(isActive ? t('users_list.success_user_activated') : t('users_list.success_user_deactivated'));
       fetchUsers();
     } catch (err: any) {

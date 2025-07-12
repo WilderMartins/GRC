@@ -9,46 +9,60 @@ interface DatabaseStepProps {
 const DatabaseStep: React.FC<DatabaseStepProps> = ({ onVerifyAndContinue, errorMessage }) => {
   const { t } = useTranslation('setupWizard');
 
-  const envVars = [
-    { name: 'POSTGRES_HOST', example: 'db (ou localhost)', description: t('steps.db_config.var_host_desc', 'O endereço do seu servidor PostgreSQL.') },
-    { name: 'POSTGRES_PORT', example: '5432', description: t('steps.db_config.var_port_desc', 'A porta do seu servidor PostgreSQL.') },
-    { name: 'POSTGRES_USER', example: 'admin', description: t('steps.db_config.var_user_desc', 'O nome de usuário para conectar ao banco.') },
-    { name: 'POSTGRES_PASSWORD', example: 'password123', description: t('steps.db_config.var_password_desc', 'A senha para o usuário do banco.') },
-    { name: 'POSTGRES_DB', example: 'phoenix_grc_dev', description: t('steps.db_config.var_dbname_desc', 'O nome do banco de dados a ser usado/criado.') },
-    { name: 'POSTGRES_SSLMODE', example: 'disable (ou require, etc.)', description: t('steps.db_config.var_sslmode_desc', 'Modo SSL para a conexão.') },
+  const requiredEnvVars = [
+    { section: t('steps.db_config.section_db'),
+      vars: [
+        { name: 'POSTGRES_HOST', example: 'db', description: t('steps.db_config.var_host_desc') },
+        { name: 'POSTGRES_USER', example: 'admin', description: t('steps.db_config.var_user_desc') },
+        { name: 'POSTGRES_PASSWORD', example: 'password123', description: t('steps.db_config.var_password_desc') },
+        { name: 'POSTGRES_DB', example: 'phoenix_grc_dev', description: t('steps.db_config.var_dbname_desc') },
+      ]
+    },
+    { section: t('steps.db_config.section_security'),
+      vars: [
+        { name: 'JWT_SECRET_KEY', example: t('steps.db_config.var_jwt_example'), description: t('steps.db_config.var_jwt_desc') },
+        { name: 'ENCRYPTION_KEY_HEX', example: t('steps.db_config.var_enc_key_example'), description: t('steps.db_config.var_enc_key_desc') },
+      ]
+    },
+     { section: t('steps.db_config.section_urls'),
+      vars: [
+        { name: 'APP_ROOT_URL', example: 'http://localhost:80', description: t('steps.db_config.var_app_root_desc') },
+        { name: 'FRONTEND_BASE_URL', example: 'http://localhost:3000', description: t('steps.db_config.var_frontend_url_desc') },
+      ]
+    }
   ];
 
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-2xl font-bold text-gray-900 dark:text-white text-center">
-          {t('steps.db_config.title', 'Configuração do Banco de Dados')}
+          {t('steps.db_config.title', 'Configuração do Ambiente')}
         </h3>
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
-          {t('steps.db_config.intro_paragraph', 'O Phoenix GRC requer um banco de dados PostgreSQL para armazenar seus dados. Por favor, configure as variáveis de ambiente no seu arquivo `.env` na raiz do projeto.')}
+          {t('steps.db_config.intro_paragraph', 'O Phoenix GRC requer algumas configurações essenciais para funcionar. Por favor, configure as variáveis de ambiente no seu arquivo `.env` na raiz do projeto.')}
         </p>
-        {errorMessage && (
-          <p className="mt-4 text-sm text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/30 p-3 rounded-md">
-            {t('steps.db_config.previous_error_message', 'Tentativa anterior falhou:')} {errorMessage}
-          </p>
-        )}
       </div>
 
-      <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg space-y-3">
+      <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg space-y-4">
         <p className="text-sm text-gray-700 dark:text-gray-200">
           {t('steps.db_config.env_instructions_1', 'Se o arquivo `.env` não existir, copie `.env.example` para `.env` na raiz do seu projeto.')}
         </p>
-        <p className="text-sm font-semibold text-gray-800 dark:text-white">
-          {t('steps.db_config.env_instructions_2', 'Certifique-se de que as seguintes variáveis estão corretamente configuradas:')}
-        </p>
-        <ul className="list-none space-y-2 text-sm">
-          {envVars.map(v => (
-            <li key={v.name} className="p-2 bg-white dark:bg-gray-800 rounded shadow-sm">
-              <code className="font-mono text-brand-primary dark:text-brand-primary">{v.name}</code>:
-              <span className="text-gray-600 dark:text-gray-300"> {v.description} (Ex: <code>{v.example}</code>)</span>
-            </li>
-          ))}
-        </ul>
+
+        {requiredEnvVars.map(section => (
+            <div key={section.section}>
+                 <p className="text-sm font-semibold text-gray-800 dark:text-white">
+                    {section.section}:
+                </p>
+                <ul className="list-none space-y-2 text-sm mt-2">
+                {section.vars.map(v => (
+                    <li key={v.name} className="p-2 bg-white dark:bg-gray-800 rounded shadow-sm">
+                    <code className="font-mono text-brand-primary dark:text-brand-primary">{v.name}</code>:
+                    <span className="text-gray-600 dark:text-gray-300"> {v.description} (Ex: <code>{v.example}</code>)</span>
+                    </li>
+                ))}
+                </ul>
+            </div>
+        ))}
       </div>
 
       <div className="bg-yellow-50 dark:bg-yellow-700/30 border-l-4 border-yellow-400 dark:border-yellow-500 p-4 rounded-md">

@@ -100,7 +100,7 @@ const OrganizationBrandingPageContent = (props: InferGetStaticPropsType<typeof g
     }
 
     try {
-      await apiClient.put(`/organizations/${user.organization_id}/branding`, submissionData, {
+      await apiClient.put(`/api/v1/organizations/${user.organization_id}/branding`, submissionData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       notify.success(t('branding.success_updated'));

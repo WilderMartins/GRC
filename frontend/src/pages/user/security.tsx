@@ -54,7 +54,7 @@ const UserSecurityPageContent = (props: InferGetStaticPropsType<typeof getStatic
     setIsSubmittingInitial(true);
     setSetupError(null);
     try {
-      const response = await apiClient.post('/users/me/2fa/totp/setup');
+      const response = await apiClient.post('/api/v1/users/me/2fa/totp/setup');
       setSetupQrCode(response.data.qr_code);
       setSetupSecret(response.data.secret);
       setIsSettingUpTotp(true);
@@ -75,7 +75,7 @@ const UserSecurityPageContent = (props: InferGetStaticPropsType<typeof getStatic
     setIsVerifying(true);
     setSetupError(null);
     try {
-      await apiClient.post('/users/me/2fa/totp/verify', { token: verificationToken });
+      await apiClient.post('/api/v1/users/me/2fa/totp/verify', { token: verificationToken });
       notify.success(t('setup_totp.success_totp_enabled'));
       await refreshUser(); // Recarregar dados do usuário para obter is_totp_enabled atualizado
       setIsSettingUpTotp(false);
@@ -113,7 +113,7 @@ const UserSecurityPageContent = (props: InferGetStaticPropsType<typeof getStatic
     setIsDisabling(true);
     setDisableError(null);
     try {
-      await apiClient.post('/users/me/2fa/totp/disable', { password: disablePassword });
+      await apiClient.post('/api/v1/users/me/2fa/totp/disable', { password: disablePassword });
       notify.success(t('disable_totp.success_totp_disabled'));
       await refreshUser();
       setShowDisableModal(false);
@@ -138,7 +138,7 @@ const UserSecurityPageContent = (props: InferGetStaticPropsType<typeof getStatic
     setIsLoadingBackupCodes(true);
     setBackupCodesError(null);
     try {
-      const response = await apiClient.post('/users/me/2fa/backup-codes/generate');
+      const response = await apiClient.post('/api/v1/users/me/2fa/backup-codes/generate');
       if (response.data && response.data.backup_codes && response.data.backup_codes.length > 0) {
         setBackupCodes(response.data.backup_codes);
         setShowBackupCodesModal(true);

@@ -6,7 +6,6 @@ import { useTranslation } from 'next-i18next';
 interface AssessmentFormModalProps {
   isOpen: boolean;
   onClose: () => void;
-  organizationId: string;
   control: ControlWithAssessment; // Passar o controle completo, que pode ter a avaliação existente
   // initialData (assessment) é derivado de control.assessment
   onSubmitSuccess: () => void;
@@ -15,7 +14,6 @@ interface AssessmentFormModalProps {
 const AssessmentFormModal: React.FC<AssessmentFormModalProps> = ({
   isOpen,
   onClose,
-  organizationId,
   control,
   onSubmitSuccess,
 }) => {
@@ -33,7 +31,9 @@ const AssessmentFormModal: React.FC<AssessmentFormModalProps> = ({
                        ? control.assessment.assessment_date.split('T')[0]
                        : new Date().toISOString().split('T')[0],
     evidence_url: control.assessment.evidence_url || '',
-    // evidence_file não é passado como initialData, é apenas para novo upload
+    comments: control.assessment.comments || '',
+    c2m2_maturity_level: control.assessment.c2m2_maturity_level ?? '',
+    c2m2_comments: control.assessment.c2m2_comments || '',
   } : undefined;
 
 
@@ -64,7 +64,6 @@ const AssessmentFormModal: React.FC<AssessmentFormModalProps> = ({
         </p>
 
         <AssessmentForm
-          organizationId={organizationId} // Passar organizationId
           controlId={control.id}
           controlDisplayId={control.control_id} // Passar controlDisplayId
           initialData={initialAssessmentData}

@@ -37,7 +37,7 @@ const EditVulnerabilityPageContent = (props: InferGetServerSidePropsType<typeof 
     if (vulnId && typeof vulnId === 'string') {
       setIsLoading(true);
       setError(null);
-      apiClient.get(`/vulnerabilities/${vulnId}`)
+      apiClient.get(`/api/v1/vulnerabilities/${vulnId}`)
         .then(response => {
           setInitialData(response.data);
         })

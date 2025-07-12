@@ -11,6 +11,9 @@ interface AssessmentFormData {
   score?: number | string;
   assessment_date: string;
   evidence_url: string;
+  comments: string;
+  c2m2_maturity_level?: number | string;
+  c2m2_comments: string;
 }
 
 interface AssessmentFormProps {
@@ -38,6 +41,9 @@ const AssessmentForm: React.FC<AssessmentFormProps> = ({
     score: initialData?.score ?? '',
     assessment_date: initialData?.assessment_date || new Date().toISOString().split('T')[0],
     evidence_url: initialData?.evidence_url || '',
+    comments: initialData?.comments || '',
+    c2m2_maturity_level: initialData?.c2m2_maturity_level ?? '',
+    c2m2_comments: initialData?.c2m2_comments || '',
   });
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -92,14 +98,17 @@ const AssessmentForm: React.FC<AssessmentFormProps> = ({
         audit_control_id: formData.audit_control_id,
         status: formData.status,
         assessment_date: formData.assessment_date,
+        comments: formData.comments,
+        c2m2_comments: formData.c2m2_comments,
     };
     if (formData.score !== '') {
         assessmentPayload.score = Number(formData.score);
     }
-    if (formData.evidence_url) {
-        if (!evidenceFile) {
-            assessmentPayload.evidence_url = formData.evidence_url;
-        }
+    if (formData.c2m2_maturity_level !== '') {
+        assessmentPayload.c2m2_maturity_level = Number(formData.c2m2_maturity_level);
+    }
+    if (formData.evidence_url && !evidenceFile) {
+        assessmentPayload.evidence_url = formData.evidence_url;
     }
 
     submissionData.append('data', JSON.stringify(assessmentPayload));
@@ -109,7 +118,7 @@ const AssessmentForm: React.FC<AssessmentFormProps> = ({
     }
 
     try {
-      const response = await apiClient.post('/audit/assessments', submissionData, {
+      const response = await apiClient.post('/api/v1/audit/assessments', submissionData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -176,6 +185,28 @@ const AssessmentForm: React.FC<AssessmentFormProps> = ({
             {t('assessment_form.evidence_url_help_text')}
         </p>
       </div>
+
+      {/* C2M2 Fields */}
+      <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <h4 className="text-md font-semibold text-gray-800 dark:text-white mb-2">{t('assessment_form.c2m2_section_title')}</h4>
+        <div>
+            <label htmlFor="c2m2_maturity_level" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('assessment_form.field_c2m2_level_label')}</label>
+            <select name="c2m2_maturity_level" id="c2m2_maturity_level" value={formData.c2m2_maturity_level} onChange={handleChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2">
+            <option value="">{t('assessment_form.option_select_c2m2_level')}</option>
+            <option value="0">MIL 0</option>
+            <option value="1">MIL 1</option>
+            <option value="2">MIL 2</option>
+            <option value="3">MIL 3</option>
+            </select>
+        </div>
+        <div className="mt-4">
+            <label htmlFor="c2m2_comments" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('assessment_form.field_c2m2_comments_label')}</label>
+            <textarea name="c2m2_comments" id="c2m2_comments" value={formData.c2m2_comments} onChange={handleChange} rows={3}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+        </div>
+      </div>
+
 
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
         <button type="button" onClick={onClose}

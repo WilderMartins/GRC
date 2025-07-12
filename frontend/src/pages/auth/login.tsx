@@ -59,9 +59,13 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
           setIsLoadingSso(true);
           setSsoError(null);
           try {
-            // Ajustar endpoint se for público ou requerer alguma forma de identificação da instância/org
-            const response = await apiClient.get<LoginIdentityProvider[]>('/api/public/auth/identity-providers');
-            setSsoProviders(response.data || []);
+            const response = await apiClient.get<LoginIdentityProvider[]>('/api/public/social-identity-providers');
+            // Transformar a resposta para incluir a login_url construída
+            const transformedProviders = response.data.map(provider => ({
+              ...provider,
+              login_url: `${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/auth/oauth2/${provider.provider_slug}/${provider.id}/login`
+            }));
+            setSsoProviders(transformedProviders || []);
           } catch (err: any) {
             console.error('Error fetching identity providers:', err);
             setSsoError(t('login.error_loading_sso'));
