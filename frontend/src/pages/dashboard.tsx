@@ -24,7 +24,7 @@ export const getStaticProps: GetStaticProps<Props> = async ({ locale }) => ({
 
 const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>) => {
   const { t } = useTranslation(['dashboard', 'common']);
-  const { user, logout } = useAuth();
+  const { user, logout, branding } = useAuth(); // Adicionar branding aqui
   // const notify = useNotifier(); // Mantido se formos adicionar notificações de erro aqui
 
   const [summary, setSummary] = useState<UserDashboardSummary | null>(null);
@@ -37,7 +37,7 @@ const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticPro
       setIsLoadingSummary(true);
       setSummaryError(null);
       try {
-        const response = await apiClient.get<UserDashboardSummary>('/me/dashboard/summary');
+        const response = await apiClient.get<UserDashboardSummary>('/api/v1/me/dashboard/summary');
         setSummary(response.data);
       } catch (err: any) {
         console.error("Erro ao buscar resumo do dashboard do usuário:", err);
@@ -64,10 +64,10 @@ const DashboardPageContent = (props: InferGetStaticPropsType<typeof getStaticPro
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center">
                 {/* Usar imagem do branding se disponível no AuthContext, ou fallback */}
-                { authContext.branding?.logoUrl ? (
+                { branding?.logoUrl ? (
                     <Link href="/dashboard" legacyBehavior>
                         <a className="flex items-center space-x-2">
-                            <img src={authContext.branding.logoUrl} alt={appName} className="h-8 w-auto" />
+                            <img src={branding.logoUrl} alt={appName} className="h-8 w-auto" />
                             {/* <span className="font-bold text-xl text-gray-800 dark:text-white">{appName}</span> */}
                         </a>
                     </Link>

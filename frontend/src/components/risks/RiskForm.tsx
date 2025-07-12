@@ -52,46 +52,67 @@ const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onS
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
 
+import useOrganizationUsersLookup from '@/hooks/useOrganizationUsersLookup'; // Importar o hook
+
+// ... outras importações
+
+const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onSubmitSuccess }) => {
+  const { t } = useTranslation(['risks', 'common']); // Adicionar hook de tradução
+  const router = useRouter();
+  const { user, isLoading: authIsLoading } = useAuth();
+  const notify = useNotifier();
+
+  const [formData, setFormData] = useState<RiskFormData>({
+    title: '',
+    description: '',
+    category: 'tecnologico',
+    impact: '',
+    probability: '',
+    status: 'aberto',
+    owner_id: '',
+    ...(initialData || {}),
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Usar o hook para buscar usuários
+  const { users: organizationUsers, isLoading: isLoadingUsers, error: usersError, fetchUsers: fetchOrganizationUsers } = useOrganizationUsersLookup();
+
   useEffect(() => {
-    const fetchOrganizationUsers = async () => {
-      if (!user || authIsLoading) return;
+    // Buscar usuários quando o componente montar ou o usuário autenticado mudar
+    if (user && !authIsLoading) {
+      fetchOrganizationUsers();
+    }
+  }, [user, authIsLoading, fetchOrganizationUsers]);
 
-      setIsLoadingUsers(true);
-      setUsersError(null);
-      try {
-        const response = await apiClient.get<UserLookup[]>('/users/organization-lookup');
-        setOrganizationUsers(response.data || []);
+  // Lidar com erros ao carregar usuários para o seletor
+  useEffect(() => {
+    if (usersError) {
+      console.error(t('form.error_loading_owners_console'), usersError);
+      notify.error(t('form.error_loading_owners'));
+      // Não necessariamente limpar organizationUsers aqui, o hook pode manter dados antigos se desejado
+    }
+  }, [usersError, notify, t]);
 
-        if (!isEditing && user?.id && !formData.owner_id && response.data?.some(u => u.id === user.id)) {
-            setFormData(prev => ({ ...prev, owner_id: user.id }));
-        } else if (!isEditing && !formData.owner_id && response.data?.length > 0) {
-            // No default owner if logged-in user is not in the list or no specific logic for first user
-        }
-
-      } catch (err: any) {
-        console.error(t('form.error_loading_owners_console'), err); // Log traduzido
-        setUsersError(t('form.error_loading_owners'));
-        setOrganizationUsers([]);
-      } finally {
-        setIsLoadingUsers(false);
-      }
-    };
-
-    fetchOrganizationUsers();
-  }, [user, authIsLoading, isEditing, formData.owner_id, t]); // Adicionado t
-
- useEffect(() => {
+  // Definir owner_id inicial
+  useEffect(() => {
     if (initialData) {
+      // Se initialData existir, usar o owner_id dele ou manter o do estado atual se já tiver.
+      // A desestruturação no useState já cuida de initialData.owner_id.
+      // Este useEffect pode ser simplificado ou focado apenas no default para criação.
       setFormData(prev => ({ ...prev, ...initialData }));
     } else if (!isEditing && user && organizationUsers.length > 0) {
+      // Se estiver criando, e o usuário logado estiver na lista, e owner_id ainda não foi definido
       const loggedUserInList = organizationUsers.find(u => u.id === user.id);
-      if (loggedUserInList && !formData.owner_id) { // Apenas se owner_id não estiver já preenchido
+      if (loggedUserInList && !formData.owner_id) {
         setFormData(prev => ({ ...prev, owner_id: user.id }));
       }
-    } else if (!isEditing && user && organizationUsers.length === 0 && !isLoadingUsers && !formData.owner_id) {
-        setFormData(prev => ({...prev, owner_id: user.id}));
+    } else if (!isEditing && user && organizationUsers.length === 0 && !isLoadingUsers && usersError && !formData.owner_id) {
+      // Se a lista de usuários falhou em carregar mas temos o usuário logado, usá-lo como fallback para criação.
+      setFormData(prev => ({ ...prev, owner_id: user.id }));
     }
-  }, [initialData, isEditing, user, organizationUsers, isLoadingUsers, formData.owner_id]);
+  }, [initialData, isEditing, user, organizationUsers, isLoadingUsers, usersError, formData.owner_id]);
 
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -117,10 +138,10 @@ const RiskForm: React.FC<RiskFormProps> = ({ initialData, isEditing = false, onS
 
     try {
       if (isEditing && initialData?.id) {
-        await apiClient.put(`/risks/${initialData.id}`, formData);
+        await apiClient.put(`/api/v1/risks/${initialData.id}`, formData);
         notify.success(t('form.update_success_message'));
       } else {
-        await apiClient.post('/risks', formData);
+        await apiClient.post('/api/v1/risks', formData);
         notify.success(t('form.create_success_message'));
       }
       if (onSubmitSuccess) {

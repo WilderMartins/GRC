@@ -68,22 +68,34 @@ const RisksPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>)
   const [pendingApprovalWorkflowId, setPendingApprovalWorkflowId] = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
+import useOrganizationUsersLookup from '@/hooks/useOrganizationUsersLookup'; // Importar o hook
+
+// ... (manter outras importações)
+
+const RisksPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>) => {
+  const { t } = useTranslation(['risks', 'common']);
+  const notify = useNotifier();
+  const { user } = useAuth();
+
+  // ... (manter outros estados)
+  const { users: ownersForFilter, isLoading: isLoadingOwners, error: ownersError, fetchUsers: fetchOwnersForFilter } = useOrganizationUsersLookup();
+
+
   useEffect(() => {
-    const fetchOwners = async () => {
-      if (!user) return;
-      setIsLoadingOwners(true);
-      try {
-        const response = await apiClient.get<UserLookup[]>('/users/organization-lookup');
-        setOwnersForFilter(response.data || []);
-      } catch (err) {
-        console.error("Erro ao buscar proprietários para filtro:", err);
-        notify.error(t('common:error_loading_list', {list_name: t('list.filter_owner_label')}));
-      } finally {
-        setIsLoadingOwners(false);
-      }
-    };
-    fetchOwners();
-  }, [user, notify, t]);
+    // fetchOwnersForFilter é estável devido ao useCallback no hook, seguro para adicionar como dependência
+    // Apenas buscar se o usuário estiver carregado para evitar chamadas desnecessárias ou com token inválido
+    if (user) {
+        fetchOwnersForFilter();
+    }
+  }, [user, fetchOwnersForFilter]);
+
+  // Lidar com erros ao carregar proprietários para o filtro
+  useEffect(() => {
+    if (ownersError) {
+      notify.error(t('common:error_loading_list', { list_name: t('list.filter_owner_label') }));
+    }
+  }, [ownersError, notify, t]);
+
 
   const fetchRisks = useCallback(async () => {
     setIsLoading(true);
@@ -93,7 +105,7 @@ const RisksPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>)
         page: currentPage,
         page_size: pageSize,
         sort_by: sortBy,
-        order: sortOrder,
+        order: sortOrder, // 'order' é o nome correto do query param esperado pela API (asc/desc)
       };
       if (filterCategory) params.category = filterCategory;
       if (filterImpact) params.impact = filterImpact;
@@ -102,17 +114,23 @@ const RisksPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>)
       if (filterOwnerId) params.owner_id = filterOwnerId;
       if (debouncedSearchTitle) params.title_like = debouncedSearchTitle;
 
-      const response = await apiClient.get<PaginatedResponse<Risk>>('/risks', { params });
+      const response = await apiClient.get<PaginatedResponse<Risk>>('/api/v1/risks', { params });
 
       const risksData = response.data.items || [];
       const processedRisks = await Promise.all(
         risksData.map(async (risk) => {
-          if (user && risk.owner_id === user.id) {
+          // Otimização: Apenas buscar histórico de aprovação se o risco estiver em um estado que possa ter aprovações
+          // e se o usuário atual for o proprietário ou admin/manager.
+          // A lógica exata de quem pode ver "hasPendingApproval" pode variar.
+          // Por agora, mantendo a lógica original de verificar se user é owner.
+          if (user && risk.owner_id === user.id && (risk.status === 'aberto' || risk.status === 'em_andamento')) {
             try {
-              const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/risks/${risk.id}/approval-history`);
+              // Corrigir URL
+              const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/api/v1/risks/${risk.id}/approval-history`);
               const pendingApproval = historyResponse.data.find(wf => wf.status === 'pendente');
               return { ...risk, hasPendingApproval: !!pendingApproval };
             } catch (historyErr) {
+               console.warn(`Failed to fetch approval history for risk ${risk.id}:`, historyErr);
               return { ...risk, hasPendingApproval: false };
             }
           }
@@ -175,7 +193,7 @@ const RisksPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>)
   const handleOpenDecisionModal = async (risk: Risk) => {
     setIsLoading(true);
     try {
-      const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/risks/${risk.id}/approval-history`);
+      const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/api/v1/risks/${risk.id}/approval-history`);
       const pendingWF = historyResponse.data.find(wf => wf.status === 'pendente');
       if (pendingWF) {
         setSelectedRiskForDecision(risk);
@@ -205,7 +223,7 @@ const RisksPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>)
   const handleSubmitForAcceptance = async (riskId: string, riskTitle: string) => {
     if (window.confirm(t('list.submit_acceptance_confirm_message', { riskTitle }))) {
         try {
-            await apiClient.post(`/risks/${riskId}/submit-acceptance`);
+            await apiClient.post(`/api/v1/risks/${riskId}/submit-acceptance`);
             notify.success(t('list.submit_acceptance_success_message', { riskTitle }));
             fetchRisks();
         } catch (err: any) {
@@ -216,12 +234,13 @@ const RisksPageContent = (props: InferGetStaticPropsType<typeof getStaticProps>)
 
   const handleDeleteRisk = async (riskId: string, riskTitle: string) => {
     if (window.confirm(t('list.confirm_delete_message', { riskTitle }))) {
-      setIsLoading(true);
+      setIsLoading(true); // Pode ser um estado de loading específico para a ação de deleção
       try {
-        await apiClient.delete(`/risks/${riskId}`);
+        await apiClient.delete(`/api/v1/risks/${riskId}`);
         notify.success(t('list.delete_success_message', { riskTitle }));
+        // Re-fetch ou ajuste local da lista de riscos
         if (risks.length === 1 && currentPage > 1) {
-            setCurrentPage(currentPage - 1);
+            setCurrentPage(currentPage - 1); // fetchRisks será chamado pelo useEffect de currentPage
         } else {
             fetchRisks();
         }
