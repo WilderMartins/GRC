@@ -218,3 +218,16 @@ func GetSetupStatusHandler(c *gin.Context) {
 		Message: "A aplicação está configurada e pronta para uso.",
 	})
 }
+
+// ListGlobalSAMLIdentityProvidersHandler retorna uma lista de provedores de identidade SAML
+// configurados globalmente.
+func ListGlobalSAMLIdentityProvidersHandler(c *gin.Context) {
+	db := database.GetDB()
+	var idps []models.IdentityProvider
+	if err := db.Where("provider_type = ? AND is_active = ?", models.IDPTypeSAML, true).Find(&idps).Error; err != nil {
+		phxlog.L.Error("Failed to retrieve SAML identity providers", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve SAML identity providers"})
+		return
+	}
+	c.JSON(http.StatusOK, idps)
+}

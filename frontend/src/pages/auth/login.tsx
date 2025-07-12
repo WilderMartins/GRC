@@ -32,6 +32,7 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
 
   // Estados para SSO
   const [ssoProviders, setSsoProviders] = useState<LoginIdentityProvider[]>([]);
+  const [samlProviders, setSamlProviders] = useState<LoginIdentityProvider[]>([]);
   const [isLoadingSso, setIsLoadingSso] = useState(true);
   const [ssoError, setSsoError] = useState<string | null>(null);
   const [ssoLoadingProvider, setSsoLoadingProvider] = useState<string | null>(null); // Novo estado para loading de botão SSO
@@ -59,17 +60,30 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
           setIsLoadingSso(true);
           setSsoError(null);
           try {
-            const response = await apiClient.get<LoginIdentityProvider[]>('/api/public/social-identity-providers');
-            // Transformar a resposta para incluir a login_url construída
-            const transformedProviders = response.data.map(provider => ({
+            // Fetch Social Providers
+            const socialResponse = await apiClient.get<LoginIdentityProvider[]>('/api/public/social-identity-providers');
+            const transformedSocial = socialResponse.data.map(provider => ({
               ...provider,
               login_url: `${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/auth/oauth2/${provider.provider_slug}/${provider.id}/login`
             }));
-            setSsoProviders(transformedProviders || []);
+            setSsoProviders(transformedSocial || []);
+
+            // Fetch SAML Providers (assumindo um endpoint similar)
+            // NOTA: Este endpoint pode precisar ser ajustado dependendo da lógica de negócios.
+            // Por exemplo, pode ser necessário passar um 'organization_slug' ou similar se a página de login for específica.
+            // Por agora, vamos assumir um endpoint público que lista todos os IdPs SAML ativos.
+            const samlResponse = await apiClient.get<LoginIdentityProvider[]>('/api/public/saml-identity-providers'); // Endpoint hipotético
+            const transformedSaml = samlResponse.data.map(provider => ({
+                ...provider,
+                login_url: `${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/auth/saml/${provider.id}/login`
+            }));
+            setSamlProviders(transformedSaml || []);
+
           } catch (err: any) {
             console.error('Error fetching identity providers:', err);
             setSsoError(t('login.error_loading_sso'));
             setSsoProviders([]);
+            setSamlProviders([]);
           } finally {
             setIsLoadingSso(false);
           }
@@ -238,8 +252,29 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
               {ssoError && !isLoadingSso && (
                 <div className="mb-4 rounded-md bg-yellow-50 p-4 dark:bg-yellow-900/30"><div className="flex"><div className="flex-shrink-0"><svg className="h-5 w-5 text-yellow-400 dark:text-yellow-300" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg></div><div className="ml-3"><p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">{ssoError}</p></div></div></div>
               )}
-              {!isLoadingSso && ssoProviders.length > 0 && (
+              {!isLoadingSso && (ssoProviders.length > 0 || samlProviders.length > 0) && (
                 <div className="space-y-3">
+                  {samlProviders.map((provider) => (
+                    <button
+                      key={provider.id}
+                      onClick={() => {
+                        setSsoLoadingProvider(provider.id);
+                        window.location.href = provider.login_url;
+                      }}
+                      disabled={isLoadingTraditionalLogin || isVerifyingTwoFactor || !!ssoLoadingProvider}
+                      className="flex w-full items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-60"
+                    >
+                      {ssoLoadingProvider === provider.id ? (
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-700 dark:text-gray-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        <span className="mr-2 text-xl">🔑</span>
+                      )}
+                      {ssoLoadingProvider === provider.id ? t('login.sso_redirecting_button') : t('login.sso_button_prefix', {providerName: provider.name})}
+                    </button>
+                  ))}
                   {ssoProviders.map((provider) => (
                     <button
                       key={provider.id}
@@ -259,7 +294,6 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
                         <span className="mr-2 text-xl">
                           {provider.type === 'oauth2_google' && '🇬'}
                           {provider.type === 'oauth2_github' && <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.5.49.09.66-.213.66-.473 0-.234-.01-1.028-.015-1.86-2.782.602-3.369-1.206-3.369-1.206-.445-1.13-.91-1.43-.91-1.43-.889-.608.067-.596.067-.596 1.003.07 1.531 1.03 1.531 1.03.892 1.527 2.341 1.087 2.91.831.091-.645.35-1.087.638-1.337-2.22-.252-4.555-1.11-4.555-4.937 0-1.09.39-1.984 1.029-2.682-.103-.254-.446-1.27.098-2.647 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.82c.85.004 1.705.115 2.504.336 1.909-1.296 2.747-1.026 2.747-1.026.546 1.377.203 2.393.1 2.647.64.698 1.028 1.592 1.028 2.682 0 3.837-2.339 4.683-4.567 4.93.359.307.678.915.678 1.846 0 1.337-.012 2.416-.012 2.74 0 .26.169.566.668.473A10.01 10.01 0 0022 12.017C22 6.484 17.522 2 12 2Z" clipRule="evenodd" /></svg>}
-                          {provider.type === 'saml' && '🔑'}
                         </span>
                       )}
                       {ssoLoadingProvider === provider.id ? t('login.sso_redirecting_button') : t('login.sso_button_prefix', {providerName: provider.name})}
@@ -267,7 +301,7 @@ export default function LoginPage(props: InferGetStaticPropsType<typeof getStati
                   ))}
                 </div>
               )}
-              {!isLoadingSso && ssoProviders.length > 0 && (
+              {!isLoadingSso && (ssoProviders.length > 0 || samlProviders.length > 0) && (
                 <div className="my-6 flex items-center"><div className="flex-grow border-t border-gray-300 dark:border-gray-600"></div><span className="mx-4 flex-shrink text-sm text-gray-500 dark:text-gray-400">{t('login.sso_divider_text')}</span><div className="flex-grow border-t border-gray-300 dark:border-gray-600"></div></div>
               )}
             </>
