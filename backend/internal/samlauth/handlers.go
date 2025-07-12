@@ -134,8 +134,35 @@ func ACSHandler(c *gin.Context) {
 	//    phxlog.L.Debug("SAML Attributes received", zap.Any("attributes", attrs))
 	// }
 
-	// c.JSON(http.StatusNotImplemented, gin.H{"message": "SAML ACS logic is not fully implemented yet."})
-	c.String(http.StatusNotImplemented, "SAML ACS Handler for IdP %s (IdP Name: %s) - Not Fully Implemented. Assertion received, but processing logic is pending. User attributes would be extracted here, user provisioned/updated, and a session/JWT for Phoenix GRC would be issued, followed by a redirect to the frontend.", idpModel.ID, idpModel.Name)
+	// Tentativa de obter a sessão SAML (que conteria a asserção processada pelo middleware)
+	// O middleware.RequireAccount deveria ter sido aplicado a esta rota para que isto funcione.
+	// Se não, c.Request.Context() pode não ter a asserção.
+	// Por agora, o foco é no placeholder.
+	var samlAssertionAttributes samlsp.Attributes
+	session, errSession := middleware.Session.GetSession(c.Request)
+	if errSession == nil && session != nil {
+		if s, ok := session.(samlsp.SessionWithAttributes); ok {
+			samlAssertionAttributes = s.GetAttributes()
+			phxlog.L.Info("SAML assertion attributes received by ACS (placeholder)",
+				zap.String("idpID", idpModel.ID.String()),
+				zap.String("idpName", idpModel.Name),
+				zap.Any("attributes", samlAssertionAttributes),
+			)
+		}
+	} else if errSession != nil {
+		phxlog.L.Warn("Could not get SAML session in ACS handler", zap.Error(errSession), zap.String("idpID", idpModel.ID.String()))
+	}
+
+
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"message":                       "SAML ACS logic is partially implemented. Assertion may have been received by SP.",
+		"status":                        "pending_full_user_processing_and_jwt_issuance",
+		"idp_id":                        idpModel.ID.String(),
+		"idp_name":                      idpModel.Name,
+		"received_attributes_example":   samlAssertionAttributes, // Pode ser nil
+		"next_steps":                    "Backend needs to fully process assertion, provision user, and issue Phoenix GRC JWT.",
+	})
+	// c.String(http.StatusNotImplemented, "SAML ACS Handler for IdP %s (IdP Name: %s) - Not Fully Implemented. Assertion received, but processing logic is pending. User attributes would be extracted here, user provisioned/updated, and a session/JWT for Phoenix GRC would be issued, followed by a redirect to the frontend.", idpModel.ID, idpModel.Name)
 }
 
 func SAMLLoginHandler(c *gin.Context) {

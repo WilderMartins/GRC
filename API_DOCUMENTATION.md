@@ -186,13 +186,39 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `500 Internal Server Error`: Falha ao gerar token JWT ou atualizar códigos de backup.
 
 *   **Endpoints SAML 2.0 (Implementação Parcial - Requer Teste e Finalização)**
-    *   **Nota:** A biblioteca SAML (`github.com/crewjam/saml v0.5.1`) foi adicionada/atualizada e o código relacionado foi descomentado. No entanto, a compilação completa e testes funcionais não puderam ser realizados no ambiente atual. A lógica principal do Assertion Consumer Service (ACS) para processar a asserção, provisionar usuários e emitir tokens JWT ainda é um placeholder e precisa ser implementada. **Esta funcionalidade deve ser considerada experimental e requer testes e desenvolvimento adicionais antes do uso em produção.**
+    *   **Nota sobre o Estado da Implementação SAML:**
+        *   A funcionalidade SAML 2.0 está **parcialmente implementada** e deve ser considerada **experimental**.
+        *   **Funcional:**
+            *   Configuração de Provedores de Identidade SAML por organização via API (`/api/v1/organizations/{orgId}/identity-providers`).
+            *   Exposição de metadados do Service Provider (SP) por IdP: `GET /auth/saml/{idpId}/metadata`.
+            *   Início do fluxo de login SP-Initiated: `GET /auth/saml/{idpId}/login` redireciona para o IdP configurado.
+        *   **Pendências Críticas / Não Funcional:**
+            *   **Assertion Consumer Service (`POST /auth/saml/{idpId}/acs`):** A lógica para processar a asserção SAML recebida do IdP, validar assinaturas, extrair atributos do usuário, provisionar/logar o usuário no Phoenix GRC e emitir um token JWT da aplicação **NÃO ESTÁ IMPLEMENTADA**. Atualmente, este endpoint apenas loga a chamada e retorna uma mensagem de "não implementado".
+            *   **Busca de Configuração do IdP:** A função que carrega a configuração do IdP SAML do banco de dados (`getSAMLServiceProvider`) atualmente usa dados mockados e precisa ser finalizada para buscar do DB.
+            *   **Validação de Assinatura do IdP:** A configuração para carregar e usar os metadados/certificados do IdP para validar assinaturas de asserções precisa ser cuidadosamente implementada e testada no ACS.
+        *   **Requer Desenvolvimento e Testes Adicionais significativos antes do uso em produção.**
+    *   **Variáveis de Ambiente Globais para SAML SP:**
+        *   `APP_ROOT_URL`: URL base da aplicação, usada para construir URLs de ACS e Metadata.
+        *   `SAML_SP_KEY_PEM`: Conteúdo do arquivo PEM da chave privada do Service Provider.
+        *   `SAML_SP_CERT_PEM`: Conteúdo do arquivo PEM do certificado público do Service Provider.
+    *   **Configuração do `IdentityProvider` (tipo `saml`) no `config_json`:**
+        ```json
+        {
+            "idp_entity_id": "URL ou URN do EntityID do IdP SAML", // Obrigatório
+            "idp_sso_url": "URL do endpoint SSO (login) do IdP SAML", // Obrigatório
+            "idp_x509_cert": "-----BEGIN CERTIFICATE-----\nMIID...END CERTIFICATE-----", // Certificado público X.509 do IdP (formato PEM string) para validar assinaturas de resposta/asserção. Obrigatório.
+            "sp_entity_id": "URL ou URN EntityID deste SP para este IdP (opcional, default: URL de metadados do SP)",
+            "sign_request": "boolean (opcional, default: false, se o SP deve assinar AuthnRequests)"
+            // "idp_metadata_url": "URL para buscar os metadados do IdP dinamicamente" // Alternativa, não usada atualmente
+        }
+        ```
+
     *   **`GET /auth/saml/:idpId/login`**
-        *   **Descrição:** Tenta iniciar o fluxo de login SAML SP-initiated redirecionando o usuário para o IdP SAML configurado.
+        *   **Descrição:** Inicia o fluxo de login SAML SP-initiated redirecionando o usuário para o IdP SAML configurado (usando `idp_sso_url` do `config_json`). Requer que o `idpId` seja um UUID de um `IdentityProvider` do tipo `saml` ativo e corretamente configurado.
     *   **`GET /auth/saml/:idpId/metadata`**
-        *   **Descrição:** Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado.
+        *   **Descrição:** Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado. O IdP usará esta URL para configurar a confiança com o SP.
     *   **`POST /auth/saml/:idpId/acs`**
-        *   **Descrição:** Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido. **Lógica de processamento da asserção e provisionamento de usuário pendente.**
+        *   **Descrição:** Assertion Consumer Service (ACS). Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido no IdP. **Atualmente, não processa a asserção nem completa o login no Phoenix GRC.**
 
 ---
 

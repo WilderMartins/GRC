@@ -189,6 +189,23 @@ O fluxo de login social envolve redirecionamentos entre o frontend, o backend e 
     6.  Redirecionar o usuário para o dashboard ou página principal da aplicação.
     7.  Se `sso_success` não for `true` ou o token estiver ausente, exibir uma mensagem de erro.
 
+### 3.4. Login SAML 2.0 (Experimental / Parcialmente Implementado no Backend)
+
+*   **Estado Atual:** A funcionalidade SAML no backend está **parcialmente implementada** e é considerada **experimental**.
+    *   **O que o frontend PODE fazer:**
+        *   Se um `IdentityProvider` do tipo `saml` estiver configurado para uma organização, o frontend pode construir uma URL para iniciar o login SP-Initiated.
+        *   **URL de Início de Login SAML:** `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`
+            *   `{idpId}`: É o UUID do `IdentityProvider` do tipo `saml`. Este NÃO usa "global".
+            *   Ao acessar esta URL, o backend redirecionará o usuário para o IdP SAML configurado.
+    *   **O que está PENDENTE no Backend (e impacta o frontend):**
+        *   O Assertion Consumer Service (ACS) (`POST /auth/saml/{idpId}/acs`) do backend, que recebe a resposta do IdP, **não está funcionalmente implementado**. Ele não processa a asserção SAML, não provisiona usuários, nem emite um token JWT da aplicação Phoenix GRC.
+        *   Portanto, **o frontend NÃO receberá um redirecionamento de volta com um token JWT da aplicação após o login no IdP SAML.** O fluxo de login não será completado.
+*   **Ação do Frontend (Atualmente):**
+    *   Pode-se optar por exibir opções de login SAML se configuradas (obtidas via `GET /api/v1/organizations/{orgId}/identity-providers`, filtrando por `provider_type: "saml"`).
+    *   Ao clicar, redirecionar para `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`.
+    *   O usuário será redirecionado ao IdP e, após autenticação lá, será redirecionado de volta ao ACS do backend. O backend atualmente retornará uma mensagem de "Não Implementado" ou similar, sem redirecionar de volta ao frontend com uma sessão válida.
+*   **Conclusão para SAML:** Até que o ACS seja totalmente implementado no backend, o login SAML não resultará em uma sessão de usuário válida no Phoenix GRC.
+
 ## 4. Gerenciamento de Usuário Autenticado
 
 Estes endpoints requerem o token JWT no header `Authorization: Bearer <token>`.
