@@ -109,6 +109,14 @@ func RunSetup() {
 	}
 	fmt.Println("Audit frameworks and controls seeded successfully.")
 
+	// Seeding C2M2 Data
+	fmt.Println("\n--- Seeding C2M2 Domains and Practices ---")
+	if err := seeders.SeedC2M2Data(db); err != nil {
+		phxlog.L.Fatal("Failed to seed C2M2 data", zap.Error(err))
+	}
+	fmt.Println("C2M2 domains and practices seeded successfully.")
+
+
 	// 4. First Organization Setup
 	fmt.Println("\n--- Creating First Organization ---")
 	orgName := readInput(reader, "Enter the name for the first organization: ")

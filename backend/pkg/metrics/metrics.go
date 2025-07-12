@@ -18,6 +18,15 @@ var (
 	// AppInfo expõe informações sobre a aplicação.
 	AppInfo *prometheus.GaugeVec
 
+	// UsersCreated conta o total de usuários criados.
+	UsersCreated *prometheus.CounterVec
+
+	// RisksCreated conta o total de riscos criados.
+	RisksCreated prometheus.Counter
+
+	// AssessmentsUpdated conta o total de avaliações criadas/atualizadas.
+	AssessmentsUpdated prometheus.Counter
+
 	// AppVersion é a versão da aplicação, carregada de config.Cfg.AppVersion.
 	AppVersion = "unknown"
 )
@@ -72,6 +81,31 @@ func init() {
 		[]string{"version"}, // Label para a versão
 	)
 	AppInfo.With(prometheus.Labels{"version": AppVersion}).Set(1)
+
+	// --- Métricas de Negócio ---
+
+	UsersCreated = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "phoenixgrc_users_created_total",
+			Help: "Total number of users created.",
+		},
+		[]string{"source"}, // ex: "password", "oauth2_google", "saml"
+	)
+
+	RisksCreated = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "phoenixgrc_risks_created_total",
+			Help: "Total number of risks created.",
+		},
+	)
+
+	AssessmentsUpdated = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "phoenixgrc_assessments_updated_total",
+			Help: "Total number of audit assessments created or updated.",
+		},
+	)
+
 
 	// Registrar métricas padrão do Go (opcional, mas útil)
 	// promauto.MustRegister(collectors.NewBuildInfoCollector()) // Requer import de collectors

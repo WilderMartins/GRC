@@ -143,13 +143,11 @@ CREATE TABLE IF NOT EXISTS audit_assessments (
     score INTEGER, -- 0-100
     assessment_date TIMESTAMP WITH TIME ZONE,
     comments TEXT,
-    c2m2_maturity_level INTEGER, -- Nível de Maturidade C2M2 (0-3)
     c2m2_assessment_date TIMESTAMP WITH TIME ZONE, -- Data da avaliação de maturidade C2M2
     c2m2_comments TEXT, -- Comentários da avaliação C2M2
     UNIQUE (organization_id, audit_control_id) -- Uma avaliação por controle por organização
 );
 CREATE INDEX IF NOT EXISTS idx_audit_assessments_deleted_at ON audit_assessments(deleted_at);
-CREATE INDEX IF NOT EXISTS idx_audit_assessments_c2m2_maturity_level ON audit_assessments(c2m2_maturity_level);
 CREATE INDEX IF NOT EXISTS idx_audit_assessments_organization_id ON audit_assessments(organization_id);
 CREATE INDEX IF NOT EXISTS idx_audit_assessments_audit_control_id ON audit_assessments(audit_control_id);
 

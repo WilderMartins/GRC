@@ -142,9 +142,12 @@ type AssessmentPayload struct {
 	Comments       *string                   `json:"comments,omitempty"`                               // Comentários da avaliação principal
 
 	// Campos C2M2
-	C2M2MaturityLevel *int    `json:"c2m2_maturity_level,omitempty" binding:"omitempty,min=0,max=3"` // 0-3
+	C2M2MaturityLevel *int    `json:"c2m2_maturity_level,omitempty" binding:"omitempty,min=0,max=3"` // 0-3 // Este campo será calculado pelo backend, mas pode ser mantido para override manual
 	C2M2AssessmentDate *string `json:"c2m2_assessment_date,omitempty" binding:"omitempty,datetime=2006-01-02"` // YYYY-MM-DD
 	C2M2Comments      *string `json:"c2m2_comments,omitempty"`
+
+	// Novo campo para receber as avaliações detalhadas das práticas C2M2
+	C2M2PracticeEvaluations map[string]string `json:"c2m2_practice_evaluations,omitempty"` // map[practiceID] -> status
 }
 
 const (
@@ -216,32 +219,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assessment_date format, use YYYY-MM-DD: " + err.Error()})
 			return
 		}
-	} else {
-		parsedAssessmentDate = time.Now() // Default to now if not provided
-	}
-	assessmentModel.AssessmentDate = &parsedAssessmentDate // Usar ponteiro
-
-	if payload.Comments != nil {
-		assessmentModel.Comments = payload.Comments
-	}
-
-	// Processar campos C2M2
-	if payload.C2M2MaturityLevel != nil {
-		assessmentModel.C2M2MaturityLevel = payload.C2M2MaturityLevel
-	}
-	if payload.C2M2Comments != nil {
-		assessmentModel.C2M2Comments = payload.C2M2Comments
-	}
-	if payload.C2M2AssessmentDate != nil && *payload.C2M2AssessmentDate != "" {
-		parsedC2M2Date, errDate := time.Parse("2006-01-02", *payload.C2M2AssessmentDate)
-		if errDate != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid c2m2_assessment_date format, use YYYY-MM-DD: " + errDate.Error()})
-			return
-		}
-		assessmentModel.C2M2AssessmentDate = &parsedC2M2Date
-	}
-
-
 	// assessmentEvidenceIdentifier armazenará o objectName se um arquivo for carregado,
 	// ou a URL externa fornecida no payload se nenhum arquivo for carregado.
 	assessmentEvidenceIdentifier := payload.EvidenceURL
@@ -250,56 +227,47 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		OrganizationID: organizationID,
 		AuditControlID: auditControlUUID,
 		Status:         payload.Status,
-		// EvidenceURL será setado abaixo
-		// AssessmentDate, Score, Comments, e campos C2M2 serão setados abaixo
+		Comments:       payload.Comments,       // Pode ser nil
+		C2M2Comments:      payload.C2M2Comments, // Pode ser nil
+		// C2M2MaturityLevel é calculado pelo backend
 	}
 
+	// Processar datas
 	if payload.AssessmentDate != "" {
-		parsedAssessmentDate, err = time.Parse("2006-01-02", payload.AssessmentDate)
+		parsedDate, err := time.Parse("2006-01-02", payload.AssessmentDate)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assessment_date format, use YYYY-MM-DD: " + err.Error()})
 			return
 		}
-		assessmentModel.AssessmentDate = &parsedAssessmentDate
+		assessmentModel.AssessmentDate = &parsedDate
 	} else {
 		now := time.Now()
-		assessmentModel.AssessmentDate = &now // Default to now if not provided
+		assessmentModel.AssessmentDate = &now
 	}
 
+	if payload.C2M2AssessmentDate != nil && *payload.C2M2AssessmentDate != "" {
+		parsedDate, err := time.Parse("2006-01-02", *payload.C2M2AssessmentDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid c2m2_assessment_date format, use YYYY-MM-DD: " + err.Error()})
+			return
+		}
+		assessmentModel.C2M2AssessmentDate = &parsedDate
+	}
+
+	// Processar score
 	if payload.Score != nil {
 		assessmentModel.Score = payload.Score
 	} else {
-		// Default score logic
 		var defaultScore int
 		switch payload.Status {
 		case models.ControlStatusConformant:
 			defaultScore = 100
 		case models.ControlStatusPartiallyConformant:
 			defaultScore = 50
-		case models.ControlStatusNonConformant, models.ControlStatusNotApplicable: // Adicionado NotApplicable
+		case models.ControlStatusNonConformant, models.ControlStatusNotApplicable:
 			defaultScore = 0
 		}
 		assessmentModel.Score = &defaultScore
-	}
-
-	if payload.Comments != nil {
-		assessmentModel.Comments = payload.Comments
-	}
-
-	// Processar campos C2M2
-	if payload.C2M2MaturityLevel != nil {
-		assessmentModel.C2M2MaturityLevel = payload.C2M2MaturityLevel
-	}
-	if payload.C2M2Comments != nil {
-		assessmentModel.C2M2Comments = payload.C2M2Comments
-	}
-	if payload.C2M2AssessmentDate != nil && *payload.C2M2AssessmentDate != "" {
-		parsedC2M2Date, errDate := time.Parse("2006-01-02", *payload.C2M2AssessmentDate)
-		if errDate != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid c2m2_assessment_date format, use YYYY-MM-DD: " + errDate.Error()})
-			return
-		}
-		assessmentModel.C2M2AssessmentDate = &parsedC2M2Date
 	}
 
 
@@ -410,6 +378,57 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
         return
 	}
 
+	// Processar avaliações de práticas C2M2, se houver
+	if payload.C2M2PracticeEvaluations != nil && len(payload.C2M2PracticeEvaluations) > 0 {
+		var evalsToUpsert []models.C2M2PracticeEvaluation
+		for practiceIDStr, status := range payload.C2M2PracticeEvaluations {
+			practiceID, errParse := uuid.Parse(practiceIDStr)
+			if errParse != nil {
+				// Poderia coletar todos os erros e retornar, mas por agora vamos falhar no primeiro
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid practice ID format in c2m2_practice_evaluations: %s", practiceIDStr)})
+				return
+			}
+			// Validar status
+			validStatuses := map[string]bool{
+				models.PracticeStatusNotImplemented:      true,
+				models.PracticeStatusPartiallyImplemented: true,
+				models.PracticeStatusFullyImplemented:    true,
+			}
+			if !validStatuses[status] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid status '%s' for practice ID %s", status, practiceIDStr)})
+				return
+			}
+
+			eval := models.C2M2PracticeEvaluation{
+				AuditAssessmentID: resultAssessment.ID, // Associar com o assessment principal
+				PracticeID:        practiceID,
+				Status:            status,
+			}
+			evalsToUpsert = append(evalsToUpsert, eval)
+		}
+
+		if len(evalsToUpsert) > 0 {
+			// Upsert das avaliações de práticas
+			tx := db.Begin()
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "audit_assessment_id"}, {Name: "practice_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"status", "updated_at"}),
+			}).Create(&evalsToUpsert).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save C2M2 practice evaluations: " + err.Error()})
+				return
+			}
+			tx.Commit()
+		}
+	}
+
+	// Re-fetch final para incluir as practice evaluations se foram criadas/atualizadas
+	if err := db.Preload("C2M2PracticeEvaluations").First(&resultAssessment, resultAssessment.ID).Error; err != nil {
+		phxlog.L.Warn("Failed to re-fetch assessment with practice evaluations", zap.String("assessmentID", resultAssessment.ID.String()), zap.Error(err))
+		// Não falhar a requisição por isso, retornar o que temos.
+	}
+
+	phxmetrics.AssessmentsUpdated.Inc()
 	c.JSON(http.StatusOK, resultAssessment) // OK for both create and update via upsert
 }
 
@@ -920,19 +939,32 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 			continue
 		}
 
-		mils := summaryByFunction[nistFunction]
-		achievedMIL := 0 // Default para MIL0
-		if len(mils) > 0 {
-			// Lógica de agregação de MIL (Simplificação Inicial: Moda)
-			counts := make(map[int]int)
-			maxCount := 0
-			for _, mil := range mils {
-				counts[mil]++
-				if counts[mil] > maxCount {
-					maxCount = counts[mil]
-					achievedMIL = mil
-				} else if counts[mil] == maxCount && mil > achievedMIL { // Desempate: pegar o MIL maior
-					achievedMIL = mil
+		// Nova lógica de cálculo de MIL estrita por função
+		achievedMIL := 0
+		if evaluatedInFunction[nistFunction] > 0 { // Só calcular se houver avaliações
+			// A lógica aqui é uma simplificação. A forma correta seria mapear os controles NIST
+			// para práticas C2M2 e verificar se TODAS as práticas de um MIL estão "fully_implemented".
+			// Como não temos esse mapeamento, vamos usar a lógica do `c2m2logic` anterior,
+			// mas aplicada ao conjunto de avaliações desta função.
+			// Esta lógica ainda é uma aproximação.
+
+			// Para este refinamento, vamos manter a lógica da moda, pois a lógica estrita
+			// depende de um mapeamento que não temos. O refinamento real seria implementar esse mapeamento.
+			// Portanto, a lógica de agregação permanece a mesma por enquanto.
+
+			// Lógica de agregação de MIL (Simplificação Inicial: Moda - MANTIDA POR ENQUANTO)
+			mils := summaryByFunction[nistFunction]
+			if len(mils) > 0 {
+				counts := make(map[int]int)
+				maxCount := 0
+				for _, mil := range mils {
+					counts[mil]++
+					if counts[mil] > maxCount {
+						maxCount = counts[mil]
+						achievedMIL = mil
+					} else if counts[mil] == maxCount && mil > achievedMIL { // Desempate: pegar o MIL maior
+						achievedMIL = mil
+					}
 				}
 			}
 		}

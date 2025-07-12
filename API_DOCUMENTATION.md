@@ -56,6 +56,26 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
                 *   `icon_url` (string, opcional): Uma URL para um ícone representando o provedor.
         *   `500 Internal Server Error`: Falha ao buscar os provedores de identidade.
 
+*   **`GET /api/public/setup-status`**
+    *   **Descrição:** Verifica o estado atual da configuração da aplicação para determinar se o setup inicial foi concluído. Útil para um Wizard de instalação no frontend.
+    *   **Autenticação:** Nenhuma.
+    *   **Respostas:**
+        *   `200 OK`: Retorna um objeto JSON com o status.
+            ```json
+            {
+                "status": "string", // Valores possíveis abaixo
+                "message": "string" // Mensagem descritiva
+            }
+            ```
+            *   **Valores de `status` Possíveis:**
+                *   `database_not_configured`: Backend não conseguiu obter uma instância de DB.
+                *   `database_not_connected`: Não foi possível fazer ping no banco de dados.
+                *   `migrations_not_run`: Conexão OK, mas as tabelas da aplicação não existem.
+                *   `setup_pending_org`: Migrações OK, mas nenhuma organização foi criada.
+                *   `setup_pending_admin`: Organização existe, mas nenhum usuário admin foi criado.
+                *   `setup_complete`: Aplicação está configurada e pronta para uso.
+        *   `503 Service Unavailable`: Se a conexão com o banco de dados falhar.
+
 ### 3. Autenticação (`/auth`)
 
 *   **`POST /auth/login`**
@@ -185,22 +205,14 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `401 Unauthorized`: Código de backup inválido, usuário não encontrado, ou 2FA/códigos de backup não habilitados.
         *   `500 Internal Server Error`: Falha ao gerar token JWT ou atualizar códigos de backup.
 
-*   **Endpoints SAML 2.0 (Implementação Parcial - Requer Teste e Finalização)**
+*   **Endpoints SAML 2.0**
     *   **Nota sobre o Estado da Implementação SAML:**
-        *   A funcionalidade SAML 2.0 está **parcialmente implementada** e deve ser considerada **experimental**.
-        *   **Funcional:**
-            *   Configuração de Provedores de Identidade SAML por organização via API (`/api/v1/organizations/{orgId}/identity-providers`).
-            *   Exposição de metadados do Service Provider (SP) por IdP: `GET /auth/saml/{idpId}/metadata`.
-            *   Início do fluxo de login SP-Initiated: `GET /auth/saml/{idpId}/login` redireciona para o IdP configurado.
-        *   **Pendências Críticas / Não Funcional:**
-            *   **Assertion Consumer Service (`POST /auth/saml/{idpId}/acs`):** A lógica para processar a asserção SAML recebida do IdP, validar assinaturas, extrair atributos do usuário, provisionar/logar o usuário no Phoenix GRC e emitir um token JWT da aplicação **NÃO ESTÁ IMPLEMENTADA**. Atualmente, este endpoint apenas loga a chamada e retorna uma mensagem de "não implementado".
-            *   **Busca de Configuração do IdP:** A função que carrega a configuração do IdP SAML do banco de dados (`getSAMLServiceProvider`) atualmente usa dados mockados e precisa ser finalizada para buscar do DB.
-            *   **Validação de Assinatura do IdP:** A configuração para carregar e usar os metadados/certificados do IdP para validar assinaturas de asserções precisa ser cuidadosamente implementada e testada no ACS.
-        *   **Requer Desenvolvimento e Testes Adicionais significativos antes do uso em produção.**
+        *   A funcionalidade SAML 2.0 foi implementada. Requer configuração cuidadosa tanto no Phoenix GRC (como um `IdentityProvider`) quanto no Identity Provider (IdP) externo.
     *   **Variáveis de Ambiente Globais para SAML SP:**
-        *   `APP_ROOT_URL`: URL base da aplicação, usada para construir URLs de ACS e Metadata.
-        *   `SAML_SP_KEY_PEM`: Conteúdo do arquivo PEM da chave privada do Service Provider.
-        *   `SAML_SP_CERT_PEM`: Conteúdo do arquivo PEM do certificado público do Service Provider.
+        *   `APP_ROOT_URL`: URL base da aplicação, usada para construir URLs de ACS e Metadata. (Obrigatório)
+        *   `SAML_SP_KEY_PEM`: Conteúdo do arquivo PEM da chave privada do Service Provider. (Obrigatório)
+        *   `SAML_SP_CERT_PEM`: Conteúdo do arquivo PEM do certificado público do Service Provider. (Obrigatório)
+        *   `ALLOW_SAML_USER_CREATION`: Booleano (`true`/`false`, default `false`) que permite ou não a criação de novos usuários via SAML.
     *   **Configuração do `IdentityProvider` (tipo `saml`) no `config_json`:**
         ```json
         {
@@ -209,16 +221,23 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
             "idp_x509_cert": "-----BEGIN CERTIFICATE-----\nMIID...END CERTIFICATE-----", // Certificado público X.509 do IdP (formato PEM string) para validar assinaturas de resposta/asserção. Obrigatório.
             "sp_entity_id": "URL ou URN EntityID deste SP para este IdP (opcional, default: URL de metadados do SP)",
             "sign_request": "boolean (opcional, default: false, se o SP deve assinar AuthnRequests)"
-            // "idp_metadata_url": "URL para buscar os metadados do IdP dinamicamente" // Alternativa, não usada atualmente
+        }
+        ```
+    *   **Configuração do `IdentityProvider` (tipo `saml`) no `attribute_mapping_json`:**
+        ```json
+        {
+            "email": "User.Email", // Nome do atributo SAML que contém o email do usuário
+            "firstName": "User.FirstName", // Nome do atributo SAML para o primeiro nome
+            "lastName": "User.LastName" // Nome do atributo SAML para o sobrenome
         }
         ```
 
     *   **`GET /auth/saml/:idpId/login`**
-        *   **Descrição:** Inicia o fluxo de login SAML SP-initiated redirecionando o usuário para o IdP SAML configurado (usando `idp_sso_url` do `config_json`). Requer que o `idpId` seja um UUID de um `IdentityProvider` do tipo `saml` ativo e corretamente configurado.
+        *   **Descrição:** Inicia o fluxo de login SAML SP-initiated, redirecionando o usuário para o IdP SAML configurado. Requer que o `idpId` seja um UUID de um `IdentityProvider` do tipo `saml` ativo e corretamente configurado.
     *   **`GET /auth/saml/:idpId/metadata`**
         *   **Descrição:** Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado. O IdP usará esta URL para configurar a confiança com o SP.
     *   **`POST /auth/saml/:idpId/acs`**
-        *   **Descrição:** Assertion Consumer Service (ACS). Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido no IdP. **Atualmente, não processa a asserção nem completa o login no Phoenix GRC.**
+        *   **Descrição:** Assertion Consumer Service (ACS). Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido. O backend valida a asserção, extrai os atributos do usuário, provisiona/loga o usuário, gera um token JWT da aplicação e redireciona para o frontend em `[APP_ROOT_URL]/saml/callback?token=[JWT_TOKEN]`.
 
 ---
 
@@ -385,6 +404,7 @@ Todos os endpoints nesta seção requerem autenticação JWT.
 
 *   **`POST /api/v1/risks/:riskId/stakeholders`**
     *   **Descrição:** Adiciona um usuário como stakeholder a um risco.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização.
     *   **Parâmetros de Path:** `riskId`.
     *   **Payload da Requisição (`application/json`):**
         ```json
@@ -394,11 +414,13 @@ Todos os endpoints nesta seção requerem autenticação JWT.
         *   `201 Created`: `{ "message": "Stakeholder added successfully" }`
         *   `200 OK`: `{ "message": "Stakeholder association already exists." }`
         *   `400 Bad Request`: IDs ou payload inválidos.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Risco ou usuário não encontrado na organização.
         *   `500 Internal Server Error`.
 
 *   **`GET /api/v1/risks/:riskId/stakeholders`**
     *   **Descrição:** Lista todos os stakeholders de um risco.
+    *   **Autorização:** Usuário deve pertencer à organização do risco.
     *   **Parâmetros de Path:** `riskId`.
     *   **Respostas:**
         *   `200 OK`: Array de objetos `UserStakeholderResponse`.
@@ -413,9 +435,11 @@ Todos os endpoints nesta seção requerem autenticação JWT.
 
 *   **`DELETE /api/v1/risks/:riskId/stakeholders/:userId`**
     *   **Descrição:** Remove um stakeholder de um risco.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização.
     *   **Parâmetros de Path:** `riskId`, `userId` (ID do stakeholder a ser removido).
     *   **Respostas:**
         *   `200 OK`: `{ "message": "Stakeholder removed successfully" }`
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Associação de stakeholder ou risco não encontrada.
         *   `500 Internal Server Error`.
 
@@ -838,10 +862,14 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             "score": "integer (opcional, 0-100)",
             "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)",
             "comments": "string (opcional, comentários da avaliação principal)",
-            // Campos C2M2 (opcionais)
-            "c2m2_maturity_level": "integer (opcional, 0-3)",
+            // Campos C2M2 (opcionais). O backend calculará o c2m2_maturity_level com base nas avaliações de práticas.
             "c2m2_assessment_date": "string (opcional, YYYY-MM-DD)",
-            "c2m2_comments": "string (opcional, comentários da avaliação C2M2)"
+            "c2m2_comments": "string (opcional, comentários da avaliação C2M2)",
+            "c2m2_practice_evaluations": {
+                "uuid-da-pratica-1": "fully_implemented",
+                "uuid-da-pratica-2": "partially_implemented",
+                "uuid-da-pratica-3": "not_implemented"
+            }
             }
             ```
         *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, o `objectName` do arquivo armazenado será salvo no campo `EvidenceURL` do modelo `AuditAssessment`.
@@ -942,7 +970,52 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
 
 ---
 
-### 8. Autenticação de Múltiplos Fatores (MFA) (`/api/v1/users/me/2fa`)
+### 8. Estrutura C2M2 (`/api/v1/c2m2`)
+
+Endpoints para obter a estrutura de domínios e práticas do C2M2, úteis para construir formulários de avaliação no frontend.
+
+*   **`GET /api/v1/c2m2/domains`**
+    *   **Descrição:** Lista todos os domínios C2M2 pré-carregados no sistema.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `models.C2M2Domain`.
+            ```json
+            [
+                {
+                    "id": "uuid-domain-1",
+                    "name": "Risk Management",
+                    "code": "RM",
+                    "created_at": "timestamp",
+                    "updated_at": "timestamp"
+                }
+            ]
+            ```
+*   **`GET /api/v1/c2m2/domains/:domainId/practices`**
+    *   **Descrição:** Lista todas as práticas C2M2 para um domínio específico.
+    *   **Autenticação:** JWT Obrigatório.
+    *   **Parâmetros de Path:** `domainId` (UUID do domínio C2M2).
+    *   **Respostas:**
+        *   `200 OK`: Array de objetos `models.C2M2Practice`.
+            ```json
+            [
+                {
+                    "id": "uuid-practice-1",
+                    "domain_id": "uuid-domain-1",
+                    "code": "RM.1.1",
+                    "description": "Establish and maintain a risk management strategy...",
+                    "target_mil": 1,
+                    "created_at": "timestamp",
+                    "updated_at": "timestamp"
+                }
+            ]
+            ```
+        *   `400 Bad Request`: `domainId` inválido.
+        *   `404 Not Found`: Domínio não encontrado.
+        *   `500 Internal Server Error`.
+
+---
+
+### 9. Autenticação de Múltiplos Fatores (MFA) (`/api/v1/users/me/2fa`)
 
 Endpoints para o usuário autenticado gerenciar suas configurações de 2FA.
 

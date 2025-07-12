@@ -67,6 +67,11 @@ const (
 	CategoryOperational   RiskCategory = "operacional"
 	CategoryLegal         RiskCategory = "legal"
 	// Add other categories as needed
+
+	// C2M2 Practice Evaluation Status
+	PracticeStatusNotImplemented      string = "not_implemented"
+	PracticeStatusPartiallyImplemented string = "partially_implemented"
+	PracticeStatusFullyImplemented    string = "fully_implemented"
 )
 
 type Organization struct {
@@ -244,13 +249,13 @@ type AuditAssessment struct {
 	UpdatedAt      time.Time          `json:"updated_at"`
 
 	// Campos para Maturidade C2M2
-	C2M2MaturityLevel *int       `gorm:"index" json:"c2m2_maturity_level,omitempty"`    // Nível de Maturidade C2M2 (0-3), ponteiro para ser nullable
 	C2M2AssessmentDate *time.Time `gorm:"type:timestamptz" json:"c2m2_assessment_date,omitempty"` // Data da avaliação de maturidade C2M2
 	C2M2Comments      *string    `gorm:"type:text" json:"c2m2_comments,omitempty"`         // Comentários da avaliação C2M2
 
 	AuditControl   AuditControl       `gorm:"foreignKey:AuditControlID;constraint:OnDelete:CASCADE;" json:"audit_control,omitempty"` // Se o AuditControl for deletado
 	// A OrganizationID também é uma FK. Se a Organization for deletada, as Assessments devem ser deletadas.
 	// Isso será tratado na definição da relação em Organization struct.
+	C2M2PracticeEvaluations []C2M2PracticeEvaluation `gorm:"foreignKey:AuditAssessmentID;constraint:OnDelete:CASCADE;" json:"c2m2_practice_evaluations,omitempty"`
 }
 
 func (as *AuditAssessment) BeforeCreate(tx *gorm.DB) (err error) {
@@ -259,6 +264,62 @@ func (as *AuditAssessment) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	return
 }
+
+// --- C2M2 Models ---
+
+// C2M2Domain representa um domínio do Cybersecurity Capability Maturity Model.
+type C2M2Domain struct {
+	ID        uuid.UUID      `gorm:"type:uuid;primary_key;" json:"id"`
+	Name      string         `gorm:"size:255;not null;uniqueIndex" json:"name"` // Ex: "Risk Management"
+	Code      string         `gorm:"size:10;not null;uniqueIndex" json:"code"`  // Ex: "RM"
+	Practices []C2M2Practice `gorm:"foreignKey:DomainID;constraint:OnDelete:CASCADE;" json:"practices,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+func (d *C2M2Domain) BeforeCreate(tx *gorm.DB) (err error) {
+	if d.ID == uuid.Nil {
+		d.ID = uuid.New()
+	}
+	return
+}
+
+// C2M2Practice representa uma prática específica dentro de um domínio C2M2.
+type C2M2Practice struct {
+	ID          uuid.UUID  `gorm:"type:uuid;primary_key;" json:"id"`
+	DomainID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"domain_id"`
+	Code        string     `gorm:"size:20;not null;uniqueIndex" json:"code"`        // Ex: "RM.1.1"
+	Description string     `gorm:"type:text;not null" json:"description"`
+	TargetMIL   int        `gorm:"not null" json:"target_mil"`                      // Nível de maturidade alvo (1, 2, ou 3)
+	Domain      C2M2Domain `gorm:"foreignKey:DomainID" json:"-"` // Omitir para evitar ciclos JSON
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+func (p *C2M2Practice) BeforeCreate(tx *gorm.DB) (err error) {
+	if p.ID == uuid.Nil {
+		p.ID = uuid.New()
+	}
+	return
+}
+
+// C2M2PracticeEvaluation armazena a avaliação de uma prática específica para uma avaliação de controle.
+type C2M2PracticeEvaluation struct {
+	ID                uuid.UUID `gorm:"type:uuid;primary_key;" json:"id"`
+	AuditAssessmentID uuid.UUID `gorm:"type:uuid;not null;index" json:"audit_assessment_id"`
+	PracticeID        uuid.UUID `gorm:"type:uuid;not null;index" json:"practice_id"`
+	Status            string    `gorm:"type:varchar(50);not null" json:"status"` // not_implemented, partially_implemented, fully_implemented
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+func (e *C2M2PracticeEvaluation) BeforeCreate(tx *gorm.DB) (err error) {
+	if e.ID == uuid.Nil {
+		e.ID = uuid.New()
+	}
+	return
+}
+
 
 // Helper function to initialize DB connection (example)
 // This would typically be in a database package
@@ -354,7 +415,11 @@ func AutoMigrateDB(db *gorm.DB) error {
 		&AuditControl{},
 		&AuditAssessment{},
 		&IdentityProvider{},
-		&WebhookConfiguration{}, // Adicionado novo modelo
+		&WebhookConfiguration{},
+		// C2M2 Models
+		&C2M2Domain{},
+		&C2M2Practice{},
+		&C2M2PracticeEvaluation{},
 	)
 	return err
 }

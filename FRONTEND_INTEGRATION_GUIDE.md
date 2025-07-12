@@ -191,20 +191,30 @@ O fluxo de login social envolve redirecionamentos entre o frontend, o backend e 
 
 ### 3.4. Login SAML 2.0 (Experimental / Parcialmente Implementado no Backend)
 
-*   **Estado Atual:** A funcionalidade SAML no backend está **parcialmente implementada** e é considerada **experimental**.
-    *   **O que o frontend PODE fazer:**
-        *   Se um `IdentityProvider` do tipo `saml` estiver configurado para uma organização, o frontend pode construir uma URL para iniciar o login SP-Initiated.
-        *   **URL de Início de Login SAML:** `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`
-            *   `{idpId}`: É o UUID do `IdentityProvider` do tipo `saml`. Este NÃO usa "global".
-            *   Ao acessar esta URL, o backend redirecionará o usuário para o IdP SAML configurado.
-    *   **O que está PENDENTE no Backend (e impacta o frontend):**
-        *   O Assertion Consumer Service (ACS) (`POST /auth/saml/{idpId}/acs`) do backend, que recebe a resposta do IdP, **não está funcionalmente implementado**. Ele não processa a asserção SAML, não provisiona usuários, nem emite um token JWT da aplicação Phoenix GRC.
-        *   Portanto, **o frontend NÃO receberá um redirecionamento de volta com um token JWT da aplicação após o login no IdP SAML.** O fluxo de login não será completado.
-*   **Ação do Frontend (Atualmente):**
-    *   Pode-se optar por exibir opções de login SAML se configuradas (obtidas via `GET /api/v1/organizations/{orgId}/identity-providers`, filtrando por `provider_type: "saml"`).
-    *   Ao clicar, redirecionar para `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`.
-    *   O usuário será redirecionado ao IdP e, após autenticação lá, será redirecionado de volta ao ACS do backend. O backend atualmente retornará uma mensagem de "Não Implementado" ou similar, sem redirecionar de volta ao frontend com uma sessão válida.
-*   **Conclusão para SAML:** Até que o ACS seja totalmente implementado no backend, o login SAML não resultará em uma sessão de usuário válida no Phoenix GRC.
+*   **Estado Atual:** A funcionalidade SAML 2.0 foi implementada no backend.
+*   **Fluxo para o Frontend:**
+    1.  **Listar Provedores SAML (Opcional, para UI de Configuração):**
+        *   Administradores da organização podem configurar Provedores de Identidade SAML através da API (`POST /api/v1/organizations/{orgId}/identity-providers` com `provider_type: "saml"`). O frontend precisará de uma interface para isso, coletando os dados do `config_json` e `attribute_mapping_json` (ver `API_DOCUMENTATION.md` para detalhes dos campos).
+    2.  **Iniciar Login SAML (SP-Initiated):**
+        *   Para um IdP SAML específico configurado (com ID `{idpId}`), o frontend deve redirecionar o navegador do usuário para:
+            `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`
+        *   O backend então redirecionará o usuário para o IdP SAML para autenticação.
+    3.  **Tratamento do Callback SAML no Frontend:**
+        *   Após a autenticação bem-sucedida no IdP, o IdP redirecionará o usuário de volta para o endpoint ACS do backend (`/auth/saml/{idpId}/acs`).
+        *   O backend processará a asserção SAML, provisionará/logará o usuário e, se tudo ocorrer bem, redirecionará o usuário para uma URL no frontend, incluindo o token JWT da aplicação.
+        *   **URL de Redirecionamento para o Frontend (enviada pelo backend):**
+            `{NEXT_PUBLIC_APP_ROOT_URL}/saml/callback?token={JWT_TOKEN}&sso_success=true&provider=saml&idp_name={NOME_DO_IDP}`
+            *   Exemplo: `http://localhost:3000/saml/callback?token=ey...&sso_success=true&provider=saml&idp_name=MeuIdPSAML`
+        *   **Ação do Frontend na Rota `/saml/callback`:**
+            *   Extrair o `token` JWT dos query parameters.
+            *   Armazenar o token JWT (como no login padrão ou OAuth2).
+            *   Verificar `sso_success=true`.
+            *   Opcionalmente, usar `idp_name` para feedback.
+            *   Redirecionar o usuário para o dashboard ou página principal da aplicação.
+            *   Se `sso_success` não for `true` ou o token estiver ausente, exibir uma mensagem de erro apropriada.
+*   **Notas Importantes para SAML:**
+    *   A configuração correta do `IdentityProvider` no Phoenix GRC (especialmente `idp_entity_id`, `idp_sso_url`, `idp_x509_cert` e o `attribute_mapping_json`) e a configuração correspondente no IdP SAML (com o ACS URL e Entity ID do SP do Phoenix GRC) são cruciais.
+    *   O frontend deve instruir os administradores a obterem os metadados do SP do Phoenix GRC em `GET /auth/saml/{idpId}/metadata` para configurar o IdP.
 
 ## 4. Gerenciamento de Usuário Autenticado
 
@@ -411,7 +421,7 @@ Base Path: `/risks/{riskId}/stakeholders`
     *   **Resposta (200 OK):** `{ "message": "Stakeholder removed successfully" }`
 *   **Notas Frontend:**
     *   Para adicionar, usar o lookup de usuários (Seção 6.1). Listar stakeholders na página de detalhes do risco.
-    *   **Autorização Atual:** Qualquer membro da organização do risco pode adicionar/remover stakeholders. (Este comportamento pode ser restringido no futuro para Owner/Admin/Manager do risco/organização).
+    *   **Autorização:** Apenas o proprietário do risco, admins ou managers da organização podem adicionar ou remover stakeholders.
 
 #### 5.1.8. Workflow de Aceite de Risco
 
@@ -571,14 +581,17 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
             "score": "integer (0-100, opcional)",
             "assessment_date": "string (YYYY-MM-DD, opcional, default: hoje)",
             "comments": "string (opcional)",
-            // Campos C2M2 (opcionais)
-            "c2m2_maturity_level": "integer (0-3, opcional)",
+            // Campos para avaliação C2M2
             "c2m2_assessment_date": "string (YYYY-MM-DD, opcional)",
-            "c2m2_comments": "string (opcional)"
+            "c2m2_comments": "string (opcional)",
+            "c2m2_practice_evaluations": { // Obrigatório para cálculo de maturidade
+                "uuid-da-pratica-c2m2-1": "fully_implemented",
+                "uuid-da-pratica-c2m2-2": "partially_implemented"
+            }
         }
         ```
     *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência. Se fornecido, seu `objectName` será armazenado em `EvidenceURL`.
-*   **Resposta de Sucesso (200 OK):** Objeto `AuditAssessment` criado/atualizado.
+*   **Resposta de Sucesso (200 OK):** Objeto `AuditAssessment` criado/atualizado, com o `c2m2_maturity_level` calculado pelo backend e a lista de `c2m2_practice_evaluations` salvas.
 *   **Notas Frontend:**
     *   Permitir upload de arquivo ou input de URL externa para evidência.
     *   Lembre-se que `EvidenceURL` na resposta conterá o `objectName` se um arquivo foi carregado.
@@ -809,7 +822,43 @@ Estes endpoints fornecem funcionalidades de apoio para a UI.
     *   Sempre que um campo de modelo (ex: `AuditAssessment.EvidenceURL`) contiver um `objectName` (e não uma URL `http://` ou `https://` completa), o frontend deve usar este endpoint para obter uma URL temporária para exibir ou permitir o download do arquivo.
     *   Se `EvidenceURL` já for uma URL externa completa (ex: fornecida manualmente pelo usuário), ela pode ser usada diretamente.
 
-## 7. Tratamento de Erros da API
+### 6.3. Estrutura C2M2
+
+Para construir os formulários de avaliação de maturidade C2M2, o frontend precisa buscar a lista de domínios e práticas.
+
+*   **Listar Domínios C2M2:** `GET /api/v1/c2m2/domains`
+    *   **Descrição:** Retorna todos os domínios C2M2 (ex: Risk Management, Threat and Vulnerability Management).
+    *   **Resposta (200 OK):** Array de `C2M2Domain` (`{id, name, code, ...}`).
+*   **Listar Práticas de um Domínio:** `GET /api/v1/c2m2/domains/{domainId}/practices`
+    *   **Descrição:** Retorna todas as práticas para um domínio C2M2 específico.
+    *   **Resposta (200 OK):** Array de `C2M2Practice` (`{id, domain_id, code, description, target_mil, ...}`).
+*   **Notas Frontend:**
+    *   A UI deve primeiro permitir que o usuário selecione um domínio (buscado de `/c2m2/domains`).
+    *   Em seguida, buscar as práticas para esse domínio (`/c2m2/domains/{domainId}/practices`).
+    *   Para cada prática, apresentar um seletor com as opções de status: "not_implemented", "partially_implemented", "fully_implemented".
+    *   Coletar as respostas (mapa de `practiceID` -> `status`) para enviar no payload de `POST /api/v1/audit/assessments`.
+
+## 7. Setup Inicial da Aplicação (Wizard Flow)
+
+O backend possui um endpoint público para que o frontend possa verificar o estado da instalação e guiar um novo administrador por um Wizard de configuração inicial.
+
+*   **Endpoint de Status:** `GET /api/public/setup-status`
+*   **Descrição:** Verifica o estado atual da configuração do backend. O frontend deve chamar este endpoint ao iniciar para decidir se redireciona para a página de login ou para a página de setup.
+*   **Resposta de Sucesso (200 OK):**
+    ```json
+    {
+        "status": "string", // Valores possíveis abaixo
+        "message": "string" // Mensagem descritiva
+    }
+    ```
+*   **Ação do Frontend com base no `status`:**
+    *   `database_not_configured` ou `database_not_connected`: Exibir uma página de erro instruindo o administrador a verificar as variáveis de ambiente do backend (`.env`) e garantir que o serviço de banco de dados está rodando e acessível.
+    *   `migrations_not_run`: Exibir uma página de setup que instrui o administrador a executar o comando de setup inicial do backend (ex: `docker-compose run --rm backend setup`) para criar as tabelas do banco de dados, e depois recarregar a página.
+    *   `setup_pending_org` ou `setup_pending_admin`: Similar ao anterior, instruir o usuário a completar o comando de setup do backend, que é interativo e solicitará a criação da organização e do admin.
+    *   `setup_complete`: O setup está completo. O frontend pode prosseguir para a página de login normalmente.
+*   **Melhoria Futura:** Conforme sugerido na Seção 9, o backend pode ser melhorado para expor endpoints que permitam ao Wizard do frontend *executar* os passos de setup (criar organização, criar admin) via chamadas de API, em vez de depender da execução de um comando no terminal pelo usuário.
+
+## 8. Tratamento de Erros da API
 
 A API utiliza códigos de status HTTP padrão para indicar o sucesso ou falha de uma requisição.
 
@@ -840,64 +889,22 @@ A API utiliza códigos de status HTTP padrão para indicar o sucesso ou falha de
 *   Exibir mensagens de erro amigáveis para o usuário, mas logar os detalhes do erro (ou o corpo JSON completo do erro) no console do desenvolvedor para facilitar a depuração.
 *   Para `401 Unauthorized` devido a token expirado, implementar um fluxo para deslogar o usuário e/ou redirecioná-lo para a página de login (possivelmente com uma tentativa de refresh de token se essa funcionalidade for implementada no futuro).
 
-## 8. Considerações sobre o Setup Inicial via Wizard (Frontend)
-
-O backend suporta um fluxo de setup inicial que é idealmente conduzido por uma interface de usuário (Wizard) no frontend.
-
-**Detecção de Necessidade de Setup:**
-*   O frontend pode tentar fazer uma chamada para um endpoint simples que requer que a organização e o admin já existam (ex: `GET /api/v1/me` após uma tentativa de login "fictícia" ou um endpoint de status de setup dedicado - este último não existe atualmente).
-*   Alternativamente, se o backend for iniciado e não conseguir se conectar ao banco de dados (conforme configurado no `.env` do backend), ele não iniciará corretamente. O frontend, ao não conseguir se comunicar com a API, pode inferir um problema de setup ou de conexão.
-*   **Melhoria Sugerida para o Backend:** Criar um endpoint público (ex: `/api/public/setup-status`) que o frontend possa consultar para saber se o setup básico (conexão com DB, migrações, organização/admin inicial) já foi concluído.
-
-**Fluxo do Wizard (Interação Frontend-Backend):**
-
-1.  **Configuração do Banco de Dados (Frontend informa, Backend usa):**
-    *   O Wizard no frontend coletaria os dados de conexão do banco de dados do usuário (host, port, user, password, dbname, sslmode).
-    *   **Ação:** Estes dados NÃO são enviados para um endpoint. O usuário deve ser instruído a colocar esses dados no arquivo `.env` do **backend** e reiniciar o backend. O frontend pode, então, tentar verificar a conexão.
-2.  **Verificar Conexão com o Banco e Executar Migrações (Backend):**
-    *   Após o usuário configurar o `.env` do backend e reiniciá-lo, o backend tentará se conectar ao DB.
-    *   Se o comando `setup` for executado (`docker-compose run --rm backend setup` ou `./server setup`), o backend:
-        *   Conecta-se ao DB.
-        *   Executa as migrações (`database.MigrateDB(dbURL)`).
-    *   **Feedback para o Frontend:** O frontend precisaria de uma forma de saber se esta etapa foi bem-sucedida. Se o Wizard for uma aplicação frontend separada que orquestra o setup, ela poderia invocar o comando de setup do backend e analisar sua saída, ou depender de um endpoint de status.
-3.  **Criar Primeira Organização e Usuário Admin (Backend):**
-    *   O comando `setup` do backend, após as migrações, solicita interativamente no console os detalhes da primeira organização e do usuário admin.
-    *   **Desafio para Wizard no Browser:** Este fluxo interativo no console do backend não se traduz diretamente para um Wizard no browser.
-    *   **Soluções Possíveis para Wizard no Browser:**
-        *   **Opção A (Recomendada):** O backend expõe endpoints específicos para o Wizard após as migrações terem sido executadas com sucesso.
-            *   Ex: `POST /api/setup/initialize` (público, mas talvez protegido por um token de setup único ou primeira execução)
-            *   Payload: `{ "organization_name": "...", "admin_name": "...", "admin_email": "...", "admin_password": "..." }`
-            *   O backend então cria a organização e o admin.
-        *   **Opção B:** O frontend instrui o usuário a executar o comando `docker-compose run --rm backend setup` separadamente no terminal e depois voltar ao frontend.
-
-**Fluxo Simplificado Assumindo Endpoints de Setup (Opção A):**
-
-1.  **Frontend (Página de Setup):**
-    *   Instrui o usuário a configurar as variáveis de DB no `.env` do backend e reiniciar o backend.
-    *   Após o usuário confirmar, o frontend chama um endpoint (ex: `POST /api/public/setup/check-db-and-migrate`).
-        *   Backend tenta conectar ao DB e rodar migrações. Retorna sucesso/falha.
-    *   Se sucesso, o frontend exibe formulários para:
-        *   Nome da Organização.
-        *   Nome, Email, Senha do Admin.
-    *   Frontend envia esses dados para `POST /api/public/setup/create-admin-org`.
-        *   Backend cria a organização e o admin. Retorna sucesso/falha.
-    *   Se sucesso, redireciona para a página de login.
-
-**Nota:** Os endpoints `/api/public/setup/*` mencionados acima são sugestões e **não existem atualmente**. A implementação atual do setup é via CLI interativa do backend. Para um Wizard no browser, o backend precisaria ser adaptado para expor tais endpoints.
-
 ## 9. Apêndice: Lista de Endpoints Chave (Resumo)
 
 *   `GET /health`
+*   `GET /api/public/setup-status`
 *   `GET /api/public/social-identity-providers`
 *   `POST /auth/login`
 *   `POST /auth/login/2fa/verify`
 *   `POST /auth/login/2fa/backup-code/verify`
 *   `GET /auth/oauth2/{provider}/{idpId}/login`
+*   `GET /auth/saml/{idpId}/login`
 *   `GET /api/v1/me`
 *   `GET /api/v1/me/dashboard/summary`
 *   CRUD em `/api/v1/risks`
 *   CRUD em `/api/v1/vulnerabilities`
 *   Endpoints em `/api/v1/audit/...`
+*   Endpoints em `/api/v1/c2m2/...`
 *   Endpoints de administração em `/api/v1/organizations/{orgId}/...`
 *   `GET /api/v1/users/organization-lookup`
 *   `GET /api/v1/files/signed-url`

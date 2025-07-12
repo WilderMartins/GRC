@@ -34,7 +34,8 @@ type AppConfig struct {
 	AWSS3Bucket         string // Novo para S3
 	FileStorageProvider                string // "gcs" ou "s3"
 	FrontendBaseURL                    string // Adicionado para links em emails/notificações
-	DefaultOrganizationIDForGlobalSSO string // UUID da organização padrão para novos usuários de SSO global
+	DefaultOrganizationIDForGlobalSSO string `mapstructure:"DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO"`
+	AllowSAMLUserCreation             bool   `mapstructure:"ALLOW_SAML_USER_CREATION"` // Nova config para SAML
 	FeatureToggles                     map[string]bool
 	// Adicionar outras configurações aqui
 }
@@ -86,6 +87,7 @@ func LoadConfig() {
 	Cfg.FileStorageProvider = strings.ToLower(getEnv("FILE_STORAGE_PROVIDER", "gcs")) // Default para GCS
 	Cfg.FrontendBaseURL = getEnv("FRONTEND_BASE_URL", "http://localhost:3000")
 	Cfg.DefaultOrganizationIDForGlobalSSO = getEnv("DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO", "")
+	Cfg.AllowSAMLUserCreation = getEnvAsBool("ALLOW_SAML_USER_CREATION", false) // Default false
 
 
 	// Carregar Feature Toggles
