@@ -30,6 +30,7 @@ func RunMigrations(db *gorm.DB) error {
 		&models.C2M2Domain{},
 		&models.C2M2Practice{},
 		&models.SystemSetting{},
+		&models.PasswordResetToken{},
 	)
 
 	if err != nil {

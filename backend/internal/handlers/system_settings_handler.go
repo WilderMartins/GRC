@@ -105,3 +105,31 @@ func UpdateSystemSettingsHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "System settings updated successfully"})
 }
+
+// SendTestEmailHandler envia um e-mail de teste para o usuário autenticado.
+func SendTestEmailHandler(c *gin.Context) {
+	log := phxlog.L.Named("SendTestEmailHandler")
+	userEmail, exists := c.Get("userEmail")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User email not found in token"})
+		return
+	}
+
+	to := userEmail.(string)
+	subject := "Phoenix GRC - Test Email"
+	bodyHTML := "<h1>Success!</h1><p>This is a test email from your Phoenix GRC instance.</p><p>Your email settings are configured correctly.</p>"
+	bodyText := "Success! This is a test email from your Phoenix GRC instance. Your email settings are configured correctly."
+
+	// Re-inicializa o serviço de e-mail para garantir que ele use as configurações mais recentes
+	// que podem ter sido acabadas de salvar pelo usuário.
+	notifications.InitEmailService()
+
+	err := notifications.SendEmail(to, subject, bodyHTML, bodyText)
+	if err != nil {
+		log.Error("Failed to send test email", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send test email: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Test email sent successfully to " + to})
+}

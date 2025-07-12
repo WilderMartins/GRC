@@ -27,6 +27,7 @@ const AdminSettingsPage = (props: InferGetStaticPropsType<typeof getStaticProps>
   const [settings, setSettings] = useState<SystemSetting[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTestingEmail, setIsTestingEmail] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -62,6 +63,24 @@ const AdminSettingsPage = (props: InferGetStaticPropsType<typeof getStaticProps>
       showError(t('notifications.save_error'));
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    setIsTestingEmail(true);
+    try {
+      // É uma boa prática salvar as configurações antes de testar
+      await handleSave();
+      const response = await axios.post('/api/v1/admin/settings/test-email');
+      showSuccess(response.data.message || t('notifications.test_email_success'));
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        showError(error.response.data.error || t('notifications.test_email_error'));
+      } else {
+        showError(t('notifications.test_email_error'));
+      }
+    } finally {
+      setIsTestingEmail(false);
     }
   };
 
@@ -107,11 +126,19 @@ const AdminSettingsPage = (props: InferGetStaticPropsType<typeof getStaticProps>
             ))}
           </dl>
         </div>
-        <div className="px-4 py-3 bg-gray-50 dark:bg-gray-700/50 text-right sm:px-6">
+        <div className="px-4 py-3 bg-gray-50 dark:bg-gray-700/50 flex justify-end items-center space-x-3 sm:px-6">
+          <button
+            type="button"
+            onClick={handleTestEmail}
+            disabled={isSaving || isTestingEmail}
+            className="inline-flex justify-center py-2 px-4 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm bg-white dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50"
+          >
+            {isTestingEmail ? t('buttons.testing_email') : t('buttons.test_email')}
+          </button>
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || isTestingEmail}
             className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50"
           >
             {isSaving ? t('buttons.saving') : t('buttons.save')}

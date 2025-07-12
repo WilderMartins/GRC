@@ -116,8 +116,6 @@ func startServer() {
 		phxlog.L.Warn("File storage initialization failed. Uploads may not work.", zap.Error(err))
 	}
 
-	notifications.InitEmailService()
-
 	dbHost := os.Getenv("POSTGRES_HOST")
 	dbPort := os.Getenv("POSTGRES_PORT")
 	dbUser := os.Getenv("POSTGRES_USER")
@@ -139,6 +137,9 @@ func startServer() {
 		phxlog.L.Fatal("Failed to connect to database for the server", zap.Error(err))
 	}
 	phxlog.L.Info("Database connection established for the server.")
+
+	// Inicializar serviços que dependem do DB
+	notifications.InitEmailService()
 
 	router := gin.New() // Usar gin.New() para controle explícito de middleware
 
@@ -209,6 +210,10 @@ func startServer() {
 		authRoutes.POST("/login/2fa/verify", handlers.LoginVerifyTOTPHandler)
 		// 2FA Backup Code Verification as part of login
 		authRoutes.POST("/login/2fa/backup-code/verify", handlers.LoginVerifyBackupCodeHandler)
+
+		// Password Reset
+		authRoutes.POST("/forgot-password", handlers.ForgotPasswordHandler)
+		authRoutes.POST("/reset-password", handlers.ResetPasswordHandler)
 	}
 
 	apiV1 := router.Group("/api/v1")
@@ -342,6 +347,7 @@ func startServer() {
 			{
 				settingsRoutes.GET("", handlers.ListSystemSettingsHandler)
 				settingsRoutes.PUT("", handlers.UpdateSystemSettingsHandler)
+				settingsRoutes.POST("/test-email", handlers.SendTestEmailHandler)
 			}
 		}
 	}

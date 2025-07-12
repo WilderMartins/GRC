@@ -38,3 +38,12 @@ func (s *SystemSetting) GetDecryptedValue() (string, error) {
 	}
 	return utils.Decrypt(s.Value)
 }
+
+// GetSystemSetting busca uma configuração específica no banco de dados e retorna seu valor descriptografado.
+func GetSystemSetting(db *gorm.DB, key string) (string, error) {
+	var setting SystemSetting
+	if err := db.Where("key = ?", key).First(&setting).Error; err != nil {
+		return "", err
+	}
+	return setting.GetDecryptedValue()
+}
