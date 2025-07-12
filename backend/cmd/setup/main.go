@@ -3,10 +3,11 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"phoenixgrc/backend/internal/seeders"
 	"strings"
 
@@ -43,7 +44,7 @@ func RunSetup() {
 	dbUser := readInput(reader, "Enter Database User: ")
 	dbPassword, err := readPassword("Enter Database Password: ")
 	if err != nil {
-		log.Fatalf("Failed to read database password: %v", err)
+		phxlog.L.Fatal("Failed to read database password", zap.Error(err))
 	}
 	dbName := readInput(reader, "Enter Database Name: ")
 	dbSSLMode := readInput(reader, "Enter Database SSL Mode (e.g., disable, require): ")
@@ -53,7 +54,7 @@ func RunSetup() {
 
 	fmt.Println("Connecting to database...")
 	if err := database.ConnectDB(dsn); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		phxlog.L.Fatal("Failed to connect to database", zap.Error(err))
 	}
 	fmt.Println("Successfully connected to the database.")
 
@@ -93,7 +94,7 @@ func RunSetup() {
 	)
 
 	if err := database.MigrateDB(migrateDbURL); err != nil {
-		log.Fatalf("Database migration process failed: %v", err)
+		phxlog.L.Fatal("Database migration process failed", zap.Error(err))
 	}
 	fmt.Println("Database migrations completed successfully.")
 
@@ -101,10 +102,10 @@ func RunSetup() {
 	fmt.Println("\n--- Seeding Audit Frameworks and Controls ---")
 	db := database.GetDB()
 	if db == nil {
-		log.Fatal("Failed to get database instance for seeding.")
+		phxlog.L.Fatal("Failed to get database instance for seeding.")
 	}
 	if err := seeders.SeedAuditFrameworksAndControls(db); err != nil {
-		log.Fatalf("Failed to seed audit frameworks and controls: %v", err)
+		phxlog.L.Fatal("Failed to seed audit frameworks and controls", zap.Error(err))
 	}
 	fmt.Println("Audit frameworks and controls seeded successfully.")
 
@@ -120,7 +121,7 @@ func RunSetup() {
 		Name: orgName,
 	}
 	if err := db.Create(&organization).Error; err != nil {
-		log.Fatalf("Failed to create organization: %v", err)
+		phxlog.L.Fatal("Failed to create organization", zap.Error(err))
 	}
 	fmt.Printf("Organization '%s' created successfully with ID: %s\n", organization.Name, organization.ID)
 
@@ -134,7 +135,7 @@ func RunSetup() {
 	for {
 		adminPassword, err = readPassword("Enter Admin User Password: ")
 		if err != nil {
-			log.Fatalf("Failed to read admin password: %v", err)
+			phxlog.L.Fatal("Failed to read admin password", zap.Error(err))
 		}
 		if adminPassword == "" {
 			fmt.Println("Password cannot be empty. Please try again.")
@@ -142,7 +143,7 @@ func RunSetup() {
 		}
 		adminPasswordConfirm, err = readPassword("Confirm Admin User Password: ")
 		if err != nil {
-			log.Fatalf("Failed to read admin password confirmation: %v", err)
+			phxlog.L.Fatal("Failed to read admin password confirmation", zap.Error(err))
 		}
 		if adminPassword == adminPasswordConfirm {
 			break
@@ -152,7 +153,7 @@ func RunSetup() {
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatalf("Failed to hash password: %v", err)
+		phxlog.L.Fatal("Failed to hash password", zap.Error(err))
 	}
 
 	adminUser := models.User{
@@ -165,7 +166,7 @@ func RunSetup() {
 	}
 
 	if err := db.Create(&adminUser).Error; err != nil {
-		log.Fatalf("Failed to create admin user: %v. Ensure email is unique.", err)
+		phxlog.L.Fatal("Failed to create admin user. Ensure email is unique.", zap.Error(err))
 	}
 	fmt.Printf("Admin user '%s' created successfully.\n", adminUser.Email)
 

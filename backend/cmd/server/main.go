@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap" // Adicionar import do zap
 	"time"            // Para time.RFC3339 no middleware de log
 
+	"phoenixgrc/backend/pkg/config"                        // Importar config para Cfg.Environment
 	phxmiddleware "phoenixgrc/backend/internal/middleware" // Importar o pacote de middleware
 	"phoenixgrc/backend/cmd/setup"                         // Descomentado para permitir a chamada do setup
 	// "phoenixgrc/backend/cmd/setup" // Comentado para permitir compilação do server isoladamente. Refatorar setup.
@@ -33,19 +34,16 @@ import (
 
 func startServer() {
 	// Inicializar o logger global zap primeiro
-	// Usar GIN_MODE para determinar o ambiente (development vs production) para o logger
-	// e LOG_LEVEL para o nível de log.
-	appEnv := os.Getenv("GIN_MODE") // gin.ReleaseMode ("release") ou gin.DebugMode ("debug")
-	if strings.ToLower(appEnv) == gin.ReleaseMode {
-		appEnv = "production" // Mapear "release" para "production" para o logger
-	} else {
-		appEnv = "development" // Default para development se não for release
-	}
-	logLevel := os.Getenv("LOG_LEVEL")
+	// Usar config.Cfg.Environment (carregado de APP_ENV) e LOG_LEVEL.
+	// A função Init do pacote log já lê LOG_LEVEL e APP_ENV em seu próprio init(),
+	// mas chamá-la aqui explicitamente com os valores da config garante que
+	// a configuração carregada por LoadConfig() seja usada.
+	logLevel := os.Getenv("LOG_LEVEL") // LOG_LEVEL pode ser sobrescrito por env var direta
 	if logLevel == "" {
-		logLevel = "info" // Default
+		logLevel = "info" // Default se LOG_LEVEL não estiver diretamente no env para esta chamada
 	}
-	phxlog.Init(logLevel, appEnv) // Usar phxlog.Init para evitar conflito com log.L padrão do Go
+	// config.Cfg.Environment já foi carregado e padronizado por config.LoadConfig()
+	phxlog.Init(logLevel, config.Cfg.Environment)
 
 	// Agora usar phxlog.L ou phxlog.S para logging
 	if err := auth.InitializeJWT(); err != nil {
@@ -296,18 +294,15 @@ func main() {
 		// O logger já foi inicializado pelo init() do pacote phxlog.
 		// Podemos re-inicializá-lo aqui se quisermos garantir consistência com as vars de env
 		// lidas em main, mas o init() do pkg/log já faz isso.
-		// Por segurança, podemos chamar phxlog.Init aqui também, não fará mal.
-		appEnv := os.Getenv("GIN_MODE")
-		if strings.ToLower(appEnv) == gin.ReleaseMode {
-			appEnv = "production"
-		} else {
-			appEnv = "development"
-		}
+		// Por segurança, podemos chamar phxlog.Init aqui também, para garantir que usa config.Cfg.Environment
+		// que foi carregado de APP_ENV.
 		logLevel := os.Getenv("LOG_LEVEL")
 		if logLevel == "" {
 			logLevel = "info"
 		}
-		phxlog.Init(logLevel, appEnv) // Re-inicializa com base nas vars de main.
+		// config.Cfg.Environment já foi carregado e padronizado por config.LoadConfig()
+		// que é chamado pelo init() do pacote config, que por sua vez é importado por aqui ou por phxlog.
+		phxlog.Init(logLevel, config.Cfg.Environment)
 
 		phxlog.L.Info("Starting Phoenix GRC setup...")
 		setup.RunSetup() // RunSetup usará o logger global phxlog.L / phxlog.S

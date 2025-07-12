@@ -4,10 +4,11 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"phoenixgrc/backend/internal/notifications"
 	"phoenixgrc/backend/internal/riskutils"
 	"phoenixgrc/backend/pkg/features"
@@ -99,7 +100,10 @@ func GetRiskHandler(c *gin.Context) {
 		return
 	}
 	if features.IsEnabled("LOG_DETALHADO_RISCO") {
-		log.Printf("FEATURE_LOG_DETALHADO_RISCO: Detalhes do risco %s solicitados: %+v", riskID, risk)
+		phxlog.L.Debug("Detailed risk information requested (feature flag enabled)",
+			zap.String("riskID", riskID.String()),
+			zap.Any("risk", risk), // zap.Any pode ser verboso; considerar campos específicos
+		)
 	}
 	c.JSON(http.StatusOK, risk)
 }
@@ -350,9 +354,15 @@ func SubmitRiskForAcceptanceHandler(c *gin.Context) {
 			risk.Impact, risk.Probability, risk.RiskLevel,
 		)
 		notifications.NotifyUserByEmail(approverUser.ID, emailSubject, emailBody)
-		log.Printf("Notificação por email enviada para o aprovador %s sobre submissão de risco '%s'", approverUser.Email, risk.Title)
+		phxlog.L.Info("Risk submission approval notification sent",
+			zap.String("approverEmail", approverUser.Email),
+			zap.String("riskTitle", risk.Title),
+			zap.String("riskID", risk.ID.String()))
 	} else {
-		log.Printf("Aprovador (ID: %s) não encontrado ou inativo, notificação por email não enviada para submissão do risco '%s'.", approvalWorkflow.ApproverID, risk.Title)
+		phxlog.L.Warn("Approver not found or inactive for risk submission notification",
+			zap.String("approverID", approvalWorkflow.ApproverID.String()),
+			zap.String("riskTitle", risk.Title),
+			zap.String("riskID", risk.ID.String()))
 	}
 	c.JSON(http.StatusCreated, approvalWorkflow)
 }
@@ -413,7 +423,10 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
 						approvedRisk.Title, approverDetails.Name, approvedRisk.Status, approvalWorkflow.Comments)
 					notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
 				} else {
-					log.Printf("Erro ao buscar detalhes do aprovador %s para notificação: %v", tokenUserID.(uuid.UUID), errDb)
+					phxlog.L.Error("Failed to fetch approver details for notification",
+						zap.String("approverID", tokenUserID.(uuid.UUID).String()),
+						zap.Error(errDb))
+					// Fallback notification without approver name
 					emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
 					emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada.\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
 						approvedRisk.Title, approvedRisk.Status, approvalWorkflow.Comments)

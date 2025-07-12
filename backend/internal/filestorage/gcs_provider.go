@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	// "os" // Removido, config.Cfg é usado
 	"phoenixgrc/backend/pkg/config" // Adicionado para acessar config.Cfg
+	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"net/url"
 	"strings"
 	"time"
@@ -36,11 +37,11 @@ func InitializeGCSProvider() (*GCSStorageProvider, error) {
 	// GOOGLE_APPLICATION_CREDENTIALS é lido automaticamente pela biblioteca cliente se estiver definido no ambiente.
 
 	if projectID == "" {
-		log.Println("GCS_PROJECT_ID not set in config. File upload to GCS will be disabled.")
+		phxlog.L.Warn("GCS_PROJECT_ID not set in config. File upload to GCS will be disabled.")
 		return nil, nil // Retorna nil, nil para indicar que o provedor está desabilitado
 	}
 	if bucketName == "" {
-		log.Println("GCS_BUCKET_NAME not set in config. File upload to GCS will be disabled.")
+		phxlog.L.Warn("GCS_BUCKET_NAME not set in config. File upload to GCS will be disabled.")
 		return nil, nil // Retorna nil, nil para indicar que o provedor está desabilitado
 	}
 
@@ -50,10 +51,11 @@ func InitializeGCSProvider() (*GCSStorageProvider, error) {
 	// Em um ambiente GCP (Cloud Run, GKE, etc.), as credenciais da conta de serviço associada são usadas.
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Google Cloud Storage client: %w. Ensure GOOGLE_APPLICATION_CREDENTIALS is set correctly for local/Docker or Workload Identity is configured in GCP.", err)
+		phxlog.L.Error("Failed to create Google Cloud Storage client. Ensure GOOGLE_APPLICATION_CREDENTIALS is set correctly for local/Docker or Workload Identity is configured in GCP.", zap.Error(err))
+		return nil, fmt.Errorf("failed to create Google Cloud Storage client: %w", err)
 	}
 
-	log.Printf("Google Cloud Storage provider initialized for project %s, bucket %s", projectID, bucketName)
+	phxlog.L.Info("Google Cloud Storage provider initialized", zap.String("projectID", projectID), zap.String("bucketName", bucketName))
 
 	provider := &GCSStorageProvider{
 		client:     localStorageClient, // Usa o cliente localmente definido
@@ -87,7 +89,9 @@ func (g *GCSStorageProvider) UploadFile(ctx context.Context, organizationID stri
 		return "", fmt.Errorf("failed to close GCS object writer: %w", err)
 	}
 
-	log.Printf("File uploaded successfully to GCS: gs://%s/%s", g.bucketName, objectName)
+	phxlog.L.Info("File uploaded successfully to GCS",
+		zap.String("bucket", g.bucketName),
+		zap.String("objectName", objectName))
 	return objectName, nil // Retorna o objectName
 }
 
@@ -103,13 +107,21 @@ func (g *GCSStorageProvider) DeleteFile(ctx context.Context, objectName string) 
 	obj := g.client.Bucket(g.bucketName).Object(objectName)
 	if err := obj.Delete(ctx); err != nil {
 		if err == storage.ErrObjectNotExist {
-			log.Printf("GCS DeleteFile: Object %s not found in bucket %s (considered successful for idempotency).", objectName, g.bucketName)
+			phxlog.L.Info("GCS DeleteFile: Object not found (considered successful for idempotency)",
+				zap.String("objectName", objectName),
+				zap.String("bucket", g.bucketName))
 			return nil
 		}
+		phxlog.L.Error("Failed to delete object from GCS",
+			zap.String("objectName", objectName),
+			zap.String("bucket", g.bucketName),
+			zap.Error(err))
 		return fmt.Errorf("failed to delete object '%s' from GCS bucket '%s': %w", objectName, g.bucketName, err)
 	}
 
-	log.Printf("File deleted successfully from GCS: gs://%s/%s", g.bucketName, objectName)
+	phxlog.L.Info("File deleted successfully from GCS",
+		zap.String("bucket", g.bucketName),
+		zap.String("objectName", objectName))
 	return nil
 }
 

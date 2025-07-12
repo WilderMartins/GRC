@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	// "os" // log e fmt.Fprintf(os.Stderr,...) serão substituídos
 	"phoenixgrc/backend/internal/auth"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"strings"
 	"time"
 
@@ -195,8 +197,10 @@ func GithubCallbackHandler(c *gin.Context) {
 		reqEmails, _ := http.NewRequest("GET", "https://api.github.com/user/emails", nil)
 		respEmails, errEmails := client.Do(reqEmails)
 		if errEmails != nil {
-			// Log this error but don't necessarily fail the login if primary email might be found later
-			fmt.Fprintf(os.Stderr, "Failed to get user emails from Github: %v\n", errEmails)
+			phxlog.L.Warn("Failed to get user emails from Github during OAuth callback",
+				zap.String("idpIDStr", idpIDStr), // Adicionar contexto
+				zap.Error(errEmails))
+			// Continuar, pois o email primário pode ter sido encontrado ou pode ser um erro não fatal.
 		} else {
 			defer respEmails.Body.Close()
 			bodyEmails, _ := io.ReadAll(respEmails.Body)
@@ -260,7 +264,9 @@ func GithubCallbackHandler(c *gin.Context) {
 				if errParseOrg == nil {
 					orgIDForNewUser = uuid.NullUUID{UUID: parsedOrgID, Valid: true}
 				} else {
-					log.Printf("Aviso: DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO ('%s') não é um UUID válido. Usuário será criado sem organização.", appConfig.Cfg.DefaultOrganizationIDForGlobalSSO)
+					phxlog.L.Warn("DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO is not a valid UUID. User will be created without an organization.",
+						zap.String("configuredDefaultOrgID", appConfig.Cfg.DefaultOrganizationIDForGlobalSSO),
+						zap.Error(errParseOrg))
 				}
 			}
 			user = models.User{

@@ -1,13 +1,15 @@
 package config
 
 import (
-	"log"
+	"log" // Manter log padrão para mensagens de bootstrap antes do logger zap ser configurado
 	"os"
 	"strconv"
 	"strings" // Adicionado para HasPrefix e TrimPrefix
 	"time"
 
 	"github.com/joho/godotenv"
+	// phxlog "phoenixgrc/backend/pkg/log" // Não importar aqui para evitar ciclo de importação
+	// "go.uber.org/zap"                 // Não importar aqui
 )
 
 // AppConfig detém a configuração da aplicação.
@@ -22,7 +24,8 @@ type AppConfig struct {
 	DBName              string
 	DBSchema            string
 	EnableDBSSL         bool
-	Environment         string // "development", "staging", "production"
+	Environment         string // "development", "staging", "production" (carregado de APP_ENV)
+	AppVersion          string // Versão da aplicação (carregado de APP_VERSION)
 	GCSProjectID        string
 	GCSBucketName       string
 	AWSRegion           string
@@ -42,27 +45,36 @@ var Cfg AppConfig
 func LoadConfig() {
 	// Carregar .env para desenvolvimento local, ignorar erro se não existir (para produção)
 	if err := godotenv.Load(); err != nil {
-		log.Println("Aviso: Arquivo .env não encontrado ou erro ao carregar:", err)
+		// Usar phxlog aqui pode ser problemático se o logger ainda não estiver 100% configurado
+		// ou se houver dependência cíclica. O log padrão do Go é seguro para esta fase inicial.
+		log.Println("Warning: .env file not found or error loading it:", err)
 	}
 
-	Cfg.Port = getEnv("SERVER_PORT", "8080") // Mudado de PORT para SERVER_PORT para consistência com docker-compose
+	Cfg.Port = getEnv("SERVER_PORT", "8080")
 	Cfg.JWTSecret = getEnv("JWT_SECRET_KEY", "a_very_secure_secret_key_please_change_me_32_chars_long")
-	jwtLifespanHours, err := strconv.Atoi(getEnv("JWT_TOKEN_LIFESPAN_HOURS", "24"))
+	jwtLifespanHoursStr := getEnv("JWT_TOKEN_LIFESPAN_HOURS", "24")
+	jwtLifespanHours, err := strconv.Atoi(jwtLifespanHoursStr)
 	if err != nil {
-		log.Printf("Aviso: JWT_TOKEN_LIFESPAN_HOURS inválido, usando default 24h. Erro: %v", err)
+		log.Printf("Warning: Invalid JWT_TOKEN_LIFESPAN_HOURS ('%s'), using default 24h. Error: %v", jwtLifespanHoursStr, err)
 		jwtLifespanHours = 24
 	}
 	Cfg.JWTTokenLifespan = time.Duration(jwtLifespanHours) * time.Hour
 
-	Cfg.DBHost = getEnv("POSTGRES_HOST", "db") // Consistente com docker-compose
+	Cfg.DBHost = getEnv("POSTGRES_HOST", "db")
 	Cfg.DBPort = getEnv("POSTGRES_PORT", "5432")
 	Cfg.DBUser = getEnv("POSTGRES_USER", "admin")
 	Cfg.DBPassword = getEnv("POSTGRES_PASSWORD", "password123")
 	Cfg.DBName = getEnv("POSTGRES_DB", "phoenix_grc_dev")
-	Cfg.DBSchema = getEnv("DB_SCHEMA", "phoenix_grc") // Esquema padrão, verificar se é usado
-	Cfg.EnableDBSSL = getEnvAsBool("POSTGRES_SSLMODE_ENABLE", false) // POSTGRES_SSLMODE é string, EnableDBSSL é bool
+	Cfg.DBSchema = getEnv("DB_SCHEMA", "phoenix_grc")
+	Cfg.EnableDBSSL = getEnvAsBool("POSTGRES_SSLMODE_ENABLE", false)
 
-	Cfg.Environment = getEnv("GIN_MODE", "development") // GIN_MODE (debug/release) ou APP_ENV
+	// Padronizar para APP_ENV. GIN_MODE ainda pode ser usado pelo Gin, mas nossa config usa APP_ENV.
+	Cfg.Environment = strings.ToLower(getEnv("APP_ENV", "development"))
+	if Cfg.Environment != "development" && Cfg.Environment != "staging" && Cfg.Environment != "production" {
+		log.Printf("Warning: Invalid APP_ENV value '%s'. Defaulting to 'development'. Allowed: development, staging, production.", Cfg.Environment)
+		Cfg.Environment = "development"
+	}
+	Cfg.AppVersion = getEnv("APP_VERSION", "0.0.0-dev") // Default version
 
 	Cfg.GCSProjectID = getEnv("GCS_PROJECT_ID", "")
 	Cfg.GCSBucketName = getEnv("GCS_BUCKET_NAME", "")

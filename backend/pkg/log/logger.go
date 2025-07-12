@@ -68,9 +68,11 @@ func init() {
 	if logLevel == "" {
 		logLevel = "info" // Default log level
 	}
-	appEnv := os.Getenv("APP_ENV") // Ou GIN_MODE, se preferir
-	if appEnv == "" {
-		appEnv = "development" // Default para ambiente de desenvolvimento
+	// Usar APP_ENV como a fonte primária para o ambiente da aplicação.
+	// GIN_MODE pode ser usado separadamente pelo Gin, mas para logging, APP_ENV é o padrão.
+	appEnv := strings.ToLower(os.Getenv("APP_ENV"))
+	if appEnv != "production" && appEnv != "staging" {
+		appEnv = "development" // Default para development se não for production/staging
 	}
 
 	// Inicialização inicial do logger.
