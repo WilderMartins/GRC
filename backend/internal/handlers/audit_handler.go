@@ -87,7 +87,47 @@ func GetFrameworkControlsHandler(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, controls)
+
+	// Para cada controle, buscar a avaliação da organização do usuário (se existir)
+	orgID, orgOk := c.Get("organizationID")
+	if !orgOk {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Organization ID not found in token for fetching assessments"})
+		return
+	}
+	organizationID := orgID.(uuid.UUID)
+
+	type AuditControlWithAssessmentResponse struct {
+		models.AuditControl
+		Assessment *models.AuditAssessment `json:"assessment,omitempty"`
+	}
+
+	responseControls := make([]AuditControlWithAssessmentResponse, 0, len(controls))
+	controlIDs := make([]uuid.UUID, len(controls))
+	for i, ctrl := range controls {
+		controlIDs[i] = ctrl.ID
+	}
+
+	var assessments []models.AuditAssessment
+	if len(controlIDs) > 0 {
+		db.Where("organization_id = ? AND audit_control_id IN (?)", organizationID, controlIDs).Find(&assessments)
+	}
+
+	assessmentMap := make(map[uuid.UUID]models.AuditAssessment)
+	for _, assess := range assessments {
+		assessmentMap[assess.AuditControlID] = assess
+	}
+
+	for _, ctrl := range controls {
+		respCtrl := AuditControlWithAssessmentResponse{
+			AuditControl: ctrl,
+		}
+		if assessment, found := assessmentMap[ctrl.ID]; found {
+			respCtrl.Assessment = &assessment
+		}
+		responseControls = append(responseControls, respCtrl)
+	}
+
+	c.JSON(http.StatusOK, responseControls)
 }
 
 // --- Assessment Handlers ---

@@ -16,32 +16,16 @@ type IdentityProviderPayload struct {
 	ProviderType         models.IdentityProviderType `json:"provider_type" binding:"required,oneof=saml oauth2_google oauth2_github"`
 	Name                 string                    `json:"name" binding:"required,min=3,max=100"`
 	IsActive             *bool                     `json:"is_active"` // Pointer to distinguish between false and not provided
+	IsPublic             *bool                     `json:"is_public"` // Pointer for optional public flag
 	ConfigJSON           json.RawMessage           `json:"config_json" binding:"required"` // Keep as RawMessage for flexibility
 	AttributeMappingJSON json.RawMessage           `json:"attribute_mapping_json"`       // Optional
 }
 
-// Helper to check if the authenticated user is an admin of the target organization
-func checkOrgAdmin(c *gin.Context, targetOrgID uuid.UUID) bool {
-	tokenOrgID, orgExists := c.Get("organizationID")
-	tokenUserRole, roleExists := c.Get("userRole")
-
-	if !orgExists || !roleExists {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing token information"})
-		return false
-	}
-	if tokenOrgID.(uuid.UUID) != targetOrgID {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access denied: You do not belong to this organization"})
-		return false
-	}
-	// Assuming RoleAdmin allows managing IdPs for their own organization.
-	// More granular permissions could be added later.
-	if tokenUserRole.(models.UserRole) != models.RoleAdmin && tokenUserRole.(models.UserRole) != models.RoleManager {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Access denied: Insufficient privileges"})
-		return false
-	}
-	return true
-}
-
+// checkOrgAdminOrManager é definido em organization_user_handler.go
+// Se não for movido para um pacote comum, precisaria ser acessível ou duplicado.
+// Para este exercício, vamos assumir que podemos usar checkOrgAdminOrManager de alguma forma,
+// ou que a lógica embutida abaixo é suficiente e já é Admin OU Manager.
+// A função checkOrgAdmin foi removida pois checkOrgAdminOrManager é mais genérica.
 
 // CreateIdentityProviderHandler handles adding a new identity provider for an organization.
 func CreateIdentityProviderHandler(c *gin.Context) {
@@ -52,9 +36,17 @@ func CreateIdentityProviderHandler(c *gin.Context) {
 		return
 	}
 
-	if !checkOrgAdmin(c, targetOrgID) {
-		return // Error response already sent by checkOrgAdmin
+	// Usar checkOrgAdminOrManager (definido em organization_user_handler.go ou um helper comum)
+	// Por enquanto, replicando a lógica de verificação de admin/manager aqui para manter o arquivo self-contained
+	// até que helpers de autorização sejam centralizados.
+	tokenOrgID, orgOk := c.Get("organizationID")
+	tokenUserRole, roleOk := c.Get("userRole")
+	if !orgOk || !roleOk || tokenOrgID.(uuid.UUID) != targetOrgID ||
+		(tokenUserRole.(models.UserRole) != models.RoleAdmin && tokenUserRole.(models.UserRole) != models.RoleManager) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied or insufficient privileges to manage identity providers"})
+		return
 	}
+
 
 	var payload IdentityProviderPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -80,13 +72,17 @@ func CreateIdentityProviderHandler(c *gin.Context) {
 	if payload.IsActive != nil {
 		isActive = *payload.IsActive
 	}
-
+	isPublic := false // Default to false
+	if payload.IsPublic != nil {
+		isPublic = *payload.IsPublic
+	}
 
 	idp := models.IdentityProvider{
 		OrganizationID:       targetOrgID,
 		ProviderType:         payload.ProviderType,
 		Name:                 payload.Name,
 		IsActive:             isActive,
+		IsPublic:             isPublic, // Adicionado
 		ConfigJSON:           string(payload.ConfigJSON),
 		AttributeMappingJSON: string(payload.AttributeMappingJSON),
 	}
@@ -166,7 +162,12 @@ func GetIdentityProviderHandler(c *gin.Context) {
 		return
 	}
 
-	if !checkOrgAdmin(c, targetOrgID) {
+	// Usar checkOrgAdminOrManager ou lógica similar
+	tokenOrgIDGet, orgOkGet := c.Get("organizationID")
+	tokenUserRoleGet, roleOkGet := c.Get("userRole")
+	if !orgOkGet || !roleOkGet || tokenOrgIDGet.(uuid.UUID) != targetOrgID ||
+		(tokenUserRoleGet.(models.UserRole) != models.RoleAdmin && tokenUserRoleGet.(models.UserRole) != models.RoleManager) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied or insufficient privileges"})
 		return
 	}
 
@@ -198,7 +199,11 @@ func UpdateIdentityProviderHandler(c *gin.Context) {
 		return
 	}
 
-	if !checkOrgAdmin(c, targetOrgID) {
+	tokenOrgIDUpd, orgOkUpd := c.Get("organizationID")
+	tokenUserRoleUpd, roleOkUpd := c.Get("userRole")
+	if !orgOkUpd || !roleOkUpd || tokenOrgIDUpd.(uuid.UUID) != targetOrgID ||
+		(tokenUserRoleUpd.(models.UserRole) != models.RoleAdmin && tokenUserRoleUpd.(models.UserRole) != models.RoleManager) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied or insufficient privileges"})
 		return
 	}
 
@@ -238,6 +243,9 @@ func UpdateIdentityProviderHandler(c *gin.Context) {
 	if payload.IsActive != nil {
 		idp.IsActive = *payload.IsActive
 	}
+	if payload.IsPublic != nil { // Adicionado para atualizar IsPublic
+		idp.IsPublic = *payload.IsPublic
+	}
 	idp.ConfigJSON = string(payload.ConfigJSON)
 	idp.AttributeMappingJSON = string(payload.AttributeMappingJSON)
 
@@ -264,7 +272,11 @@ func DeleteIdentityProviderHandler(c *gin.Context) {
 		return
 	}
 
-	if !checkOrgAdmin(c, targetOrgID) {
+	tokenOrgIDDel, orgOkDel := c.Get("organizationID")
+	tokenUserRoleDel, roleOkDel := c.Get("userRole")
+	if !orgOkDel || !roleOkDel || tokenOrgIDDel.(uuid.UUID) != targetOrgID ||
+		(tokenUserRoleDel.(models.UserRole) != models.RoleAdmin && tokenUserRoleDel.(models.UserRole) != models.RoleManager) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied or insufficient privileges"})
 		return
 	}
 

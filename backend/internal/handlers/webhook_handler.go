@@ -13,10 +13,25 @@ import (
 
 // WebhookPayload defines the structure for creating or updating a WebhookConfiguration.
 type WebhookPayload struct {
-	Name       string   `json:"name" binding:"required,min=3,max=100"`
-	URL        string   `json:"url" binding:"required,url,max=2048"`
-	EventTypes []string `json:"event_types" binding:"required,dive,oneof=risk_created risk_status_changed"` // `dive` valida cada item do slice
-	IsActive   *bool    `json:"is_active"` // Pointer to distinguish false from not provided
+	Name        string   `json:"name" binding:"required,min=3,max=100"`
+	URL         string   `json:"url" binding:"required,url,max=2048"`
+	EventTypes  []string `json:"event_types" binding:"required,dive,oneof=risk_created risk_status_changed"` // `dive` valida cada item do slice
+	IsActive    *bool    `json:"is_active"`    // Pointer to distinguish false from not provided
+	SecretToken *string  `json:"secret_token"` // Opcional
+}
+
+// WebhookResponseItem é o DTO para respostas de webhook, incluindo EventTypes como slice.
+type WebhookResponseItem struct {
+	models.WebhookConfiguration
+	EventTypesList []string `json:"event_types_list"`
+}
+
+// newWebhookResponseItem cria um WebhookResponseItem a partir de um WebhookConfiguration.
+func newWebhookResponseItem(wh models.WebhookConfiguration) WebhookResponseItem {
+	return WebhookResponseItem{
+		WebhookConfiguration: wh,
+		EventTypesList:       stringToEventTypes(wh.EventTypes),
+	}
 }
 
 // Helper para serializar/desserializar EventTypes
@@ -69,17 +84,17 @@ func CreateWebhookHandler(c *gin.Context) {
 		EventTypes:     eventTypesToString(payload.EventTypes),
 		IsActive:       isActive,
 	}
+	if payload.SecretToken != nil { // Adicionar SecretToken se fornecido
+		webhookConfig.SecretToken = *payload.SecretToken
+	}
 
 	db := database.GetDB()
 	if err := db.Create(&webhookConfig).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create webhook configuration: " + err.Error()})
 		return
 	}
-    // Retornar o objeto criado, mas com EventTypes como slice
-    response := webhookConfig
-    // response.EventTypesSlice = stringToEventTypes(webhookConfig.EventTypes) // Se tivéssemos um campo extra para isso no DTO de resposta
 
-	c.JSON(http.StatusCreated, response) // Ou um DTO de resposta que tenha EventTypes como slice
+	c.JSON(http.StatusCreated, newWebhookResponseItem(webhookConfig))
 }
 
 // ListWebhooksHandler lists all webhook configurations for an organization.
@@ -175,7 +190,7 @@ func GetWebhookHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch webhook configuration: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, webhook)
+	c.JSON(http.StatusOK, newWebhookResponseItem(webhook))
 }
 
 // UpdateWebhookHandler updates an existing webhook configuration.
@@ -224,12 +239,16 @@ func UpdateWebhookHandler(c *gin.Context) {
 	if payload.IsActive != nil {
 		webhook.IsActive = *payload.IsActive
 	}
+	if payload.SecretToken != nil { // Permitir atualização do SecretToken
+		webhook.SecretToken = *payload.SecretToken
+	}
+
 
 	if err := db.Save(&webhook).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update webhook configuration: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, webhook)
+	c.JSON(http.StatusOK, newWebhookResponseItem(webhook))
 }
 
 // DeleteWebhookHandler deletes a webhook configuration.

@@ -764,4 +764,95 @@ func TestGetC2M2MaturitySummaryHandler_FrameworkNotFound(t *testing.T) {
 	}
 }
 
+
+func TestGetFrameworkControlsHandler_Success_WithAssessments(t *testing.T) {
+	setupTestEnvironment(t)
+	orgID := testOrgID
+	frameworkID := uuid.New()
+
+	router := getRouterWithAuthContext(testUserID, orgID, models.RoleUser) // Auth context para pegar orgID
+	router.GET("/audit/frameworks/:frameworkId/controls", GetFrameworkControlsHandler)
+
+	// Mock Controls
+	ctrl1ID := uuid.New()
+	ctrl2ID := uuid.New()
+	ctrlRows := sqlmock.NewRows([]string{"id", "framework_id", "control_id", "family", "description"}).
+		AddRow(ctrl1ID, frameworkID, "Ctrl1", "Family1", "Desc1").
+		AddRow(ctrl2ID, frameworkID, "Ctrl2", "Family2", "Desc2")
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_controls" WHERE framework_id = $1 ORDER BY control_id asc`)).
+		WithArgs(frameworkID).
+		WillReturnRows(ctrlRows)
+
+	// Mock Assessments
+	assessScore := 80
+	assessDate := time.Now().Truncate(24 * time.Hour)
+	assessRows := sqlmock.NewRows([]string{"id", "organization_id", "audit_control_id", "status", "score", "assessment_date"}).
+		AddRow(uuid.New(), orgID, ctrl1ID, models.ControlStatusConformant, &assessScore, &assessDate) // Assessment para ctrl1
+		// ctrl2 não tem assessment
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_assessments" WHERE organization_id = $1 AND audit_control_id IN ($2,$3)`)).
+		WithArgs(orgID, ctrl1ID, ctrl2ID). // A ordem dos IDs pode variar
+		WillReturnRows(assessRows)
+
+
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/audit/frameworks/%s/controls", frameworkID), nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code, "Response code. Body: %s", rr.Body.String())
+
+	// Definir a struct localmente para o teste, pois ela é definida no handler
+	type AuditControlWithAssessmentResponse struct {
+		models.AuditControl
+		Assessment *models.AuditAssessment `json:"assessment,omitempty"`
+	}
+	var response []AuditControlWithAssessmentResponse
+	err := json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.NoError(t, err, "Failed to unmarshal response")
+	assert.Len(t, response, 2, "Deveria haver 2 controles")
+
+	// Verificar Controle 1 (com assessment)
+	assert.Equal(t, ctrl1ID, response[0].AuditControl.ID)
+	assert.NotNil(t, response[0].Assessment, "Assessment para ctrl1 não deveria ser nulo")
+	if response[0].Assessment != nil {
+		assert.Equal(t, models.ControlStatusConformant, response[0].Assessment.Status)
+		assert.Equal(t, &assessScore, response[0].Assessment.Score)
+	}
+
+	// Verificar Controle 2 (sem assessment)
+	assert.Equal(t, ctrl2ID, response[1].AuditControl.ID)
+	assert.Nil(t, response[1].Assessment, "Assessment para ctrl2 deveria ser nulo")
+
+
+	if errDbMock := sqlMock.ExpectationsWereMet(); errDbMock != nil {
+		t.Errorf("SQL mock expectations not met: %s", errDbMock)
+	}
+}
+
+func TestGetFrameworkControlsHandler_NoFramework(t *testing.T) {
+	setupTestEnvironment(t)
+	orgID := testOrgID
+	frameworkID := uuid.New()
+
+	router := getRouterWithAuthContext(testUserID, orgID, models.RoleUser)
+	router.GET("/audit/frameworks/:frameworkId/controls", GetFrameworkControlsHandler)
+
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_controls" WHERE framework_id = $1 ORDER BY control_id asc`)).
+		WithArgs(frameworkID).
+		WillReturnRows(sqlmock.NewRows(nil)) // Nenhum controle retornado
+
+	sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "audit_frameworks" WHERE id = $1 ORDER BY "audit_frameworks"."id" LIMIT 1`)).
+		WithArgs(frameworkID).
+		WillReturnError(gorm.ErrRecordNotFound) // Framework não encontrado
+
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/audit/frameworks/%s/controls", frameworkID), nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Framework not found")
+
+	if errDbMock := sqlMock.ExpectationsWereMet(); errDbMock != nil {
+		t.Errorf("SQL mock expectations not met: %s", errDbMock)
+	}
+}
 // Ensure newline at end of file

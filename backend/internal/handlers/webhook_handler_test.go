@@ -32,18 +32,33 @@ func TestCreateWebhookHandler(t *testing.T) {
 
 	t.Run("Successful webhook creation", func(t *testing.T) {
 		isActive := true
+		isActive := true
+		secret := "mysecret"
 		payload := WebhookPayload{
-			Name:       "Test Webhook",
-			URL:        "https://example.com/hook",
-			EventTypes: []string{string(models.EventTypeRiskCreated), string(models.EventTypeRiskStatusChanged)},
-			IsActive:   &isActive,
+			Name:        "Test Webhook",
+			URL:         "https://example.com/hook",
+			EventTypes:  []string{string(models.EventTypeRiskCreated), string(models.EventTypeRiskStatusChanged)},
+			IsActive:    &isActive,
+			SecretToken: &secret,
 		}
 		body, _ := json.Marshal(payload)
 
 		sqlMock.ExpectBegin()
-		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "webhook_configurations" ("id","organization_id","name","url","event_types","is_active","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING "id"`)).
-			WithArgs(sqlmock.AnyArg(), testOrgID, payload.Name, payload.URL, "risk_created,risk_status_changed", *payload.IsActive, sqlmock.AnyArg(), sqlmock.AnyArg()).
-			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
+		// Adicionar "secret_token" à query e args.
+		// ("id","organization_id","name","url","event_types","is_active","secret_token","created_at","updated_at")
+		// $1,  $2,               $3,    $4,   $5,           $6,          $7,            $8,           $9
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "webhook_configurations" ("id","organization_id","name","url","event_types","is_active","secret_token","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING "id"`)).
+			WithArgs(
+				sqlmock.AnyArg(), // id
+				testOrgID,        // organization_id
+				payload.Name,
+				payload.URL,
+				"risk_created,risk_status_changed", // event_types (string CSV)
+				*payload.IsActive,
+				*payload.SecretToken, // secret_token
+				sqlmock.AnyArg(),     // created_at
+				sqlmock.AnyArg(),     // updated_at
+			).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
 		sqlMock.ExpectCommit()
 
 		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/orgs/%s/webhooks", testOrgID.String()), bytes.NewBuffer(body))
@@ -52,13 +67,14 @@ func TestCreateWebhookHandler(t *testing.T) {
 		router.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusCreated, rr.Code, "Response: %s", rr.Body.String())
-		var createdWebhook models.WebhookConfiguration
-		err := json.Unmarshal(rr.Body.Bytes(), &createdWebhook)
+		var responseItem WebhookResponseItem // Esperar WebhookResponseItem
+		err := json.Unmarshal(rr.Body.Bytes(), &responseItem)
 		assert.NoError(t, err)
-		assert.Equal(t, payload.Name, createdWebhook.Name)
-		assert.Equal(t, payload.URL, createdWebhook.URL)
-		assert.True(t, createdWebhook.IsActive)
-		assert.Equal(t, "risk_created,risk_status_changed", createdWebhook.EventTypes)
+		assert.Equal(t, payload.Name, responseItem.Name)
+		assert.Equal(t, payload.URL, responseItem.URL)
+		assert.True(t, responseItem.IsActive)
+		assert.Equal(t, *payload.SecretToken, responseItem.SecretToken)
+		assert.Equal(t, payload.EventTypes, responseItem.EventTypesList) // Verificar a lista
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
 
@@ -120,15 +136,20 @@ func TestListWebhooksHandler(t *testing.T) {
 		var resp PaginatedResponse
 		err := json.Unmarshal(rr.Body.Bytes(), &resp)
 		assert.NoError(t, err)
-		// assert.Equal(t, int64(len(mockWebhooks)), resp.TotalItems) // Se paginado
-		assert.Len(t, resp.Items, len(mockWebhooks))
-		// Para verificar o conteúdo de resp.Items, precisa fazer type assertion para []map[string]interface{} e depois para WebhookResponseItem
 
-		// Exemplo de verificação mais profunda se necessário:
-        // itemsAsMaps := resp.Items.([]interface{})
-        // firstItemMap := itemsAsMaps[0].(map[string]interface{})
-        // assert.Equal(t, mockWebhooks[0].Name, firstItemMap["name"])
-        // assert.Contains(t, firstItemMap["event_types_list"], "risk_created")
+		// Para verificar o conteúdo de resp.Items, precisamos decodificar cada item para WebhookResponseItem
+		itemsJSON, _ := json.Marshal(resp.Items)
+		var responseItems []WebhookResponseItem
+		err = json.Unmarshal(itemsJSON, &responseItems)
+		assert.NoError(t, err)
+
+		assert.Len(t, responseItems, len(mockWebhooks))
+        if len(responseItems) == len(mockWebhooks) {
+            assert.Equal(t, mockWebhooks[0].Name, responseItems[0].Name)
+            assert.Equal(t, stringToEventTypes(mockWebhooks[0].EventTypes), responseItems[0].EventTypesList)
+            assert.Equal(t, mockWebhooks[1].Name, responseItems[1].Name)
+            assert.Equal(t, stringToEventTypes(mockWebhooks[1].EventTypes), responseItems[1].EventTypesList)
+        }
 
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
@@ -154,9 +175,11 @@ func TestGetWebhookHandler(t *testing.T) {
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		assert.Equal(t, http.StatusOK, rr.Code)
-		var respWH models.WebhookConfiguration
-		json.Unmarshal(rr.Body.Bytes(), &respWH)
-		assert.Equal(t, mockWH.Name, respWH.Name)
+		var respItem WebhookResponseItem
+		err := json.Unmarshal(rr.Body.Bytes(), &respItem)
+		assert.NoError(t, err)
+		assert.Equal(t, mockWH.Name, respItem.Name)
+		assert.Equal(t, stringToEventTypes(mockWH.EventTypes), respItem.EventTypesList)
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
 
@@ -189,20 +212,37 @@ func TestUpdateWebhookHandler(t *testing.T) {
 
 	t.Run("Successful webhook update", func(t *testing.T) {
 		isActive := false
+		secretUpdate := "newSecret"
 		payload := WebhookPayload{
-			Name: "Updated Webhook", URL: "https://updated.com/hook", EventTypes: []string{string(models.EventTypeRiskStatusChanged)}, IsActive: &isActive,
+			Name:        "Updated Webhook",
+			URL:         "https://updated.com/hook",
+			EventTypes:  []string{string(models.EventTypeRiskStatusChanged)},
+			IsActive:    &isActive,
+			SecretToken: &secretUpdate,
 		}
 		body, _ := json.Marshal(payload)
 
-		originalWH := models.WebhookConfiguration{ID: testWebhookID, OrganizationID: testOrgID}
-		rows := sqlmock.NewRows([]string{"id", "organization_id"}).AddRow(originalWH.ID, originalWH.OrganizationID)
+		originalWH := models.WebhookConfiguration{ID: testWebhookID, OrganizationID: testOrgID, SecretToken: "oldSecret"}
+		rows := sqlmock.NewRows([]string{"id", "organization_id", "secret_token"}).AddRow(originalWH.ID, originalWH.OrganizationID, originalWH.SecretToken)
 		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "webhook_configurations" WHERE id = $1 AND organization_id = $2 ORDER BY "webhook_configurations"."id" LIMIT $3`)).
 			WithArgs(testWebhookID, testOrgID, 1).WillReturnRows(rows)
 
 		sqlMock.ExpectBegin()
+		// A ordem dos SETs no GORM pode ser alfabética ou pela struct.
+		// Campos atualizados: name, url, event_types, is_active, secret_token, updated_at
+		// WHERE id = ? AND organization_id = ? (GORM pode omitir org_id no WHERE do Save)
+		// Exemplo de WithArgs (precisa confirmar a ordem exata gerada pelo GORM):
+		// $1=event_types, $2=is_active, $3=name, $4=secret_token, $5=url, $6=updated_at, $7=id
 		sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "webhook_configurations" SET`)).
-			WithArgs(sqlmock.AnyArg(), payload.IsActive, payload.Name, testOrgID, payload.URL, sqlmock.AnyArg(), testWebhookID). // EventTypes, UpdatedAt, ID
-			WillReturnResult(sqlmock.NewResult(0,1))
+			WithArgs(
+				eventTypesToString(payload.EventTypes), // event_types
+				*payload.IsActive,                      // is_active
+				payload.Name,                           // name
+				*payload.SecretToken,                   // secret_token
+				payload.URL,                            // url
+				sqlmock.AnyArg(),                       // updated_at
+				testWebhookID,                          // WHERE id
+			).WillReturnResult(sqlmock.NewResult(0, 1))
 		sqlMock.ExpectCommit()
 
 		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/webhooks/%s", testOrgID.String(), testWebhookID.String()), bytes.NewBuffer(body))
@@ -210,11 +250,14 @@ func TestUpdateWebhookHandler(t *testing.T) {
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 
-		assert.Equal(t, http.StatusOK, rr.Code)
-		var respWH models.WebhookConfiguration
-		json.Unmarshal(rr.Body.Bytes(), &respWH)
-		assert.Equal(t, payload.Name, respWH.Name)
-		assert.False(t, respWH.IsActive)
+		assert.Equal(t, http.StatusOK, rr.Code, "Response: %s", rr.Body.String())
+		var respItem WebhookResponseItem
+		err := json.Unmarshal(rr.Body.Bytes(), &respItem)
+		assert.NoError(t, err)
+		assert.Equal(t, payload.Name, respItem.Name)
+		assert.False(t, respItem.IsActive)
+		assert.Equal(t, *payload.SecretToken, respItem.SecretToken)
+		assert.Equal(t, payload.EventTypes, respItem.EventTypesList)
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
 

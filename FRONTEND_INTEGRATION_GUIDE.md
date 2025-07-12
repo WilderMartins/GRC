@@ -363,6 +363,8 @@ Esta seção detalha os endpoints para as funcionalidades centrais de GRC. Todos
     }
     ```
 *   **Notas Frontend:** Implementar controles de paginação e filtros na UI.
+    *   Filtros disponíveis: `status`, `impact`, `probability`, `category`, `owner_id` (UUID), `title_like` (string).
+    *   Ordenação disponível via `sort_by` (campos: `created_at`, `title`, `risk_level`, `status`, `owner_id`, `next_review_date`, `impact`, `probability`, `category`) e `sort_order` (`asc`, `desc`). Default: `created_at desc`.
 
 #### 5.1.3. Obter Risco Específico
 
@@ -407,7 +409,9 @@ Base Path: `/risks/{riskId}/stakeholders`
     *   **Resposta (200 OK):** Array de `UserStakeholderResponse` (`{ id, name, email, role }`).
 *   **Remover Stakeholder:** `DELETE /{userId}`
     *   **Resposta (200 OK):** `{ "message": "Stakeholder removed successfully" }`
-*   **Notas Frontend:** Para adicionar, usar o lookup de usuários. Listar stakeholders na página de detalhes do risco.
+*   **Notas Frontend:**
+    *   Para adicionar, usar o lookup de usuários (Seção 6.1). Listar stakeholders na página de detalhes do risco.
+    *   **Autorização Atual:** Qualquer membro da organização do risco pode adicionar/remover stakeholders. (Este comportamento pode ser restringido no futuro para Owner/Admin/Manager do risco/organização).
 
 #### 5.1.8. Workflow de Aceite de Risco
 
@@ -477,7 +481,10 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
         "page_size": 10
     }
     ```
-*   **Notas Frontend:** Implementar UI para paginação e filtros.
+*   **Notas Frontend:**
+    *   Implementar UI para paginação e filtros.
+    *   Filtros disponíveis: `status`, `severity`, `title_like`, `cve_id`, `asset_affected_like`.
+    *   Ordenação padrão atual: `created_at desc`. (Funcionalidade de `sort_by` customizável não implementada para este endpoint no momento).
 
 #### 5.2.3. Obter Vulnerabilidade Específica
 
@@ -547,7 +554,8 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
     ```
 *   **Notas Frontend:**
     *   A UI deve permitir ao usuário ver o status da avaliação e os dados de maturidade C2M2 de cada controle.
-    *   Se `assessment.EvidenceURL` for um `objectName` (não uma URL http/https), o frontend precisa chamar `GET /files/signed-url?objectKey={assessment.EvidenceURL}` para obter uma URL de download/visualização temporária.
+    *   Se `assessment.EvidenceURL` for um `objectName` (não uma URL http/s), o frontend precisa chamar `GET /files/signed-url?objectKey={assessment.EvidenceURL}` para obter uma URL de download/visualização temporária.
+    *   Ordenação padrão dos controles: `control_id asc`.
 
 #### 5.3.4. Criar/Atualizar Avaliação de Controle
 
@@ -595,6 +603,7 @@ O `approvalId` é parte do path para a decisão. A submissão e listagem são no
 *   **Descrição:** Lista todas as avaliações de uma organização para um framework. Útil para visões gerais de conformidade ou relatórios. O `{orgId}` deve ser o da organização do usuário logado (ou o handler imporá isso).
 *   **Query Params:** `page`, `page_size`.
 *   **Resposta de Sucesso (200 OK):** Lista paginada de `AuditAssessment` (com `AuditControl` pré-carregado).
+    *   **Notas Frontend:** Ordenação padrão: `assessment_date desc`.
 
 #### 5.3.8. Obter Score de Conformidade
 
@@ -675,20 +684,45 @@ Base Path: `/organizations/{orgId}/identity-providers`
     *   **Payload:**
         ```json
         {
-            "provider_type": "string (saml, oauth2_google, oauth2_github)",
-            "name": "string (nome amigável)",
-            "is_active": "boolean (default: true)",
-            "is_public": "boolean (default: false)", // Se true, aparece em /api/public/social-identity-providers
-            "config_json": { /* ...config específica do provedor... */ },
-            "attribute_mapping_json": { /* ...mapeamento de atributos SAML... */ } // Opcional
+            "provider_type": "string (saml, oauth2_google, oauth2_github)", // Obrigatório
+            "name": "string (nome amigável)", // Obrigatório
+            "is_active": "boolean (opcional, default: true)",
+            "is_public": "boolean (opcional, default: false)", // Se true, e for OAuth2, aparecerá na lista pública de IdPs sociais.
+            "config_json": {}, // Objeto JSON, Obrigatório. A estrutura interna varia.
+            "attribute_mapping_json": {} // Objeto JSON, Opcional (principalmente para SAML).
         }
         ```
-        *   Exemplos de `config_json`:
-            *   `oauth2_google`: `{ "client_id": "...", "client_secret": "..." }`
-            *   `saml`: `{ "idp_entity_id": "...", "idp_sso_url": "...", "idp_x509_cert": "..." }`
+        *   **Estrutura de `config_json` por `provider_type`:**
+            *   `oauth2_google`:
+                ```json
+                {
+                    "client_id": "SEU_GOOGLE_CLIENT_ID",
+                    "client_secret": "SEU_GOOGLE_CLIENT_SECRET",
+                    "scopes": ["openid", "profile", "email"] // Opcional, scopes padrão se omitido
+                }
+                ```
+            *   `oauth2_github`:
+                ```json
+                {
+                    "client_id": "SEU_GITHUB_CLIENT_ID",
+                    "client_secret": "SEU_GITHUB_CLIENT_SECRET",
+                    "scopes": ["read:user", "user:email"] // Opcional, scopes padrão se omitido
+                }
+                ```
+            *   `saml`: (Consulte `API_DOCUMENTATION.md` para detalhes, pois SAML é experimental)
+                ```json
+                {
+                    "idp_entity_id": "URL_ENTITY_ID_DO_IDP",
+                    "idp_sso_url": "URL_SSO_DO_IDP",
+                    "idp_x509_cert": "CERTIFICADO_X509_PEM_DO_IDP",
+                    "sp_entity_id": "URL_ENTITY_ID_DO_SEU_SP (opcional)",
+                    "sign_request": false // boolean, opcional
+                }
+                ```
     *   **Resposta (201 Created):** Objeto `IdentityProvider`.
 *   **Listar IdPs:** `GET /` (paginado)
     *   **Resposta (200 OK):** Lista paginada de `IdentityProvider`.
+    *   **Notas Frontend:** Ordenação padrão: `created_at desc`.
 *   **Obter IdP:** `GET /{idpId}`
 *   **Atualizar IdP:** `PUT /{idpId}` (Payload similar ao POST)
 *   **Deletar IdP:** `DELETE /{idpId}`
@@ -704,19 +738,25 @@ Base Path: `/organizations/{orgId}/webhooks`
     *   **Payload:**
         ```json
         {
-            "name": "string",
-            "url": "string (URL válida)",
-            "event_types": ["string"], // Ex: ["risk_created", "vulnerability_status_changed"]
-            "is_active": "boolean (default: true)",
-            "secret_token": "string (opcional, para verificar payloads)"
+            "name": "string", // Obrigatório
+            "url": "string (URL válida)", // Obrigatório
+            "event_types": ["string"], // Array de strings, Obrigatório. Ex: ["risk_created", "risk_status_changed"]
+                                     // Eventos válidos atuais: "risk_created", "risk_status_changed"
+            "is_active": "boolean (opcional, default: true)",
+            "secret_token": "string (opcional, para verificar payloads)" // Opcional
         }
         ```
-    *   **Resposta (201 Created):** Objeto `WebhookConfiguration`.
+    *   **Resposta (201 Created):** Objeto `WebhookResponseItem` (inclui `EventTypesList []string`).
 *   **Listar Webhooks:** `GET /` (paginado)
+    *   **Resposta (200 OK):** Lista paginada de `WebhookResponseItem`.
+    *   **Notas Frontend:** Ordenação padrão: `created_at desc`.
 *   **Obter Webhook:** `GET /{webhookId}`
+    *   **Resposta (200 OK):** Objeto `WebhookResponseItem`.
 *   **Atualizar Webhook:** `PUT /{webhookId}` (Payload similar ao POST)
+    *   **Resposta (200 OK):** Objeto `WebhookResponseItem`.
 *   **Deletar Webhook:** `DELETE /{webhookId}`
-*   **Notas Frontend:** Listar `event_types` disponíveis para seleção.
+*   **Notas Frontend:**
+    *   A UI deve permitir a seleção múltipla dos `event_types` válidos. Atualmente são: `risk_created`, `risk_status_changed`. (Esta lista pode ser expandida no futuro).
 
 #### 5.4.4. Gerenciamento de Usuários da Organização
 
@@ -724,6 +764,7 @@ Base Path: `/organizations/{orgId}/users`
 
 *   **Listar Usuários da Organização:** `GET /` (paginado)
     *   **Resposta (200 OK):** Lista paginada de `UserResponse` (DTO sem PasswordHash).
+    *   **Notas Frontend:** Ordenação padrão: `created_at desc`.
 *   **Obter Usuário Específico:** `GET /{userId}`
     *   **Resposta (200 OK):** Objeto `UserResponse`.
 *   **Atualizar Role do Usuário:** `PUT /{userId}/role`
