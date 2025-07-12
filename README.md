@@ -261,6 +261,39 @@ Ao executar o comando `docker-compose run --rm backend setup` (ou o binário com
 
 ---
 
+## CI/CD (Integração Contínua / Entrega Contínua)
+
+O projeto utiliza GitHub Actions para automatizar os processos de CI e CD. Os workflows estão localizados em `.github/workflows/`.
+
+### Workflows Principais:
+
+1.  **`backend-ci.yml` (Backend CI):**
+    *   **Triggers:** Acionado em `push` para os branches `main` e `develop`, em `pull_request` para `main`, ou manualmente (`workflow_dispatch`). Roda apenas se houver alterações em `backend/**` ou no próprio arquivo de workflow.
+    *   **Jobs:**
+        *   `lint`: Executa `golangci-lint` no código do backend para garantir a qualidade e estilo do código. Utiliza a configuração de `backend/.golangci.yml`.
+        *   `test`: Compila e executa os testes unitários do backend (`go test ./...`). Gera um relatório de cobertura de código (`coverage.out`) que é carregado como um artefato. Opcionalmente, pode enviar para o Codecov (requer `CODECOV_TOKEN` nos secrets do repositório).
+        *   `build`: Compila a aplicação backend (`go build ...`) para verificar se o build está funcional. O binário resultante é carregado como um artefato.
+
+2.  **`backend-docker.yml` (Backend Docker Build and Push):**
+    *   **Triggers:** Acionado em `push` para o branch `main` (após um merge, por exemplo) ou quando uma tag versionada (ex: `v1.0.0`) é criada. Roda se houver alterações em `backend/**`, `Dockerfile.backend` ou no workflow.
+    *   **Jobs:**
+        *   `build_and_push`:
+            *   Faz login no GitHub Container Registry (GHCR).
+            *   Extrai metadados para gerar tags para a imagem Docker (ex: `latest` para `main`, tags semânticas como `v1.0.0`, `v1.0`, e o SHA do commit).
+            *   Builda a imagem Docker do backend usando `Dockerfile.backend`.
+            *   Faz push da imagem com suas tags para o GHCR (`ghcr.io/SEU_USUARIO_OU_ORG/phoenix-grc-backend`).
+            *   Utiliza cache de layers do Docker via GitHub Actions para acelerar builds futuros.
+
+### Observações:
+
+*   **Secrets:** Para o workflow `backend-docker.yml` fazer push para um registry como Docker Hub (em vez do GHCR padrão com `GITHUB_TOKEN`), você precisaria configurar `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN` nos secrets do repositório GitHub.
+*   **Frontend CI/CD:** Workflows similares para o frontend (lint, teste, build, e talvez push de imagem Docker se servido standalone) podem ser adicionados em `.github/workflows/frontend-ci.yml` e `.github/workflows/frontend-docker.yml`.
+*   **Deployment:** Os workflows atuais cobrem CI e o build/push de artefatos (binário e imagem Docker). Workflows de CD (Deployment Contínuo) para ambientes de staging ou produção não estão incluídos nesta configuração inicial e precisariam ser desenvolvidos separadamente, dependendo da plataforma de hospedagem (ex: Kubernetes, ECS, etc.).
+
+Você pode monitorar a execução desses workflows na aba "Actions" do seu repositório GitHub.
+
+---
+
 ## Endpoints da API (Backend)
 
 A API está versionada sob `/api/v1`. Rotas dentro deste grupo requerem autenticação JWT. Para detalhes completos, veja o arquivo [API_DOCUMENTATION.md](API_DOCUMENTATION.md).

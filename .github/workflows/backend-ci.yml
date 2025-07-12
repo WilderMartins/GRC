@@ -1,0 +1,113 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint Go Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22' # Manter sincronizado com o go.mod ou usar go-version-file
+
+      - name: GolangCI Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          # Caminho para o diretório do backend
+          working-directory: backend
+          # Opcional: Especifique a versão do golangci-lint
+          # version: v1.55.2
+          # Opcional: Arquivo de configuração (se não estiver na raiz do working-directory com nome padrão)
+          # config-path: backend/.golangci.yml
+          args: --timeout=5m # Aumentar timeout se necessário
+
+  test:
+    name: Test Go Code
+    runs-on: ubuntu-latest
+    needs: lint # Executar após o lint passar
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          # go-version-file: 'backend/go.mod' # Alternativa para ler a versão do go.mod
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run tests
+        working-directory: backend
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }} # CODECOV_TOKEN é um secret opcional do repositório
+          files: backend/coverage.out
+          # working-directory: backend # codecov action pode precisar disso se o path do coverage.out for relativo
+          flags: unittests # Opcional
+          name: codecov-umbrella # Opcional
+          fail_ci_if_error: false # Opcional, default é false
+        # Descomentar acima e configurar CODECOV_TOKEN se for usar Codecov
+
+      - name: Upload test coverage artifact
+        uses: actions/upload-artifact@v4
+        if: always() # Sempre fazer upload, mesmo se os testes falharem, para análise
+        with:
+          name: backend-coverage-report
+          path: backend/coverage.out
+          retention-days: 7
+
+  build:
+    name: Build Go Application
+    runs-on: ubuntu-latest
+    needs: test # Executar após os testes passarem
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          # go-version-file: 'backend/go.mod'
+
+      - name: Build application
+        working-directory: backend
+        run: go build -v -o ./app_server ./cmd/server/main.go
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-app-server-${{ github.sha }}
+          path: backend/app_server
+          retention-days: 7
