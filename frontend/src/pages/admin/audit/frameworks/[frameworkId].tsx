@@ -8,7 +8,9 @@ import type { GetServerSideProps, InferGetServerSidePropsType } from 'next';
 import Link from 'next/link';
 import { useEffect, useState, useMemo } from 'react';
 import apiClient from '@/lib/axios';
-import { AuditControlWithAssessmentResponse, AuditAssessmentStatus, AuditFramework } from '@/types';
+import { ControlWithAssessment, AuditAssessmentStatus, AuditFramework, ComplianceScoreResponse, C2M2MaturityFrameworkSummaryResponse } from '@/types';
+import AssessmentFormModal from '@/components/audit/AssessmentFormModal'; // Importar o modal
+import StatCard from '@/components/common/StatCard'; // Importar StatCard
 
 type Props = {}
 
@@ -24,11 +26,21 @@ const FrameworkDetailsPageContent = (props: InferGetServerSidePropsType<typeof g
   const { t } = useTranslation(['audit', 'common']);
   const router = useRouter();
   const { frameworkId } = router.query;
+  const { user } = useAuth(); // Para obter o orgId
 
   const [framework, setFramework] = useState<AuditFramework | null>(null);
-  const [controls, setControls] = useState<AuditControlWithAssessmentResponse[]>([]);
+  const [controls, setControls] = useState<ControlWithAssessment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Estados para os sumários
+  const [complianceScore, setComplianceScore] = useState<ComplianceScoreResponse | null>(null);
+  const [c2m2Summary, setC2m2Summary] = useState<C2M2MaturityFrameworkSummaryResponse | null>(null);
+  const [isLoadingSummaries, setIsLoadingSummaries] = useState(true);
+
+  // Estados para o modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedControl, setSelectedControl] = useState<ControlWithAssessment | null>(null);
 
   // Filtros
   const [statusFilter, setStatusFilter] = useState<AuditAssessmentStatus | 'nao_avaliado' | ''>('');
@@ -48,11 +60,39 @@ const FrameworkDetailsPageContent = (props: InferGetServerSidePropsType<typeof g
     });
   }, [controls, statusFilter, familyFilter]);
 
+  const handleOpenModal = (control: ControlWithAssessment) => {
+    setSelectedControl(control);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedControl(null);
+  };
+
+  const handleAssessmentSuccess = () => {
+    // Re-fetch dos controles para obter a avaliação atualizada
+    if (frameworkId && typeof frameworkId === 'string') {
+        apiClient.get<ControlWithAssessment[]>(`/api/v1/audit/frameworks/${frameworkId}/controls`)
+            .then(response => {
+                setControls(response.data);
+            })
+            .catch(err => {
+                console.error("Failed to re-fetch controls after assessment:", err);
+                // Opcional: notificar o usuário sobre o erro de re-fetch
+            });
+    }
+    handleCloseModal();
+  };
+
 
   useEffect(() => {
-    if (frameworkId) {
+    if (frameworkId && user?.organization_id) {
       setIsLoading(true);
+      setIsLoadingSummaries(true);
       setError(null);
+
+      const orgId = user.organization_id;
 
       const fetchFrameworkDetails = apiClient.get<AuditFramework[]>(`/api/v1/audit/frameworks`).then(res => {
           const currentFramework = res.data.find(fw => fw.ID === frameworkId);
@@ -63,11 +103,29 @@ const FrameworkDetailsPageContent = (props: InferGetServerSidePropsType<typeof g
           }
       });
 
-      const fetchControls = apiClient.get<AuditControlWithAssessmentResponse[]>(`/api/v1/audit/frameworks/${frameworkId}/controls`);
+      const fetchControls = apiClient.get<ControlWithAssessment[]>(`/api/v1/audit/frameworks/${frameworkId}/controls`);
+
+      const fetchSummaries = () => {
+          const scorePromise = apiClient.get<ComplianceScoreResponse>(`/api/v1/audit/organizations/${orgId}/frameworks/${frameworkId}/compliance-score`);
+          const c2m2Promise = apiClient.get<C2M2MaturityFrameworkSummaryResponse>(`/api/v1/audit/organizations/${orgId}/frameworks/${frameworkId}/c2m2-maturity-summary`);
+
+          Promise.all([scorePromise, c2m2Promise])
+            .then(([scoreRes, c2m2Res]) => {
+                setComplianceScore(scoreRes.data);
+                setC2m2Summary(c2m2Res.data);
+            }).catch(summaryErr => {
+                console.error("Failed to load summary data:", summaryErr);
+                // Não definir erro principal para não bloquear a lista de controles
+            }).finally(() => {
+                setIsLoadingSummaries(false);
+            });
+      };
 
       Promise.all([fetchFrameworkDetails, fetchControls])
         .then(([, controlsResponse]) => { // O resultado de fetchFrameworkDetails já foi tratado no .then
           setControls(controlsResponse.data);
+          // Buscar sumários após o carregamento principal ter sucesso
+          fetchSummaries();
         })
         .catch(err => {
           console.error(t('controls_list.error_loading_console'), err);
@@ -77,7 +135,7 @@ const FrameworkDetailsPageContent = (props: InferGetServerSidePropsType<typeof g
           setIsLoading(false);
         });
     }
-  }, [frameworkId, t]);
+  }, [frameworkId, user?.organization_id, t]);
 
   const getStatusColor = (status: AuditAssessmentStatus | null) => {
     if (!status) return 'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-200';
@@ -109,6 +167,44 @@ const FrameworkDetailsPageContent = (props: InferGetServerSidePropsType<typeof g
           {pageTitle}
         </h1>
         <p className="text-gray-600 dark:text-gray-400 mb-8">{framework?.Description}</p>
+
+        {/* Seção de Sumários */}
+        <div className="mb-8">
+            <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-4">{t('summaries.compliance_score_title')}</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard title={t('summaries.score')} value={`${complianceScore?.compliance_score.toFixed(1) ?? '-'}%`} isLoading={isLoadingSummaries} />
+                <StatCard title={t('summaries.evaluated_controls')} value={`${complianceScore?.evaluated_controls ?? '-'}/${complianceScore?.total_controls ?? '-'}`} isLoading={isLoadingSummaries} />
+                <StatCard title={t('summaries.conformant')} value={complianceScore?.conformant_controls ?? '-'} isLoading={isLoadingSummaries} />
+                <StatCard title={t('summaries.non_conformant')} value={complianceScore?.non_conformant_controls ?? '-'} isLoading={isLoadingSummaries} />
+            </div>
+        </div>
+
+        <div className="mb-8">
+             <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-4">{t('summaries.c2m2_maturity_title')}</h2>
+             {isLoadingSummaries && <p>{t('common:loading_ellipsis')}</p>}
+             {c2m2Summary && (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-300 dark:divide-gray-700">
+                        <thead className="bg-gray-50 dark:bg-gray-700">
+                            <tr>
+                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 dark:text-white">{t('summaries.c2m2_function_header')}</th>
+                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 dark:text-white">{t('summaries.c2m2_achieved_mil_header')}</th>
+                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 dark:text-white">{t('summaries.c2m2_evaluated_header')}</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-600 bg-white dark:bg-gray-800">
+                            {c2m2Summary.summary_by_function.map(item => (
+                                <tr key={item.nist_component_name}>
+                                    <td className="whitespace-nowrap py-4 px-3 text-sm font-medium text-gray-900 dark:text-white">{item.nist_component_name}</td>
+                                    <td className="whitespace-nowrap py-4 px-3 text-sm text-gray-500 dark:text-gray-300">MIL {item.achieved_mil}</td>
+                                    <td className="whitespace-nowrap py-4 px-3 text-sm text-gray-500 dark:text-gray-300">{item.evaluated_controls} / {item.total_controls}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+             )}
+        </div>
 
         {isLoading && <p className="text-center">{t('common:loading_ellipsis')}</p>}
         {error && <p className="text-center text-red-500">{error}</p>}
@@ -156,7 +252,7 @@ const FrameworkDetailsPageContent = (props: InferGetServerSidePropsType<typeof g
                       </thead>
                       <tbody className="divide-y divide-gray-200 dark:divide-gray-600 bg-white dark:bg-gray-800">
                         {filteredControls.map((control) => (
-                          <tr key={control.ID} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                          <tr key={control.ID} onClick={() => handleOpenModal(control)} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer">
                             <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 dark:text-white sm:pl-6">{control.ControlID}</td>
                             <td className="px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{control.Description}</td>
                             <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-300">{control.Family}</td>
@@ -177,6 +273,15 @@ const FrameworkDetailsPageContent = (props: InferGetServerSidePropsType<typeof g
               </div>
             </div>
             </>
+        )}
+
+        {isModalOpen && selectedControl && (
+            <AssessmentFormModal
+                isOpen={isModalOpen}
+                onClose={handleCloseModal}
+                control={selectedControl}
+                onSubmitSuccess={handleAssessmentSuccess}
+            />
         )}
       </div>
     </AdminLayout>
