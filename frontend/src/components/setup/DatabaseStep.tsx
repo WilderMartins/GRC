@@ -3,91 +3,73 @@ import { useTranslation } from 'next-i18next';
 
 interface DatabaseStepProps {
   onVerifyAndContinue: () => void;
+  isLoading: boolean;
   errorMessage?: string | null;
 }
 
-const DatabaseStep: React.FC<DatabaseStepProps> = ({ onVerifyAndContinue, errorMessage }) => {
+const DatabaseStep: React.FC<DatabaseStepProps> = ({ onVerifyAndContinue, isLoading, errorMessage }) => {
   const { t } = useTranslation('setupWizard');
 
-  const requiredEnvVars = [
-    { section: t('steps.db_config.section_db'),
-      vars: [
-        { name: 'POSTGRES_HOST', example: 'db', description: t('steps.db_config.var_host_desc') },
-        { name: 'POSTGRES_USER', example: 'admin', description: t('steps.db_config.var_user_desc') },
-        { name: 'POSTGRES_PASSWORD', example: 'password123', description: t('steps.db_config.var_password_desc') },
-        { name: 'POSTGRES_DB', example: 'phoenix_grc_dev', description: t('steps.db_config.var_dbname_desc') },
-      ]
-    },
-    { section: t('steps.db_config.section_security'),
-      vars: [
-        { name: 'JWT_SECRET_KEY', example: t('steps.db_config.var_jwt_example'), description: t('steps.db_config.var_jwt_desc') },
-        { name: 'ENCRYPTION_KEY_HEX', example: t('steps.db_config.var_enc_key_example'), description: t('steps.db_config.var_enc_key_desc') },
-      ]
-    },
-     { section: t('steps.db_config.section_urls'),
-      vars: [
-        { name: 'APP_ROOT_URL', example: 'http://localhost:80', description: t('steps.db_config.var_app_root_desc') },
-        { name: 'FRONTEND_BASE_URL', example: 'http://localhost:3000', description: t('steps.db_config.var_frontend_url_desc') },
-      ]
-    }
-  ];
-
+  // As variáveis de ambiente agora são gerenciadas de forma mais inteligente.
+  // O foco aqui é na verificação e no feedback de erro.
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-2xl font-bold text-gray-900 dark:text-white text-center">
-          {t('steps.db_config.title', 'Configuração do Ambiente')}
+          {t('steps.db_config.title_v2', 'Verificação do Sistema')}
         </h3>
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
-          {t('steps.db_config.intro_paragraph', 'O Phoenix GRC requer algumas configurações essenciais para funcionar. Por favor, configure as variáveis de ambiente no seu arquivo `.env` na raiz do projeto.')}
+          {t('steps.db_config.intro_paragraph_v2', 'Vamos verificar se o servidor backend e a conexão com o banco de dados estão prontos. Clique no botão abaixo para iniciar a verificação.')}
         </p>
       </div>
 
-      <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg space-y-4">
-        <p className="text-sm text-gray-700 dark:text-gray-200">
-          {t('steps.db_config.env_instructions_1', 'Se o arquivo `.env` não existir, copie `.env.example` para `.env` na raiz do seu projeto.')}
-        </p>
-
-        {requiredEnvVars.map(section => (
-            <div key={section.section}>
-                 <p className="text-sm font-semibold text-gray-800 dark:text-white">
-                    {section.section}:
-                </p>
-                <ul className="list-none space-y-2 text-sm mt-2">
-                {section.vars.map(v => (
-                    <li key={v.name} className="p-2 bg-white dark:bg-gray-800 rounded shadow-sm">
-                    <code className="font-mono text-brand-primary dark:text-brand-primary">{v.name}</code>:
-                    <span className="text-gray-600 dark:text-gray-300"> {v.description} (Ex: <code>{v.example}</code>)</span>
-                    </li>
-                ))}
-                </ul>
+      {/* Exibição de Erro */}
+      {errorMessage && (
+        <div className="bg-red-50 dark:bg-red-700/30 border-l-4 border-red-400 dark:border-red-500 p-4 rounded-md">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-red-400 dark:text-red-300" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+              </svg>
             </div>
-        ))}
-      </div>
-
-      <div className="bg-yellow-50 dark:bg-yellow-700/30 border-l-4 border-yellow-400 dark:border-yellow-500 p-4 rounded-md">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-yellow-400 dark:text-yellow-300" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="ml-3">
-            <p className="text-sm text-yellow-700 dark:text-yellow-200">
-              <strong>{t('steps.db_config.important_restart_title', 'Importante:')}</strong> {t('steps.db_config.important_restart_instruction', 'Após salvar as alterações no arquivo `.env`, você DEVE reiniciar os containers da aplicação (especialmente o backend) para que as novas configurações sejam carregadas.')}
-               <span className="block mt-1">{t('steps.db_config.docker_compose_restart_tip', 'Ex: `docker-compose down && docker-compose up -d --build` (se estiver usando Docker).')}</span>
-            </p>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
+                {t('steps.db_config.error_title', 'Falha na Verificação')}
+              </h3>
+              <div className="mt-2 text-sm text-red-700 dark:text-red-300">
+                <p>{errorMessage}</p>
+                <p className="mt-2">
+                  {t('steps.db_config.error_instructions', 'Por favor, verifique se o Docker está em execução e se as variáveis no seu arquivo `.env` estão corretas (especialmente as de banco de dados). Após ajustar, reinicie a aplicação com `docker-compose down && docker-compose up -d` e tente novamente.')}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+      <div className="bg-blue-50 dark:bg-blue-700/30 border-l-4 border-blue-400 dark:border-blue-500 p-4 rounded-md">
+          <div className="flex">
+            <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-blue-400 dark:text-blue-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-700 dark:text-blue-200">
+                {t('steps.db_config.info_text', 'Esta etapa verifica se o frontend consegue se comunicar com o backend e se o backend consegue se conectar ao banco de dados. As chaves de segurança também são validadas neste momento.')}
+              </p>
+            </div>
+          </div>
       </div>
 
       <div>
         <button
           type="button"
           onClick={onVerifyAndContinue}
-          className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary transition-colors"
+          disabled={isLoading}
+          className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary transition-colors disabled:opacity-50"
         >
-          {t('steps.db_config.verify_button', 'Já configurei e reiniciei. Verificar e Continuar')}
+          {isLoading ? t('steps.db_config.verifying_button', 'Verificando...') : t('steps.db_config.verify_button_v2', 'Verificar e Continuar')}
         </button>
       </div>
     </div>
