@@ -133,6 +133,9 @@ func startServer() {
 
 	authRoutes := router.Group("/auth")
 	{
+		// Endpoint para o setup inicial via API. Deve ser uma das primeiras rotas.
+		authRoutes.POST("/setup", handlers.PerformSetupHandler)
+
 		authRoutes.POST("/login", handlers.LoginHandler) // Restaurado para usar o handler implementado
 
 		samlIdPGroup := authRoutes.Group("/saml/:idpId")
@@ -294,27 +297,7 @@ func startServer() {
 }
 
 func main() {
-	// Logger já foi inicializado pela importação de pkg/log ou será re-inicializado em startServer().
-	// Se startServer() não for chamado (ex: no fluxo de setup), o logger da importação será usado.
-	if len(os.Args) > 1 && os.Args[1] == "setup" {
-		// A inicialização do logger em startServer() não ocorrerá.
-		// O logger já foi inicializado pelo init() do pacote phxlog.
-		// Podemos re-inicializá-lo aqui se quisermos garantir consistência com as vars de env
-		// lidas em main, mas o init() do pkg/log já faz isso.
-		// Por segurança, podemos chamar phxlog.Init aqui também, para garantir que usa config.Cfg.Environment
-		// que foi carregado de APP_ENV.
-		logLevel := os.Getenv("LOG_LEVEL")
-		if logLevel == "" {
-			logLevel = "info"
-		}
-		// config.Cfg.Environment já foi carregado e padronizado por config.LoadConfig()
-		// que é chamado pelo init() do pacote config, que por sua vez é importado por aqui ou por phxlog.
-		phxlog.Init(logLevel, config.Cfg.Environment)
-
-		phxlog.L.Info("Starting Phoenix GRC setup...")
-		setup.RunSetup() // RunSetup usará o logger global phxlog.L / phxlog.S
-		phxlog.L.Info("Phoenix GRC setup finished.")
-	} else {
-		startServer()
-	}
+	// O ponto de entrada agora sempre inicia o servidor.
+	// O setup é tratado pelo endpoint da API.
+	startServer()
 }

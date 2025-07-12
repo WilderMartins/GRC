@@ -8,13 +8,14 @@ import type { GetStaticProps, InferGetStaticPropsType } from 'next';
 import WelcomeStep from '@/components/setup/WelcomeStep';
 import DatabaseStep from '@/components/setup/DatabaseStep';
 import CompletionStep from '@/components/setup/CompletionStep';
-import CliCommandStep from '@/components/setup/CliCommandStep'; // Novo componente
+import AdminUserStep from '@/components/setup/AdminUserStep';
+import CompletionStep from '@/components/setup/CompletionStep';
 
 // Definir os tipos para as etapas do wizard
 type SetupStep =
   | 'welcome'
   | 'db_config'
-  | 'cli_command'
+  | 'admin_user'
   | 'completion';
 
 type Props = {};
@@ -30,7 +31,7 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
   const [currentStep, setCurrentStep] = useState<SetupStep>('welcome');
 
   const goToNextStep = () => {
-    const stepOrder: SetupStep[] = ['welcome', 'db_config', 'cli_command', 'completion'];
+    const stepOrder: SetupStep[] = ['welcome', 'db_config', 'admin_user', 'completion'];
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex < stepOrder.length - 1) {
       setCurrentStep(stepOrder[currentIndex + 1]);
@@ -43,8 +44,8 @@ const SetupWizardPage = (props: InferGetStaticPropsType<typeof getStaticProps>) 
         return <WelcomeStep onNext={goToNextStep} />;
       case 'db_config':
         return <DatabaseStep onVerifyAndContinue={goToNextStep} />;
-      case 'cli_command':
-        return <CliCommandStep onNext={goToNextStep} />;
+      case 'admin_user':
+        return <AdminUserStep onSetupComplete={goToNextStep} />;
       case 'completion':
         return <CompletionStep />;
       default:
