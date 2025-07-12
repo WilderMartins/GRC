@@ -33,21 +33,30 @@ const EditRiskPageContent = () => {
   const { user } = useAuth();
 
   // Estados para Stakeholders
-  const [stakeholders, setStakeholders] = useState<UserLookup[]>([]);
-  const [isLoadingStakeholders, setIsLoadingStakeholders] = useState(true);
-  const [stakeholdersError, setStakeholdersError] = useState<string | null>(null);
-  const [organizationUsers, setOrganizationUsers] = useState<UserLookup[]>([]);
-  const [selectedUserToAddAsStakeholder, setSelectedUserToAddAsStakeholder] = useState<string>('');
-  const [isSubmittingStakeholder, setIsSubmittingStakeholder] = useState(false);
-  const [isRemovingStakeholderId, setIsRemovingStakeholderId] = useState<string | null>(null);
+import useOrganizationUsersLookup from '@/hooks/useOrganizationUsersLookup'; // Importar o hook
+
+// ... (outras importações)
+
+const EditRiskPageContent = () => {
+    // ... (outros hooks)
+    const { user } = useAuth();
+
+    // Estados para Stakeholders
+    const [stakeholders, setStakeholders] = useState<UserLookup[]>([]);
+    const [isLoadingStakeholders, setIsLoadingStakeholders] = useState(true);
+    const [stakeholdersError, setStakeholdersError] = useState<string | null>(null);
+    const { users: organizationUsers, isLoading: isLoadingOrgUsers, fetchUsers: fetchOrganizationUsers } = useOrganizationUsersLookup();
+    const [selectedUserToAddAsStakeholder, setSelectedUserToAddAsStakeholder] = useState<string>('');
+    const [isSubmittingStakeholder, setIsSubmittingStakeholder] = useState(false);
+    const [isRemovingStakeholderId, setIsRemovingStakeholderId] = useState<string | null>(null);
 
 
-  const fetchRiskData = useCallback(async () => {
+    const fetchRiskData = useCallback(async () => {
     if (riskId && typeof riskId === 'string') {
       setIsLoading(true);
       setError(null);
       try {
-        const riskResponse = await apiClient.get<Risk>(`/risks/${riskId}`); // Usar tipo Risk importado
+        const riskResponse = await apiClient.get<Risk>(`/api/v1/risks/${riskId}`); // Usar tipo Risk importado
         setInitialData(riskResponse.data);
       } catch (err: any) {
         console.error("Erro ao buscar dados do risco:", err);
@@ -66,7 +75,7 @@ const EditRiskPageContent = () => {
     if (riskId && typeof riskId === 'string') {
       setIsHistoryLoading(true);
       try {
-        const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/risks/${riskId}/approval-history`);
+        const historyResponse = await apiClient.get<ApprovalWorkflow[]>(`/api/v1/risks/${riskId}/approval-history`);
         setApprovalHistory(historyResponse.data || []);
       } catch (err: any) {
         console.error("Erro ao buscar histórico de aprovação:", err);
@@ -81,7 +90,7 @@ const EditRiskPageContent = () => {
       setIsLoadingStakeholders(true);
       setStakeholdersError(null);
       try {
-        const response = await apiClient.get<UserLookup[]>(`/risks/${riskId}/stakeholders`);
+        const response = await apiClient.get<UserLookup[]>(`/api/v1/risks/${riskId}/stakeholders`);
         setStakeholders(response.data || []);
       } catch (err: any) {
         console.error("Erro ao buscar stakeholders:", err);
@@ -92,16 +101,8 @@ const EditRiskPageContent = () => {
     }
   }, [riskId, t]);
 
-  const fetchOrganizationUsers = useCallback(async () => {
-    // Esta função pode ser otimizada se os usuários já foram carregados em outro lugar
-    try {
-      const response = await apiClient.get<UserLookup[]>('/users/organization-lookup');
-      setOrganizationUsers(response.data || []);
-    } catch (error) {
-      console.error("Erro ao buscar usuários da organização:", error);
-      notify.error(t('common:error_loading_list', { list_name: 'usuários' }));
-    }
-  }, [notify, t]);
+  // A função fetchOrganizationUsers foi removida e substituída pelo hook useOrganizationUsersLookup
+  // A chamada ao hook já está no topo do componente.
 
   useEffect(() => {
     if (router.isReady && riskId) {
@@ -124,7 +125,7 @@ const EditRiskPageContent = () => {
     }
     setIsSubmittingStakeholder(true);
     try {
-      await apiClient.post(`/risks/${riskId}/stakeholders`, { user_id: selectedUserToAddAsStakeholder });
+      await apiClient.post(`/api/v1/risks/${riskId}/stakeholders`, { user_id: selectedUserToAddAsStakeholder });
       notify.success(t('stakeholders.success_stakeholder_added', { ns: 'risks'}));
       setSelectedUserToAddAsStakeholder('');
       fetchStakeholders(); // Re-fetch a lista de stakeholders
@@ -140,7 +141,7 @@ const EditRiskPageContent = () => {
     if (window.confirm(t('stakeholders.confirm_remove_stakeholder', { ns: 'risks'}))) {
       setIsRemovingStakeholderId(userIdToRemove);
       try {
-        await apiClient.delete(`/risks/${riskId}/stakeholders/${userIdToRemove}`);
+        await apiClient.delete(`/api/v1/risks/${riskId}/stakeholders/${userIdToRemove}`);
         notify.success(t('stakeholders.success_stakeholder_removed', { ns: 'risks'}));
         fetchStakeholders(); // Re-fetch
       } catch (err: any) {

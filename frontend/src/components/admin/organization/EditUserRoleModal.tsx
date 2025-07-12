@@ -45,7 +45,7 @@ const EditUserRoleModal: React.FC<EditUserRoleModalProps> = ({
     setFormError(null);
 
     try {
-      await apiClient.put(`/organizations/${organizationId}/users/${user.id}/role`, { role: selectedRole });
+      await apiClient.put(`/api/v1/organizations/${organizationId}/users/${user.id}/role`, { role: selectedRole });
       notify.success(t('edit_role_modal.success_role_updated', { userName: user.name }));
       onRoleUpdated();
       onClose();
