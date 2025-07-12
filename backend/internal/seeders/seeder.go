@@ -29,6 +29,7 @@ func RunMigrations(db *gorm.DB) error {
 		&models.Webhook{},
 		&models.C2M2Domain{},
 		&models.C2M2Practice{},
+		&models.SystemSetting{},
 	)
 
 	if err != nil {

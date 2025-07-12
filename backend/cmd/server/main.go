@@ -284,6 +284,17 @@ func startServer() {
 		{
 			fileAccessRoutes.GET("/signed-url", handlers.GetSignedURLForObjectHandler)
 		}
+
+		// Rotas de Administração do Sistema
+		adminRoutes := apiV1.Group("/admin")
+		// Adicionar um middleware de verificação de role de admin aqui se necessário
+		{
+			settingsRoutes := adminRoutes.Group("/settings")
+			{
+				settingsRoutes.GET("", handlers.ListSystemSettingsHandler)
+				settingsRoutes.PUT("", handlers.UpdateSystemSettingsHandler)
+			}
+		}
 	}
 
 	serverPort := os.Getenv("SERVER_PORT")
