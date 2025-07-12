@@ -249,7 +249,6 @@ type AuditAssessment struct {
 	UpdatedAt      time.Time          `json:"updated_at"`
 
 	// Campos para Maturidade C2M2
-	C2M2MaturityLevel *int       `gorm:"index" json:"c2m2_maturity_level,omitempty"`    // Nível de Maturidade C2M2 (0-3), ponteiro para ser nullable
 	C2M2AssessmentDate *time.Time `gorm:"type:timestamptz" json:"c2m2_assessment_date,omitempty"` // Data da avaliação de maturidade C2M2
 	C2M2Comments      *string    `gorm:"type:text" json:"c2m2_comments,omitempty"`         // Comentários da avaliação C2M2
 

@@ -10,6 +10,7 @@ import (
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
 	"go.uber.org/zap"                 // Importar zap
 	"phoenixgrc/backend/internal/notifications"
+	phxmetrics "phoenixgrc/backend/pkg/metrics" // Importar métricas
 	"phoenixgrc/backend/internal/riskutils"
 	"phoenixgrc/backend/pkg/features"
 	"strings"
@@ -70,6 +71,9 @@ func CreateRiskHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create risk: " + err.Error()})
 		return
 	}
+	// Incrementar métrica
+	phxmetrics.RisksCreated.Inc()
+
 	go notifications.NotifyRiskEvent(risk.OrganizationID, risk, models.EventTypeRiskCreated)
 	if risk.OwnerID != uuid.Nil {
 		emailSubject := fmt.Sprintf("Novo Risco Criado: %s", risk.Title)
@@ -519,6 +523,17 @@ func AddRiskStakeholderHandler(c *gin.Context) {
 		if err == gorm.ErrRecordNotFound { c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"}); return }
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()}); return
 	}
+
+	// Authorization Check: Only risk owner, admin, or manager can add stakeholders
+	tokenUserID, _ := c.Get("userID")
+	tokenUserRole, _ := c.Get("userRole")
+	isOwner := risk.OwnerID == tokenUserID.(uuid.UUID)
+	isAdminOrManager := tokenUserRole.(models.UserRole) == models.RoleAdmin || tokenUserRole.(models.UserRole) == models.RoleManager
+	if !isOwner && !isAdminOrManager {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to manage stakeholders for this risk"})
+		return
+	}
+
 	var stakeholderUser models.User
 	if err := db.Where("id = ? AND organization_id = ?", stakeholderUserID, organizationID).First(&stakeholderUser).Error; err != nil {
 		if err == gorm.ErrRecordNotFound { c.JSON(http.StatusNotFound, gin.H{"error": "User to be added as stakeholder not found or not part of your organization"}); return }
@@ -546,6 +561,17 @@ func RemoveRiskStakeholderHandler(c *gin.Context) {
 		if err == gorm.ErrRecordNotFound { c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization, cannot remove stakeholder."}); return }
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify risk before stakeholder removal: " + err.Error()}); return
 	}
+
+	// Authorization Check: Only risk owner, admin, or manager can remove stakeholders
+	tokenUserID, _ := c.Get("userID")
+	tokenUserRole, _ := c.Get("userRole")
+	isOwner := risk.OwnerID == tokenUserID.(uuid.UUID)
+	isAdminOrManager := tokenUserRole.(models.UserRole) == models.RoleAdmin || tokenUserRole.(models.UserRole) == models.RoleManager
+	if !isOwner && !isAdminOrManager {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not authorized to manage stakeholders for this risk"})
+		return
+	}
+
 	result := db.Where("risk_id = ? AND user_id = ?", riskID, stakeholderUserID).Delete(&models.RiskStakeholder{})
 	if result.Error != nil { c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove stakeholder: " + result.Error.Error()}); return }
 	if result.RowsAffected == 0 { c.JSON(http.StatusNotFound, gin.H{"error": "Stakeholder association not found"}); return }

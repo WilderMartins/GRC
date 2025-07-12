@@ -56,6 +56,26 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
                 *   `icon_url` (string, opcional): Uma URL para um ícone representando o provedor.
         *   `500 Internal Server Error`: Falha ao buscar os provedores de identidade.
 
+*   **`GET /api/public/setup-status`**
+    *   **Descrição:** Verifica o estado atual da configuração da aplicação para determinar se o setup inicial foi concluído. Útil para um Wizard de instalação no frontend.
+    *   **Autenticação:** Nenhuma.
+    *   **Respostas:**
+        *   `200 OK`: Retorna um objeto JSON com o status.
+            ```json
+            {
+                "status": "string", // Valores possíveis abaixo
+                "message": "string" // Mensagem descritiva
+            }
+            ```
+            *   **Valores de `status` Possíveis:**
+                *   `database_not_configured`: Backend não conseguiu obter uma instância de DB.
+                *   `database_not_connected`: Não foi possível fazer ping no banco de dados.
+                *   `migrations_not_run`: Conexão OK, mas as tabelas da aplicação não existem.
+                *   `setup_pending_org`: Migrações OK, mas nenhuma organização foi criada.
+                *   `setup_pending_admin`: Organização existe, mas nenhum usuário admin foi criado.
+                *   `setup_complete`: Aplicação está configurada e pronta para uso.
+        *   `503 Service Unavailable`: Se a conexão com o banco de dados falhar.
+
 ### 3. Autenticação (`/auth`)
 
 *   **`POST /auth/login`**
@@ -384,6 +404,7 @@ Todos os endpoints nesta seção requerem autenticação JWT.
 
 *   **`POST /api/v1/risks/:riskId/stakeholders`**
     *   **Descrição:** Adiciona um usuário como stakeholder a um risco.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização.
     *   **Parâmetros de Path:** `riskId`.
     *   **Payload da Requisição (`application/json`):**
         ```json
@@ -393,11 +414,13 @@ Todos os endpoints nesta seção requerem autenticação JWT.
         *   `201 Created`: `{ "message": "Stakeholder added successfully" }`
         *   `200 OK`: `{ "message": "Stakeholder association already exists." }`
         *   `400 Bad Request`: IDs ou payload inválidos.
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Risco ou usuário não encontrado na organização.
         *   `500 Internal Server Error`.
 
 *   **`GET /api/v1/risks/:riskId/stakeholders`**
     *   **Descrição:** Lista todos os stakeholders de um risco.
+    *   **Autorização:** Usuário deve pertencer à organização do risco.
     *   **Parâmetros de Path:** `riskId`.
     *   **Respostas:**
         *   `200 OK`: Array de objetos `UserStakeholderResponse`.
@@ -412,9 +435,11 @@ Todos os endpoints nesta seção requerem autenticação JWT.
 
 *   **`DELETE /api/v1/risks/:riskId/stakeholders/:userId`**
     *   **Descrição:** Remove um stakeholder de um risco.
+    *   **Autorização:** Requer que o usuário autenticado seja o proprietário (`OwnerID`) do risco, ou tenha a role `admin` ou `manager` na organização.
     *   **Parâmetros de Path:** `riskId`, `userId` (ID do stakeholder a ser removido).
     *   **Respostas:**
         *   `200 OK`: `{ "message": "Stakeholder removed successfully" }`
+        *   `403 Forbidden`: Usuário não autorizado.
         *   `404 Not Found`: Associação de stakeholder ou risco não encontrada.
         *   `500 Internal Server Error`.
 

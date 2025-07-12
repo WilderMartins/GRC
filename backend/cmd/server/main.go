@@ -110,6 +110,7 @@ func startServer() {
 	publicApi := router.Group("/api/public")
 	{
 		publicApi.GET("/social-identity-providers", handlers.ListGlobalSocialIdentityProvidersHandler)
+		publicApi.GET("/setup-status", handlers.GetSetupStatusHandler) // Novo endpoint de status
 		// Outras rotas públicas podem ser adicionadas aqui no futuro
 	}
 

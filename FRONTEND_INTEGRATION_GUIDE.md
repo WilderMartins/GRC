@@ -421,7 +421,7 @@ Base Path: `/risks/{riskId}/stakeholders`
     *   **Resposta (200 OK):** `{ "message": "Stakeholder removed successfully" }`
 *   **Notas Frontend:**
     *   Para adicionar, usar o lookup de usuários (Seção 6.1). Listar stakeholders na página de detalhes do risco.
-    *   **Autorização Atual:** Qualquer membro da organização do risco pode adicionar/remover stakeholders. (Este comportamento pode ser restringido no futuro para Owner/Admin/Manager do risco/organização).
+    *   **Autorização:** Apenas o proprietário do risco, admins ou managers da organização podem adicionar ou remover stakeholders.
 
 #### 5.1.8. Workflow de Aceite de Risco
 
@@ -838,7 +838,27 @@ Para construir os formulários de avaliação de maturidade C2M2, o frontend pre
     *   Para cada prática, apresentar um seletor com as opções de status: "not_implemented", "partially_implemented", "fully_implemented".
     *   Coletar as respostas (mapa de `practiceID` -> `status`) para enviar no payload de `POST /api/v1/audit/assessments`.
 
-## 7. Tratamento de Erros da API
+## 7. Setup Inicial da Aplicação (Wizard Flow)
+
+O backend possui um endpoint público para que o frontend possa verificar o estado da instalação e guiar um novo administrador por um Wizard de configuração inicial.
+
+*   **Endpoint de Status:** `GET /api/public/setup-status`
+*   **Descrição:** Verifica o estado atual da configuração do backend. O frontend deve chamar este endpoint ao iniciar para decidir se redireciona para a página de login ou para a página de setup.
+*   **Resposta de Sucesso (200 OK):**
+    ```json
+    {
+        "status": "string", // Valores possíveis abaixo
+        "message": "string" // Mensagem descritiva
+    }
+    ```
+*   **Ação do Frontend com base no `status`:**
+    *   `database_not_configured` ou `database_not_connected`: Exibir uma página de erro instruindo o administrador a verificar as variáveis de ambiente do backend (`.env`) e garantir que o serviço de banco de dados está rodando e acessível.
+    *   `migrations_not_run`: Exibir uma página de setup que instrui o administrador a executar o comando de setup inicial do backend (ex: `docker-compose run --rm backend setup`) para criar as tabelas do banco de dados, e depois recarregar a página.
+    *   `setup_pending_org` ou `setup_pending_admin`: Similar ao anterior, instruir o usuário a completar o comando de setup do backend, que é interativo e solicitará a criação da organização e do admin.
+    *   `setup_complete`: O setup está completo. O frontend pode prosseguir para a página de login normalmente.
+*   **Melhoria Futura:** Conforme sugerido na Seção 9, o backend pode ser melhorado para expor endpoints que permitam ao Wizard do frontend *executar* os passos de setup (criar organização, criar admin) via chamadas de API, em vez de depender da execução de um comando no terminal pelo usuário.
+
+## 8. Tratamento de Erros da API
 
 A API utiliza códigos de status HTTP padrão para indicar o sucesso ou falha de uma requisição.
 
@@ -869,64 +889,22 @@ A API utiliza códigos de status HTTP padrão para indicar o sucesso ou falha de
 *   Exibir mensagens de erro amigáveis para o usuário, mas logar os detalhes do erro (ou o corpo JSON completo do erro) no console do desenvolvedor para facilitar a depuração.
 *   Para `401 Unauthorized` devido a token expirado, implementar um fluxo para deslogar o usuário e/ou redirecioná-lo para a página de login (possivelmente com uma tentativa de refresh de token se essa funcionalidade for implementada no futuro).
 
-## 8. Considerações sobre o Setup Inicial via Wizard (Frontend)
-
-O backend suporta um fluxo de setup inicial que é idealmente conduzido por uma interface de usuário (Wizard) no frontend.
-
-**Detecção de Necessidade de Setup:**
-*   O frontend pode tentar fazer uma chamada para um endpoint simples que requer que a organização e o admin já existam (ex: `GET /api/v1/me` após uma tentativa de login "fictícia" ou um endpoint de status de setup dedicado - este último não existe atualmente).
-*   Alternativamente, se o backend for iniciado e não conseguir se conectar ao banco de dados (conforme configurado no `.env` do backend), ele não iniciará corretamente. O frontend, ao não conseguir se comunicar com a API, pode inferir um problema de setup ou de conexão.
-*   **Melhoria Sugerida para o Backend:** Criar um endpoint público (ex: `/api/public/setup-status`) que o frontend possa consultar para saber se o setup básico (conexão com DB, migrações, organização/admin inicial) já foi concluído.
-
-**Fluxo do Wizard (Interação Frontend-Backend):**
-
-1.  **Configuração do Banco de Dados (Frontend informa, Backend usa):**
-    *   O Wizard no frontend coletaria os dados de conexão do banco de dados do usuário (host, port, user, password, dbname, sslmode).
-    *   **Ação:** Estes dados NÃO são enviados para um endpoint. O usuário deve ser instruído a colocar esses dados no arquivo `.env` do **backend** e reiniciar o backend. O frontend pode, então, tentar verificar a conexão.
-2.  **Verificar Conexão com o Banco e Executar Migrações (Backend):**
-    *   Após o usuário configurar o `.env` do backend e reiniciá-lo, o backend tentará se conectar ao DB.
-    *   Se o comando `setup` for executado (`docker-compose run --rm backend setup` ou `./server setup`), o backend:
-        *   Conecta-se ao DB.
-        *   Executa as migrações (`database.MigrateDB(dbURL)`).
-    *   **Feedback para o Frontend:** O frontend precisaria de uma forma de saber se esta etapa foi bem-sucedida. Se o Wizard for uma aplicação frontend separada que orquestra o setup, ela poderia invocar o comando de setup do backend e analisar sua saída, ou depender de um endpoint de status.
-3.  **Criar Primeira Organização e Usuário Admin (Backend):**
-    *   O comando `setup` do backend, após as migrações, solicita interativamente no console os detalhes da primeira organização e do usuário admin.
-    *   **Desafio para Wizard no Browser:** Este fluxo interativo no console do backend não se traduz diretamente para um Wizard no browser.
-    *   **Soluções Possíveis para Wizard no Browser:**
-        *   **Opção A (Recomendada):** O backend expõe endpoints específicos para o Wizard após as migrações terem sido executadas com sucesso.
-            *   Ex: `POST /api/setup/initialize` (público, mas talvez protegido por um token de setup único ou primeira execução)
-            *   Payload: `{ "organization_name": "...", "admin_name": "...", "admin_email": "...", "admin_password": "..." }`
-            *   O backend então cria a organização e o admin.
-        *   **Opção B:** O frontend instrui o usuário a executar o comando `docker-compose run --rm backend setup` separadamente no terminal e depois voltar ao frontend.
-
-**Fluxo Simplificado Assumindo Endpoints de Setup (Opção A):**
-
-1.  **Frontend (Página de Setup):**
-    *   Instrui o usuário a configurar as variáveis de DB no `.env` do backend e reiniciar o backend.
-    *   Após o usuário confirmar, o frontend chama um endpoint (ex: `POST /api/public/setup/check-db-and-migrate`).
-        *   Backend tenta conectar ao DB e rodar migrações. Retorna sucesso/falha.
-    *   Se sucesso, o frontend exibe formulários para:
-        *   Nome da Organização.
-        *   Nome, Email, Senha do Admin.
-    *   Frontend envia esses dados para `POST /api/public/setup/create-admin-org`.
-        *   Backend cria a organização e o admin. Retorna sucesso/falha.
-    *   Se sucesso, redireciona para a página de login.
-
-**Nota:** Os endpoints `/api/public/setup/*` mencionados acima são sugestões e **não existem atualmente**. A implementação atual do setup é via CLI interativa do backend. Para um Wizard no browser, o backend precisaria ser adaptado para expor tais endpoints.
-
 ## 9. Apêndice: Lista de Endpoints Chave (Resumo)
 
 *   `GET /health`
+*   `GET /api/public/setup-status`
 *   `GET /api/public/social-identity-providers`
 *   `POST /auth/login`
 *   `POST /auth/login/2fa/verify`
 *   `POST /auth/login/2fa/backup-code/verify`
 *   `GET /auth/oauth2/{provider}/{idpId}/login`
+*   `GET /auth/saml/{idpId}/login`
 *   `GET /api/v1/me`
 *   `GET /api/v1/me/dashboard/summary`
 *   CRUD em `/api/v1/risks`
 *   CRUD em `/api/v1/vulnerabilities`
 *   Endpoints em `/api/v1/audit/...`
+*   Endpoints em `/api/v1/c2m2/...`
 *   Endpoints de administração em `/api/v1/organizations/{orgId}/...`
 *   `GET /api/v1/users/organization-lookup`
 *   `GET /api/v1/files/signed-url`

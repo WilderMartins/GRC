@@ -10,6 +10,7 @@ import (
 	"phoenixgrc/backend/internal/database" // Adicionado para buscar/criar usuário
 	"phoenixgrc/backend/internal/auth"     // Para gerar token JWT da aplicação
 	appConfig "phoenixgrc/backend/pkg/config" // Para FRONTEND_SAML_CALLBACK_URL e novas configs
+	phxmetrics "phoenixgrc/backend/pkg/metrics"   // Importar métricas
 	"gorm.io/gorm" // Adicionado para gorm.ErrRecordNotFound
 
 	"github.com/crewjam/saml/samlsp"
@@ -292,6 +293,7 @@ func ACSHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to provision SAML user."})
 			return
 		}
+			phxmetrics.UsersCreated.WithLabelValues("saml").Inc() // Incrementar métrica
 		phxlog.L.Info("New SAML user provisioned",
 			zap.String("userID", user.ID.String()), zap.String("email", email), zap.String("idpName", idpModel.Name))
 	} else if err != nil { // Outro erro de DB
