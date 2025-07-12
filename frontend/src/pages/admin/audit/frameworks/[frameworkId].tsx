@@ -9,8 +9,8 @@ import Link from 'next/link';
 import { useEffect, useState, useMemo } from 'react';
 import apiClient from '@/lib/axios';
 import { ControlWithAssessment, AuditAssessmentStatus, AuditFramework, ComplianceScoreResponse, C2M2MaturityFrameworkSummaryResponse } from '@/types';
-import AssessmentFormModal from '@/components/audit/AssessmentFormModal'; // Importar o modal
-import StatCard from '@/components/common/StatCard'; // Importar StatCard
+import AssessmentFormModal from '@/components/audit/AssessmentFormModal';
+import StatCard from '@/components/common/StatCard';
 
 type Props = {}
 

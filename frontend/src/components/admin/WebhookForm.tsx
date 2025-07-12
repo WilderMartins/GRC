@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
 import apiClient from '@/lib/axios';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -37,9 +38,30 @@ interface WebhookFormProps {
 const WebhookForm: React.FC<WebhookFormProps> = ({
   organizationId,
   initialData,
+import { useTranslation } from 'next-i18next'; // Importar
+
+// ...
+
+const WebhookForm: React.FC<WebhookFormProps> = ({
+  organizationId,
+  initialData,
   isEditing = false,
   onSubmitSuccess,
 }) => {
+  const { t } = useTranslation(['webhooks', 'common']); // Adicionar hook
+  const router = useRouter();
+import { useTranslation } from 'next-i18next';
+
+// ... (outras definições)
+
+const WebhookForm: React.FC<WebhookFormProps> = ({
+  organizationId,
+  initialData,
+  isEditing = false,
+  onSubmitSuccess,
+}) => {
+  const router = useRouter();
+  const { t } = useTranslation(['webhooks', 'common']);
   const [formData, setFormData] = useState<WebhookFormData>({
     name: '',
     url: '',
@@ -169,8 +191,11 @@ const WebhookForm: React.FC<WebhookFormProps> = ({
         <label htmlFor="is_active_webhook" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">Ativo</label>
       </div>
 
-      <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
-        {/* O botão de cancelar foi removido. O usuário pode usar o link "Voltar para a lista" no layout da página. */}
+      <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
+        <button type="button" onClick={() => router.push('/admin/organization/webhooks')} disabled={isLoading}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white dark:bg-gray-600 dark:text-gray-200 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 disabled:opacity-50 transition-colors">
+          Cancelar
+        </button>
         <button type="submit" disabled={isLoading || formData.event_types.length === 0}
                 className="px-4 py-2 text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 rounded-md shadow-sm disabled:opacity-50 flex items-center transition-colors">
           {isLoading && (

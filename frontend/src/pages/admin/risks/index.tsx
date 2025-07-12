@@ -7,20 +7,18 @@ import RiskBulkUploadModal from '@/components/risks/RiskBulkUploadModal';
 import PaginationControls from '@/components/common/PaginationControls';
 import { useNotifier } from '@/hooks/useNotifier';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import apiClient from '@/lib/axios';
-import { useDebounce } from '@/hooks/useDebounce';
+import usePaginatedData from '@/hooks/usePaginatedData'; // Importar o novo hook
+import useOrganizationUsersLookup from '@/hooks/useOrganizationUsersLookup';
 import {
     Risk,
-    RiskOwner, // Mantendo RiskOwner aqui se ele tiver campos além de UserLookup, senão usar UserLookup
     ApprovalWorkflow,
     UserLookup,
-    PaginatedResponse,
     RiskStatus,
     RiskImpact,
     RiskProbability,
     RiskCategory,
-    SortOrder
 } from '@/types';
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';

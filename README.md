@@ -12,6 +12,51 @@ Phoenix GRC é uma plataforma SaaS (Software as a Service), whitelabel, projetad
 - **UI (Frontend):** Tailwind CSS
 - **Containerização:** Docker
 
+## Frontend (Next.js)
+
+A aplicação frontend é construída com Next.js, TypeScript e Tailwind CSS. Ela se comunica com a API do backend para todas as operações de dados.
+
+### Rodando o Frontend em Modo de Desenvolvimento
+
+Para ter uma experiência de desenvolvimento mais fluida com hot-reloading, é recomendado rodar o frontend separadamente do Docker Compose.
+
+1.  **Navegue até o diretório do frontend:**
+    ```bash
+    cd frontend
+    ```
+
+2.  **Instale as dependências:**
+    ```bash
+    npm install
+    ```
+
+3.  **Configure as Variáveis de Ambiente do Frontend:**
+    Crie um arquivo `.env.local` dentro do diretório `frontend`. Adicione as seguintes variáveis:
+    ```env
+    # URL base da API do backend. Se estiver rodando o backend via Docker com Nginx na porta 80, será http://localhost.
+    # Se estiver acessando o backend diretamente na porta 8080, será http://localhost:8080.
+    NEXT_PUBLIC_API_BASE_URL=http://localhost
+
+    # URL raiz da própria aplicação frontend.
+    NEXT_PUBLIC_APP_ROOT_URL=http://localhost:3000
+    ```
+
+4.  **Inicie o Servidor de Desenvolvimento:**
+    ```bash
+    npm run dev
+    ```
+    O frontend estará acessível em `http://localhost:3000`.
+
+### Estrutura de Pastas do Frontend (`frontend/src`)
+
+-   **`components/`**: Contém componentes React reutilizáveis, organizados por funcionalidade (ex: `auth`, `risks`, `common`).
+-   **`contexts/`**: Contém os Contextos React para gerenciamento de estado global, como `AuthContext` e `ThemeContext`.
+-   **`hooks/`**: Contém hooks customizados para encapsular lógicas reutilizáveis (ex: `useNotifier`, `usePaginatedData`).
+-   **`lib/`**: Contém bibliotecas e configurações de clientes, como a instância configurada do `axios`.
+-   **`pages/`**: Contém as páginas da aplicação, seguindo o sistema de roteamento baseado em arquivos do Next.js.
+-   **`styles/`**: Contém estilos globais.
+-   **`types/`**: Contém todas as definições de tipos TypeScript (interfaces, enums) usadas na aplicação.
+
 ## Ambiente de Desenvolvimento com Docker
 
 Este projeto utiliza Docker e Docker Compose para facilitar a configuração do ambiente de desenvolvimento.
