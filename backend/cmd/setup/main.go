@@ -3,10 +3,11 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"phoenixgrc/backend/internal/seeders"
 	"strings"
 
@@ -43,7 +44,7 @@ func RunSetup() {
 	dbUser := readInput(reader, "Enter Database User: ")
 	dbPassword, err := readPassword("Enter Database Password: ")
 	if err != nil {
-		log.Fatalf("Failed to read database password: %v", err)
+		phxlog.L.Fatal("Failed to read database password", zap.Error(err))
 	}
 	dbName := readInput(reader, "Enter Database Name: ")
 	dbSSLMode := readInput(reader, "Enter Database SSL Mode (e.g., disable, require): ")
@@ -53,15 +54,47 @@ func RunSetup() {
 
 	fmt.Println("Connecting to database...")
 	if err := database.ConnectDB(dsn); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		phxlog.L.Fatal("Failed to connect to database", zap.Error(err))
 	}
 	fmt.Println("Successfully connected to the database.")
 
 	// 2. Database Migrations
 	fmt.Println("\n--- Running Database Migrations ---")
-	if err := database.MigrateDB(); err != nil {
-		// database.MigrateDB() already logs the error
-		log.Fatalf("Database migration process failed.")
+	// Construir a dbURL para golang-migrate
+	// Formato: postgresql://user:password@host:port/dbname?sslmode=disable
+	// Nota: o usuário e senha podem conter caracteres especiais que precisam ser URL-encoded.
+	// No entanto, para input manual, geralmente não é um problema, mas para produção, sim.
+	// A biblioteca lib/pq (usada por database/sql e GORM) lida com isso na DSN.
+	// O golang-migrate também usa lib/pq internamente para o driver postgres.
+	// A DSN simples que construímos para o GORM deve ser aceitável para o driver do migrate se
+	// não houver caracteres muito exóticos.
+	// A forma mais segura de construir a URL para migrate é usar `url.URL` e `url.QueryEscape`.
+	// Por simplicidade aqui, vou usar uma formatação direta, assumindo que as credenciais não são problemáticas.
+
+	// A dbURL para golang-migrate é um pouco diferente da DSN do GORM.
+	// Ex: "postgres://postgres:password@localhost:5432/phoenix_grc_dev?sslmode=disable"
+	// Adicionar o schema padrão (public) para a tabela schema_migrations, a menos que outro seja especificado.
+	// Por agora, vamos manter simples e assumir que schema_migrations vai para o 'public' ou o search_path padrão do usuário.
+	// Se `DB_SCHEMA` for uma variável de ambiente relevante, ela deveria ser usada aqui.
+	// Para o migrate, o schema é geralmente controlado pelo search_path do usuário ou pode ser
+	// especificado na URL se o driver suportar (ex: ?search_path=myschema).
+	// O driver postgres do migrate não parece ter um suporte explícito a `search_path` na URL de forma padrão.
+	// Ele opera no search_path padrão da conexão.
+
+	// A DSN que já temos é `host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC`
+	// O migrate espera algo como `postgres://user:pass@host:port/dbname?sslmode=val`
+	// Vamos construir essa URL.
+	migrateDbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		dbUser,     // Assumindo que não precisa de URL encoding para setup manual
+		dbPassword, // Assumindo que não precisa de URL encoding para setup manual
+		dbHost,
+		dbPort,
+		dbName,
+		dbSSLMode,
+	)
+
+	if err := database.MigrateDB(migrateDbURL); err != nil {
+		phxlog.L.Fatal("Database migration process failed", zap.Error(err))
 	}
 	fmt.Println("Database migrations completed successfully.")
 
@@ -69,10 +102,10 @@ func RunSetup() {
 	fmt.Println("\n--- Seeding Audit Frameworks and Controls ---")
 	db := database.GetDB()
 	if db == nil {
-		log.Fatal("Failed to get database instance for seeding.")
+		phxlog.L.Fatal("Failed to get database instance for seeding.")
 	}
 	if err := seeders.SeedAuditFrameworksAndControls(db); err != nil {
-		log.Fatalf("Failed to seed audit frameworks and controls: %v", err)
+		phxlog.L.Fatal("Failed to seed audit frameworks and controls", zap.Error(err))
 	}
 	fmt.Println("Audit frameworks and controls seeded successfully.")
 
@@ -88,7 +121,7 @@ func RunSetup() {
 		Name: orgName,
 	}
 	if err := db.Create(&organization).Error; err != nil {
-		log.Fatalf("Failed to create organization: %v", err)
+		phxlog.L.Fatal("Failed to create organization", zap.Error(err))
 	}
 	fmt.Printf("Organization '%s' created successfully with ID: %s\n", organization.Name, organization.ID)
 
@@ -102,7 +135,7 @@ func RunSetup() {
 	for {
 		adminPassword, err = readPassword("Enter Admin User Password: ")
 		if err != nil {
-			log.Fatalf("Failed to read admin password: %v", err)
+			phxlog.L.Fatal("Failed to read admin password", zap.Error(err))
 		}
 		if adminPassword == "" {
 			fmt.Println("Password cannot be empty. Please try again.")
@@ -110,7 +143,7 @@ func RunSetup() {
 		}
 		adminPasswordConfirm, err = readPassword("Confirm Admin User Password: ")
 		if err != nil {
-			log.Fatalf("Failed to read admin password confirmation: %v", err)
+			phxlog.L.Fatal("Failed to read admin password confirmation", zap.Error(err))
 		}
 		if adminPassword == adminPasswordConfirm {
 			break
@@ -120,7 +153,7 @@ func RunSetup() {
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatalf("Failed to hash password: %v", err)
+		phxlog.L.Fatal("Failed to hash password", zap.Error(err))
 	}
 
 	adminUser := models.User{
@@ -133,7 +166,7 @@ func RunSetup() {
 	}
 
 	if err := db.Create(&adminUser).Error; err != nil {
-		log.Fatalf("Failed to create admin user: %v. Ensure email is unique.", err)
+		phxlog.L.Fatal("Failed to create admin user. Ensure email is unique.", zap.Error(err))
 	}
 	fmt.Printf("Admin user '%s' created successfully.\n", adminUser.Email)
 

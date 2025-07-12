@@ -1,0 +1,94 @@
+name: Backend Docker Build and Push
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*' # Ex: v1.0.0, v1.2.3
+    paths: # Apenas rodar se houver mudanças no backend ou no Dockerfile/workflow relevantes
+      - 'backend/**'
+      - '.github/workflows/backend-docker.yml'
+      - 'Dockerfile.backend' # Assumindo que o Dockerfile do backend está na raiz
+                             # Se estiver em backend/Dockerfile.backend, ajustar o path aqui e no build_and_push_action
+  workflow_dispatch:
+
+env:
+  # Usar GHCR como exemplo. Pode ser Docker Hub, ECR, GCR, etc.
+  # Para GHCR, a imagem é ghcr.io/OWNER/REPO_NAME/IMAGE_NAME
+  # OWNER/REPO_NAME é geralmente ${{ github.repository }}
+  IMAGE_NAME: phoenix-grc-backend # Nome da imagem
+
+jobs:
+  build_and_push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    # Definir permissões para que o GITHUB_TOKEN possa fazer push para o GHCR
+    permissions:
+      contents: read
+      packages: write # Necessário para push para GHCR
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU # Opcional: para build multi-arquitetura
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx # Opcional: para builds mais eficientes e multi-arquitetura
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }} # ou github.repository_owner para consistência
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # - name: Log in to Docker Hub (Exemplo alternativo)
+      #   uses: docker/login-action@v3
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          # Para Docker Hub seria: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}} # Para tags Git vX.Y.Z
+            type=semver,pattern={{major}}.{{minor}} # Para tags Git vX.Y
+            type=sha,prefix= # Git SHA como tag
+            type=raw,value=latest,enable={{is_default_branch}} # Tag 'latest' para o branch padrão (main)
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: . # Contexto do build (raiz do projeto, onde Dockerfile.backend está)
+          file: ./Dockerfile.backend # Path para o Dockerfile do backend
+          # Se o Dockerfile estiver em backend/Dockerfile.backend:
+          # context: ./backend
+          # file: ./backend/Dockerfile.backend
+          push: ${{ github.event_name != 'pull_request' }} # Não fazer push em PRs
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha # Habilitar cache de layers do Docker via GitHub Actions cache
+          cache-to: type=gha,mode=max
+```
+
+**Notas sobre este workflow:**
+
+*   **Dockerfile Path:** Assumi que `Dockerfile.backend` está na raiz do projeto. Se estiver em `backend/Dockerfile.backend`, os inputs `context` e `file` no `docker/build-push-action` precisam ser ajustados (comentei as alternativas).
+*   **Registry:** Usei GitHub Container Registry (GHCR) como exemplo. Se for Docker Hub ou outro, o login (`docker/login-action`) e o nome da imagem (`images` em `docker/metadata-action`) precisam ser alterados. Para Docker Hub, seriam necessários `secrets.DOCKERHUB_USERNAME` e `secrets.DOCKERHUB_TOKEN`.
+*   **Permissões:** Adicionei `permissions: packages: write` para permitir que o `GITHUB_TOKEN` faça push para o GHCR.
+*   **Tags da Imagem:** O `docker/metadata-action` é usado para gerar múltiplas tags para a imagem (latest para main, tags semver, git SHA, etc.).
+*   **Push Condition:** O push só acontece se o evento não for um `pull_request`.
+*   **Cache Docker:** Habilitado `cache-from` e `cache-to` com `type=gha` para usar o cache do GitHub Actions para as layers do Docker, o que pode acelerar builds subsequentes.
+*   **QEMU e Buildx:** São opcionais, mas úteis para builds multi-arquitetura e mais eficientes.
+
+Este arquivo está pronto para ser criado.

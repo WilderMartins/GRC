@@ -1,18 +1,19 @@
 package handlers
 
 import (
+	"encoding/json" // Added for backup codes
 	"net/http"
-	"log"
 	"phoenixgrc/backend/internal/auth"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	"phoenixgrc/backend/internal/utils" // Added for crypto utils
+	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
+	"go.uber.org/zap"                   // Importar zap
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid" // Added for parsing UserID
 	"github.com/pquerna/otp/totp" // Added for TOTP validation
 	"golang.org/x/crypto/bcrypt"
-	"encoding/json" // Added for backup codes
 )
 
 type LoginPayload struct {
@@ -151,12 +152,12 @@ func LoginVerifyBackupCodeHandler(c *gin.Context) {
 	if err != nil {
 		// Log this error, but proceed with login as code was valid.
 		// User should be prompted to regenerate backup codes if this list becomes empty.
-		log.Printf("Error marshalling updated backup codes for user %s: %v", user.ID, err)
+		phxlog.L.Error("Error marshalling updated backup codes", zap.String("userID", user.ID.String()), zap.Error(err))
 	} else {
 		user.TOTPBackupCodes = string(newBackupCodesJSON)
 		if err := db.Save(&user).Error; err != nil {
 			// Log this error, but proceed with login.
-			log.Printf("Error saving updated backup codes for user %s: %v", user.ID, err)
+			phxlog.L.Error("Error saving updated backup codes", zap.String("userID", user.ID.String()), zap.Error(err))
 		}
 	}
 
@@ -220,7 +221,7 @@ func LoginVerifyTOTPHandler(c *gin.Context) {
 
 	decryptedSecret, err := utils.Decrypt(user.TOTPSecret)
 	if err != nil {
-		log.Printf("ERROR: Failed to decrypt TOTP secret during login for user %s: %v", user.ID, err)
+		phxlog.L.Error("Failed to decrypt TOTP secret during login", zap.String("userID", user.ID.String()), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process TOTP secret during login"})
 		return
 	}

@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
+	// "os" // Para os.Getenv, mas config.Cfg é usado. log.Printf será substituído.
 	"phoenixgrc/backend/internal/auth" // For JWT token generation
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"strings"
 	"time"
 
@@ -21,10 +23,14 @@ import (
 	googleAPI "google.golang.org/api/oauth2/v2" // To get user info
 	"google.golang.org/api/option"
 	"gorm.io/gorm"
+	// appConfig já deve estar importado por causa de InitializeOAuth2GlobalConfig e uso de Cfg
+	// mas se não, adicionar:
+	// appConfig "phoenixgrc/backend/pkg/config"
 )
 
 const googleOAuthStateCookie = "phoenixgrc_google_oauth_state"
-var appRootURL string // To be initialized
+// appRootURL var não é mais necessária aqui se InitializeOAuth2GlobalConfig não a usa mais.
+// var appRootURL string // To be initialized
 
 // GoogleOAuthConfig defines fields for Google OAuth2 provider from IdentityProvider.ConfigJSON
 type GoogleOAuthConfig struct {
@@ -244,7 +250,9 @@ func GoogleCallbackHandler(c *gin.Context) {
 				if errParseOrg == nil {
 					orgIDForNewUser = uuid.NullUUID{UUID: parsedOrgID, Valid: true}
 				} else {
-					log.Printf("Aviso: DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO ('%s') não é um UUID válido. Usuário será criado sem organização.", appConfig.Cfg.DefaultOrganizationIDForGlobalSSO)
+					phxlog.L.Warn("DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO is not a valid UUID. User will be created without an organization.",
+						zap.String("configuredDefaultOrgID", appConfig.Cfg.DefaultOrganizationIDForGlobalSSO),
+						zap.Error(errParseOrg))
 				}
 			}
 

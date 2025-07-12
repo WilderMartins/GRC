@@ -71,6 +71,7 @@ Recomendamos usar o Wizard de Instalação via Browser para a primeira configura
         *   `AWS_SES_EMAIL_SENDER` (email remetente verificado no SES)
     *   **Outras Configurações:**
         *   `TOTP_ISSUER_NAME` (opcional, padrão `PhoenixGRC`. Nome que aparece no app autenticador)
+        *   `LOG_LEVEL` (opcional, padrão `info`. Define o nível de log da aplicação. Valores: `debug`, `info`, `warn`, `error`, `dpanic`, `panic`, `fatal`. Em desenvolvimento, `GIN_MODE=debug` também resulta em logs mais verbosos e em formato de console.)
 
     **Importante:** O Wizard de Instalação (`/setup` no browser) ou o setup via CLI (`docker-compose run --rm backend setup`) cuidará da criação da primeira organização e do usuário administrador. Para o Wizard via browser, apenas as variáveis de conexão com o banco de dados (`POSTGRES_*`) e `JWT_SECRET_KEY`, `APP_ROOT_URL`, `FRONTEND_BASE_URL`, `ENCRYPTION_KEY_HEX` precisam ser configuradas inicialmente no arquivo `.env`. O restante pode ser configurado depois.
 
@@ -162,6 +163,22 @@ Os serviços comunicam-se em uma rede Docker customizada chamada `grc_network` p
     *   Atualmente, o backend utiliza `AutoMigrate` do GORM para inicializar o esquema do banco de dados. Isso é conveniente para desenvolvimento.
     *   **Para ambientes de Staging e Produção, é fortemente recomendado o uso de uma ferramenta de migração de banco de dados dedicada** (como [golang-migrate/migrate](https://github.com/golang-migrate/migrate)). Isso proporciona versionamento, controle granular sobre alterações de esquema (incluindo a aplicação correta de constraints de chave estrangeira como `ON DELETE CASCADE/SET NULL`), e a capacidade de realizar rollbacks de forma segura.
     *   As tags `constraint:OnDelete:...` foram adicionadas aos modelos GORM, mas sua aplicação efetiva em bancos de dados existentes via `AutoMigrate` pode ser limitada. Migrações dedicadas garantiriam que essas constraints estejam corretamente implementadas.
+*   **Monitoramento e Métricas**:
+    *   A aplicação expõe métricas no formato Prometheus no endpoint `GET /metrics`. Este endpoint não requer autenticação.
+    *   Métricas expostas incluem:
+        *   `phoenixgrc_http_requests_total`: Contador de requisições HTTP (labels: `method`, `path`, `status_code`).
+        *   `phoenixgrc_http_request_duration_seconds`: Histograma da latência das requisições HTTP (labels: `method`, `path`).
+        *   `phoenixgrc_app_info`: Informações da aplicação, como versão (label: `version`).
+        *   Métricas padrão do Go (goroutines, estatísticas de memória, etc.).
+    *   Configure seu servidor Prometheus para fazer scrape deste endpoint. Exemplo de configuração de job no `prometheus.yml`:
+        ```yaml
+        scrape_configs:
+          - job_name: 'phoenix-grc-backend'
+            static_configs:
+              - targets: ['localhost:8080'] # Ou o endereço do seu container/serviço backend
+                # Se o Nginx estiver na frente e expondo o backend em um path diferente para /metrics, ajuste.
+                # Se o /metrics estiver na mesma porta do Nginx (ex: 80), use essa porta.
+        ```
 
 ### Comportamento de Exclusão e Integridade Referencial
 
@@ -174,6 +191,108 @@ Com as constraints `ON DELETE CASCADE` e `ON DELETE SET NULL` definidas nos mode
 *   **AuditFramework / AuditControl**: A exclusão de um Framework cascateia para seus Controles, e a exclusão de um Controle cascateia para suas Avaliações.
 
 É crucial garantir que estas constraints sejam devidamente aplicadas ao esquema do banco de dados através de migrações apropriadas para que este comportamento seja efetivo.
+
+---
+
+## Gerenciamento de Migrações de Banco de Dados
+
+Este projeto utiliza `golang-migrate/migrate` para gerenciar as alterações no schema do banco de dados. As migrações são arquivos SQL versionados localizados em `backend/internal/database/migrations/`.
+
+### Pré-requisitos para Desenvolvimento de Migrações
+
+Você precisa ter a [CLI `migrate`](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate) instalada.
+Siga as instruções de instalação na documentação oficial. Uma forma comum é:
+```bash
+go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+```
+(Certifique-se de que seu `$GOPATH/bin` ou `$HOME/go/bin` está no seu `PATH`.)
+
+### Configurando a URL do Banco para a CLI `migrate`
+
+A CLI `migrate` requer uma URL de conexão com o banco de dados. Crie ou atualize seu arquivo `.env` na raiz do diretório `backend/` (se você o criou lá para as configurações do backend) ou defina a variável de ambiente `DB_URL_MIGRATE` de outra forma.
+
+**Exemplo de variável `DB_URL_MIGRATE` (pode ser adicionada ao seu `.env` ou exportada no terminal):**
+```env
+# .env (exemplo para backend)
+# POSTGRES_HOST=localhost
+# POSTGRES_PORT=5432
+# POSTGRES_USER=admin
+# POSTGRES_PASSWORD=password123
+# POSTGRES_DB=phoenix_grc_dev
+# POSTGRES_SSLMODE=disable
+# ... outras vars ...
+
+# URL específica para a CLI golang-migrate
+# Substitua com seus valores de POSTGRES_USER, POSTGRES_PASSWORD, etc.
+DB_URL_MIGRATE="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=${POSTGRES_SSLMODE}"
+```
+A aplicação Go (durante o comando `setup`) também constrói uma URL similar internamente para aplicar as migrações.
+
+### Comandos da CLI `migrate` (Executar da Raiz do Projeto `phoenixgrc/`)
+
+*   **Criar uma nova migração:**
+    Substitua `<migration_name>` por um nome descritivo em snake_case (ex: `add_user_last_login_at`).
+    ```bash
+    migrate create -ext sql -dir backend/internal/database/migrations -seq <migration_name>
+    ```
+    Isso cria os arquivos `<timestamp>_<migration_name>.up.sql` e `<timestamp>_<migration_name>.down.sql`. Edite-os com suas DDLs.
+
+*   **Aplicar migrações pendentes (up):**
+    (Certifique-se que sua variável de ambiente `DB_URL_MIGRATE` está exportada ou use-a diretamente no comando)
+    ```bash
+    migrate -database "${DB_URL_MIGRATE}" -path backend/internal/database/migrations up
+    ```
+
+*   **Reverter a última migração (down 1):**
+    ```bash
+    migrate -database "${DB_URL_MIGRATE}" -path backend/internal/database/migrations down 1
+    ```
+
+*   **Verificar versão atual:**
+    ```bash
+    migrate -database "${DB_URL_MIGRATE}" -path backend/internal/database/migrations version
+    ```
+
+Consulte a documentação do `golang-migrate` para mais comandos e opções.
+
+### Fluxo de Migração na Aplicação
+
+Ao executar o comando `docker-compose run --rm backend setup` (ou o binário compilado `./server setup`), a aplicação tentará aplicar automaticamente quaisquer migrações SQL pendentes que ainda não foram executadas no banco de dados. O sistema anterior de `AutoMigrate` do GORM foi substituído por este método de migrações versionadas para maior controle em ambientes de produção.
+
+---
+
+## CI/CD (Integração Contínua / Entrega Contínua)
+
+O projeto utiliza GitHub Actions para automatizar os processos de CI e CD. Os workflows estão localizados em `.github/workflows/`.
+
+### Workflows Principais:
+
+1.  **`backend-ci.yml` (Backend CI):**
+    *   **Triggers:** Acionado em `push` para os branches `main` e `develop`, em `pull_request` para `main`, ou manualmente (`workflow_dispatch`). Roda apenas se houver alterações em `backend/**` ou no próprio arquivo de workflow.
+    *   **Jobs:**
+        *   `lint`: Executa `golangci-lint` no código do backend para garantir a qualidade e estilo do código. Utiliza a configuração de `backend/.golangci.yml`.
+        *   `test`: Compila e executa os testes unitários do backend (`go test ./...`). Gera um relatório de cobertura de código (`coverage.out`) que é carregado como um artefato. Opcionalmente, pode enviar para o Codecov (requer `CODECOV_TOKEN` nos secrets do repositório).
+        *   `build`: Compila a aplicação backend (`go build ...`) para verificar se o build está funcional. O binário resultante é carregado como um artefato.
+
+2.  **`backend-docker.yml` (Backend Docker Build and Push):**
+    *   **Triggers:** Acionado em `push` para o branch `main` (após um merge, por exemplo) ou quando uma tag versionada (ex: `v1.0.0`) é criada. Roda se houver alterações em `backend/**`, `Dockerfile.backend` ou no workflow.
+    *   **Jobs:**
+        *   `build_and_push`:
+            *   Faz login no GitHub Container Registry (GHCR).
+            *   Extrai metadados para gerar tags para a imagem Docker (ex: `latest` para `main`, tags semânticas como `v1.0.0`, `v1.0`, e o SHA do commit).
+            *   Builda a imagem Docker do backend usando `Dockerfile.backend`.
+            *   Faz push da imagem com suas tags para o GHCR (`ghcr.io/SEU_USUARIO_OU_ORG/phoenix-grc-backend`).
+            *   Utiliza cache de layers do Docker via GitHub Actions para acelerar builds futuros.
+
+### Observações:
+
+*   **Secrets:** Para o workflow `backend-docker.yml` fazer push para um registry como Docker Hub (em vez do GHCR padrão com `GITHUB_TOKEN`), você precisaria configurar `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN` nos secrets do repositório GitHub.
+*   **Frontend CI/CD:** Workflows similares para o frontend (lint, teste, build, e talvez push de imagem Docker se servido standalone) podem ser adicionados em `.github/workflows/frontend-ci.yml` e `.github/workflows/frontend-docker.yml`.
+*   **Deployment:** Os workflows atuais cobrem CI e o build/push de artefatos (binário e imagem Docker). Workflows de CD (Deployment Contínuo) para ambientes de staging ou produção não estão incluídos nesta configuração inicial e precisariam ser desenvolvidos separadamente, dependendo da plataforma de hospedagem (ex: Kubernetes, ECS, etc.).
+
+Você pode monitorar a execução desses workflows na aba "Actions" do seu repositório GitHub.
+
+---
 
 ## Endpoints da API (Backend)
 

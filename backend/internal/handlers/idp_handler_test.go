@@ -47,20 +47,42 @@ func TestCreateIdentityProviderHandler(t *testing.T) {
 	validSamlConfig := json.RawMessage(`{"idp_entity_id":"http://test.idp","idp_sso_url":"http://test.idp/sso","idp_x509_cert":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"}`)
 
 	t.Run("Successful IdP creation", func(t *testing.T) {
+		isPublic := true // Testar com IsPublic = true
 		payload := IdentityProviderPayload{
 			ProviderType: models.IDPTypeSAML,
 			Name:         "Test SAML IdP",
 			IsActive:     func(b bool) *bool { return &b }(true),
+			IsPublic:     &isPublic, // Adicionar IsPublic
 			ConfigJSON:   validSamlConfig,
 		}
 		body, _ := json.Marshal(payload)
 
 		sqlMock.ExpectBegin()
-		// Regex for INSERT INTO "identity_providers"
-		// Columns: id, organization_id, provider_type, name, is_active, config_json, attribute_mapping_json, created_at, updated_at
-		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "identity_providers" ("id","organization_id","provider_type","name","is_active","config_json","attribute_mapping_json","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING "id"`)).
-			WithArgs(sqlmock.AnyArg(), testOrgID, payload.ProviderType, payload.Name, *payload.IsActive, string(payload.ConfigJSON), string(payload.AttributeMappingJSON), sqlmock.AnyArg(), sqlmock.AnyArg()).
-			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
+		// Adicionar "is_public" à query e aos args. A ordem exata depende de como o GORM gera.
+		// Assumindo que é adicionado após "is_active" e antes de "config_json" na struct.
+		// A query GORM para Create geralmente inclui todos os campos não-zero da struct.
+		// A ordem no VALUES ($1, $2, ...) deve corresponder à ordem das colunas na query INSERT.
+		// GORM pode ordenar as colunas alfabeticamente ou pela ordem na struct.
+		// Para ser seguro, é melhor verificar a query gerada ou usar um regex mais flexível.
+		// Por agora, vou adicionar "is_public" e o argumento correspondente.
+		// COLUNAS: "id","organization_id","provider_type","name","is_active","is_public","config_json","attribute_mapping_json","created_at","updated_at"
+		// VALORES: $1, $2,             $3,              $4,    $5,          $6,         $7,            $8,                       $9,         $10
+		// O mock atual tem 9 VALUES, então "is_public" seria o $6 e os outros deslocados.
+		// "id","organization_id","provider_type","name","is_active","is_public","config_json","attribute_mapping_json","created_at","updated_at"
+		// $1,  $2,               $3,             $4,    $5,          $6,         $7,            $8,                      $9,         $10
+		sqlMock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "identity_providers" ("id","organization_id","provider_type","name","is_active","is_public","config_json","attribute_mapping_json","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING "id"`)).
+			WithArgs(
+				sqlmock.AnyArg(), // id
+				testOrgID,        // organization_id
+				payload.ProviderType,
+				payload.Name,
+				*payload.IsActive,
+				*payload.IsPublic, // Novo argumento
+				string(payload.ConfigJSON),
+				string(payload.AttributeMappingJSON), // Pode ser nil se não estiver no payload, mas o modelo GORM pode tentar inserir como string vazia ou NULL.
+				sqlmock.AnyArg(), // created_at
+				sqlmock.AnyArg(), // updated_at
+			).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New().String()))
 		sqlMock.ExpectCommit()
 
 		req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("/orgs/%s/identity-providers", testOrgID.String()), bytes.NewBuffer(body))
@@ -76,6 +98,7 @@ func TestCreateIdentityProviderHandler(t *testing.T) {
 		assert.Equal(t, payload.Name, createdIdP.Name)
 		assert.Equal(t, testOrgID, createdIdP.OrganizationID)
 		assert.True(t, createdIdP.IsActive)
+		assert.Equal(t, *payload.IsPublic, createdIdP.IsPublic) // Verificar IsPublic
 
 		assert.NoError(t, sqlMock.ExpectationsWereMet(), "SQL mock expectations were not met")
 	})
@@ -238,26 +261,48 @@ func TestUpdateIdentityProviderHandler(t *testing.T) {
 
 	t.Run("Successful IdP update", func(t *testing.T) {
 		isActive := false
+		isPublicUpdate := false // Testar atualização de IsPublic
 		payload := IdentityProviderPayload{
 			ProviderType: models.IDPTypeSAML,
 			Name:         "Updated Test SAML IdP",
 			IsActive:     &isActive,
+			IsPublic:     &isPublicUpdate, // Adicionar IsPublic ao payload
 			ConfigJSON:   validSamlConfigUpdate,
 		}
 		body, _ := json.Marshal(payload)
 
-		originalIdP := models.IdentityProvider{ID: testIdpID, OrganizationID: testOrgID, Name: "Original Name", ProviderType: models.IDPTypeSAML, IsActive: true, ConfigJSON: "{}"}
-		rows := sqlmock.NewRows([]string{"id", "organization_id", "name", "provider_type", "is_active", "config_json"}).
-			AddRow(originalIdP.ID, originalIdP.OrganizationID, originalIdP.Name, originalIdP.ProviderType, originalIdP.IsActive, originalIdP.ConfigJSON)
+		originalIdP := models.IdentityProvider{ID: testIdpID, OrganizationID: testOrgID, Name: "Original Name", ProviderType: models.IDPTypeSAML, IsActive: true, IsPublic: true, ConfigJSON: "{}"}
+		rows := sqlmock.NewRows([]string{"id", "organization_id", "name", "provider_type", "is_active", "is_public", "config_json"}).
+			AddRow(originalIdP.ID, originalIdP.OrganizationID, originalIdP.Name, originalIdP.ProviderType, originalIdP.IsActive, originalIdP.IsPublic, originalIdP.ConfigJSON)
 
 		sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "identity_providers" WHERE id = $1 AND organization_id = $2 ORDER BY "identity_providers"."id" LIMIT $3`)).
 			WithArgs(testIdpID, testOrgID, 1).
 			WillReturnRows(rows)
 
 		sqlMock.ExpectBegin()
+		// A query de UPDATE do GORM geralmente só inclui os campos que foram alterados ou todos os campos não-zero.
+		// E a ordem dos SETs pode ser alfabética ou pela ordem da struct.
+		// Para WithArgs, precisamos listar os valores na ordem que GORM os coloca na query.
+		// Ex: "attribute_mapping_json","config_json","is_active","is_public","name","provider_type","updated_at","id","organization_id"
+		// Vamos mockar os argumentos para os campos que estamos mudando: Name, IsActive, IsPublic, ConfigJSON, AttributeMappingJSON (se mudar), UpdatedAt, e o ID para o WHERE.
+		// O GORM pode gerar a query de forma diferente. Se este mock falhar, precisaremos ver a query real.
+		// A ordem no WithArgs para SET deve ser: ProviderType, Name, IsActive, IsPublic, ConfigJSON, AttributeMappingJSON (se houver), UpdatedAt (AnyArg), e para WHERE: ID, OrganizationID
+		// O handler atualiza: ProviderType, Name, IsActive (se no payload), IsPublic (se no payload), ConfigJSON, AttributeMappingJSON
+		// O mock atual `WithArgs(sqlmock.AnyArg(), payload.IsActive, payload.Name, testOrgID, payload.ProviderType, sqlmock.AnyArg(), testIdpID)` está incorreto na ordem e campos.
+		// Corrigindo para uma ordem mais provável (alfabética dos campos atualizados) e incluindo IsPublic:
+		// A query seria algo como: UPDATE "identity_providers" SET "config_json"=$1, "is_active"=$2, "is_public"=$3, "name"=$4, "provider_type"=$5, "updated_at"=$6 WHERE "id" = $7 AND "organization_id" = $8
+		// (AttributeMappingJSON não está no payload deste teste)
 		sqlMock.ExpectExec(regexp.QuoteMeta(`UPDATE "identity_providers" SET`)).
-			WithArgs(sqlmock.AnyArg(), payload.IsActive, payload.Name, testOrgID, payload.ProviderType, sqlmock.AnyArg(), testIdpID). // Order of args for SET can be tricky
-			WillReturnResult(sqlmock.NewResult(0,1))
+			WithArgs(
+				string(payload.ConfigJSON), // config_json
+				*payload.IsActive,          // is_active
+				*payload.IsPublic,          // is_public
+				payload.Name,               // name
+				payload.ProviderType,       // provider_type
+				sqlmock.AnyArg(),           // updated_at
+				testIdpID,                  // WHERE id
+				// testOrgID                // GORM pode não incluir organization_id no WHERE de um Save em um modelo já carregado
+			).WillReturnResult(sqlmock.NewResult(0, 1))
 		sqlMock.ExpectCommit()
 
 		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/orgs/%s/identity-providers/%s", testOrgID.String(), testIdpID.String()), bytes.NewBuffer(body))
@@ -270,7 +315,8 @@ func TestUpdateIdentityProviderHandler(t *testing.T) {
 		err := json.Unmarshal(rr.Body.Bytes(), &updatedIdP)
 		assert.NoError(t, err)
 		assert.Equal(t, payload.Name, updatedIdP.Name)
-		assert.False(t, updatedIdP.IsActive)
+		assert.False(t, updatedIdP.IsActive) // Checa se IsActive foi para false
+		assert.Equal(t, *payload.IsPublic, updatedIdP.IsPublic) // Checa se IsPublic foi para false
 		assert.NoError(t, sqlMock.ExpectationsWereMet())
 	})
 

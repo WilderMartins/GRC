@@ -3,12 +3,15 @@ package notifications
 import (
 	"bytes"
 	"context" // Adicionado
+	"bytes"
+	"context" // Adicionado
 	"encoding/json"
 	"fmt"
 	"io" // Adicionado de volta
-	"log"
 	"net/http"
 	// "os" // Removido, pois appCfg é usado
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	appCfg "phoenixgrc/backend/pkg/config" // Nosso config da aplicação
@@ -41,7 +44,11 @@ func SendWebhookNotification(webhookURL string, payload interface{}) error {
 	for i := 0; i < maxWebhookRetries; i++ {
 		req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 		if err != nil {
-			log.Printf("Error creating webhook request to %s (try %d/%d): %v\n", webhookURL, i+1, maxWebhookRetries, err)
+			phxlog.L.Error("Error creating webhook request",
+				zap.String("url", webhookURL),
+				zap.Int("attempt", i+1),
+				zap.Int("max_attempts", maxWebhookRetries),
+				zap.Error(err))
 			lastErr = fmt.Errorf("failed to create request: %w", err)
 			time.Sleep(webhookRetryDelay)
 			continue
@@ -51,14 +58,20 @@ func SendWebhookNotification(webhookURL string, payload interface{}) error {
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("Error sending webhook to %s (try %d/%d): %v\n", webhookURL, i+1, maxWebhookRetries, err)
+			phxlog.L.Error("Error sending webhook",
+				zap.String("url", webhookURL),
+				zap.Int("attempt", i+1),
+				zap.Int("max_attempts", maxWebhookRetries),
+				zap.Error(err))
 			lastErr = fmt.Errorf("request failed: %w", err)
 			time.Sleep(webhookRetryDelay)
 			continue
 		}
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			log.Printf("Webhook sent successfully to %s (status: %s)\n", webhookURL, resp.Status)
+			phxlog.L.Info("Webhook sent successfully",
+				zap.String("url", webhookURL),
+				zap.String("status", resp.Status))
 			if resp.Body != nil {
 				resp.Body.Close()
 			}
@@ -72,7 +85,12 @@ func SendWebhookNotification(webhookURL string, payload interface{}) error {
 			resp.Body.Close()
 		}
 
-		log.Printf("Webhook to %s failed (try %d/%d) - Status: %s, Body: %s\n", webhookURL, i+1, maxWebhookRetries, resp.Status, string(bodyText))
+		phxlog.L.Warn("Webhook send failed",
+			zap.String("url", webhookURL),
+			zap.Int("attempt", i+1),
+			zap.Int("max_attempts", maxWebhookRetries),
+			zap.String("status", resp.Status),
+			zap.ByteString("response_body", bodyText))
 		lastErr = fmt.Errorf("request failed with status %s", resp.Status)
 
         if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
@@ -99,19 +117,23 @@ func NotifyRiskEvent(orgID uuid.UUID, risk models.Risk, eventType models.Webhook
 		Find(&webhooks).Error
 
 	if err != nil {
-		log.Printf("Error fetching webhooks for org %s, event %s: %v\n", orgID, eventType, err)
+		phxlog.L.Error("Error fetching webhooks for notification",
+			zap.String("organizationID", orgID.String()),
+			zap.String("eventType", string(eventType)),
+			zap.Error(err))
 		return
 	}
 
 	if len(webhooks) == 0 {
-		return
+		return // Nenhum webhook configurado para este evento/org
 	}
 
 	// Construir a URL base do frontend a partir da configuração
-	frontendBaseURL := appCfg.Cfg.FrontendBaseURL // Assumindo que esta variável existe em AppConfig e é carregada de FRONTEND_BASE_URL
+	frontendBaseURL := appCfg.Cfg.FrontendBaseURL
 	if frontendBaseURL == "" {
 		frontendBaseURL = "http://localhost:3000" // Fallback se não configurado
-		log.Printf("AVISO: FRONTEND_BASE_URL não configurado, usando fallback para notificação: %s", frontendBaseURL)
+		phxlog.L.Warn("FRONTEND_BASE_URL not configured, using fallback for webhook notification link.",
+			zap.String("fallback_url", frontendBaseURL))
 	}
 	riskURLPlaceholder := fmt.Sprintf("%s/risks/%s", strings.TrimSuffix(frontendBaseURL, "/"), risk.ID.String())
 
@@ -125,18 +147,23 @@ func NotifyRiskEvent(orgID uuid.UUID, risk models.Risk, eventType models.Webhook
 		messageText = fmt.Sprintf("🔄 Status do risco '*%s*' alterado para: *%s*\nLink: %s",
 			risk.Title, risk.Status, riskURLPlaceholder)
 	default:
-		log.Printf("Tipo de evento desconhecido para notificação de risco: %s\n", eventType)
+		phxlog.L.Warn("Unknown risk event type for notification", zap.String("eventType", string(eventType)))
 		return
 	}
 
 	payload := GoogleChatMessage{Text: messageText}
 
 	for _, wh := range webhooks {
-		go func(webhookURL string, pld interface{}) {
+		go func(webhookURL string, pld interface{}, webhookName string) { // Adicionar webhookName para log
 			if err := SendWebhookNotification(webhookURL, pld); err != nil {
-				log.Printf("Falha ao enviar notificação de webhook para %s: %v\n", webhookURL, err)
+				phxlog.L.Error("Failed to send webhook notification",
+					zap.String("webhookURL", webhookURL),
+					zap.String("webhookName", webhookName),
+					zap.String("eventType", string(eventType)),
+					zap.String("riskID", risk.ID.String()),
+					zap.Error(err))
 			}
-		}(wh.URL, payload)
+		}(wh.URL, payload, wh.Name)
 	}
 }
 
@@ -149,41 +176,47 @@ func SendEmailNotification(toEmail string, subject string, htmlBody string, text
 		return DefaultEmailNotifier.SendEmail(toEmail, subject, htmlBody, textBody)
 	}
 
-	log.Printf("--- SIMULAÇÃO DE ENVIO DE EMAIL (Fallback) ---")
-	log.Printf("Para: %s", toEmail)
-	log.Printf("Assunto: %s", subject)
+	phxlog.L.Info("--- SIMULATING EMAIL SEND (Fallback) ---",
+		zap.String("to", toEmail),
+		zap.String("subject", subject))
 	if textBody != "" {
-		log.Printf("Corpo (Texto):\n%s", textBody)
+		phxlog.L.Debug("Email Body (Text)", zap.String("body", textBody))
 	}
 	if htmlBody != "" {
-		log.Printf("Corpo (HTML):\n%s", htmlBody)
+		phxlog.L.Debug("Email Body (HTML)", zap.String("body", htmlBody))
 	}
-	log.Printf("--- FIM DA SIMULAÇÃO DE ENVIO DE EMAIL (Fallback) ---")
+	phxlog.L.Info("--- END OF EMAIL SIMULATION (Fallback) ---")
 	return nil
 }
 
 func NotifyUserByEmail(userID uuid.UUID, subject string, textBody string) {
 	if userID == uuid.Nil {
-		log.Println("Tentativa de notificar usuário por email com ID nulo.")
+		phxlog.L.Warn("Attempted to notify user by email with nil UserID.")
 		return
 	}
 	db := database.GetDB()
 	var user models.User
 	if err := db.First(&user, userID).Error; err != nil {
-		log.Printf("Erro ao buscar usuário %s para notificação por email: %v\n", userID, err)
+		phxlog.L.Error("Error fetching user for email notification",
+			zap.String("userID", userID.String()),
+			zap.Error(err))
 		return
 	}
 	if user.Email == "" {
-		log.Printf("Usuário %s não possui email cadastrado para notificação.\n", userID)
+		phxlog.L.Warn("User has no email address for notification.",
+			zap.String("userID", userID.String()))
 		return
 	}
 	htmlBody := fmt.Sprintf("<p>%s</p>", strings.ReplaceAll(textBody, "\n", "<br>")) // Simple HTML version
 
-	go func(email, subj, txtBdy, htmlBdy string) {
+	go func(email, subj, txtBdy, htmlBdy string, uID uuid.UUID) { // Adicionar uID para log
 		if err := SendEmailNotification(email, subj, htmlBdy, txtBdy); err != nil {
-			log.Printf("Falha ao enviar notificação por email para %s: %v\n", email, err)
+			phxlog.L.Error("Failed to send email notification",
+				zap.String("recipientEmail", email),
+				zap.String("userID", uID.String()),
+				zap.Error(err))
 		}
-	}(user.Email, subject, textBody, htmlBody)
+	}(user.Email, subject, textBody, htmlBody, userID)
 }
 
 type EmailNotifier interface {
@@ -202,7 +235,7 @@ func InitializeAWSSession() error {
 	region := appCfg.Cfg.AWSRegion // Usar config da app
 	if region == "" {
 		sesInitializationError = fmt.Errorf("AWS_REGION não está configurada na app config")
-		log.Printf("AVISO: %v. O envio de emails reais estará desabilitado.", sesInitializationError)
+		phxlog.L.Warn("AWS_REGION not configured. Real email sending will be disabled.", zap.Error(sesInitializationError))
 		return nil
 	}
 
@@ -210,24 +243,25 @@ func InitializeAWSSession() error {
 	awsSDKConfig, err = awsGoConfig.LoadDefaultConfig(context.TODO(), awsGoConfig.WithRegion(region)) // Usar alias
 	if err != nil {
 		sesInitializationError = fmt.Errorf("falha ao carregar configuração AWS: %w", err)
-		log.Printf("AVISO: %v. O envio de emails reais estará desabilitado.", sesInitializationError)
+		phxlog.L.Error("Failed to load AWS SDK config. Real email sending will be disabled.", zap.Error(sesInitializationError))
 		return nil
 	}
-	log.Println("Sessão AWS inicializada com sucesso para a região:", region)
+	phxlog.L.Info("AWS SDK session initialized successfully", zap.String("region", region))
 	return nil
 }
 
 func NewSESEmailNotifier() (*SESEmailNotifier, error) {
 	if sesInitializationError != nil {
-		return nil, fmt.Errorf("não é possível criar SESEmailNotifier pois a sessão AWS não foi inicializada: %w", sesInitializationError)
+		// Este erro já foi logado em InitializeAWSSession
+		return nil, fmt.Errorf("cannot create SESEmailNotifier because AWS session was not initialized: %w", sesInitializationError)
 	}
-	if awsSDKConfig.Region == "" {
-		return nil, fmt.Errorf("configuração AWS não carregada (região vazia). Chame InitializeAWSSession primeiro")
+	if awsSDKConfig.Region == "" { // Checagem adicional
+		return nil, fmt.Errorf("AWS config not loaded (region is empty). Call InitializeAWSSession first")
 	}
 
 	sender := appCfg.Cfg.AWSSESEmailSender // Usar config da app
 	if sender == "" {
-		return nil, fmt.Errorf("EMAIL_SENDER_ADDRESS (AWSSESEmailSender na app config) não está configurado")
+		return nil, fmt.Errorf("EMAIL_SENDER_ADDRESS (AWSSESEmailSender in app config) is not configured")
 	}
 
 	sesClient := sesv2.NewFromConfig(awsSDKConfig) // Usar awsSDKConfig
@@ -240,7 +274,7 @@ func NewSESEmailNotifier() (*SESEmailNotifier, error) {
 
 func (s *SESEmailNotifier) SendEmail(toEmail, subject, htmlBody, textBody string) error {
 	if s.client == nil {
-		return fmt.Errorf("cliente SES não inicializado")
+		return fmt.Errorf("SES client not initialized")
 	}
 
 	input := &sesv2.SendEmailInput{
@@ -278,10 +312,16 @@ func (s *SESEmailNotifier) SendEmail(toEmail, subject, htmlBody, textBody string
 
 	_, err := s.client.SendEmail(context.TODO(), input)
 	if err != nil {
+		phxlog.L.Error("Failed to send email via SES",
+			zap.String("to", toEmail),
+			zap.String("subject", subject),
+			zap.Error(err))
 		return fmt.Errorf("falha ao enviar email via SES: %w", err)
 	}
 
-	log.Printf("Email enviado com sucesso para %s via AWS SES (Assunto: %s)", toEmail, subject)
+	phxlog.L.Info("Email sent successfully via AWS SES",
+		zap.String("to", toEmail),
+		zap.String("subject", subject))
 	return nil
 }
 
@@ -289,18 +329,20 @@ var DefaultEmailNotifier EmailNotifier
 
 func InitEmailService() {
 	if err := InitializeAWSSession(); err != nil {
-		// Log já feito em InitializeAWSSession
+		// Erro já logado em InitializeAWSSession se sesInitializationError foi setado.
+		// Se InitializeAWSSession retornasse um erro real, poderíamos logá-lo aqui.
+		// Como ela retorna nil e seta uma var global de erro, a lógica abaixo lida com isso.
 	}
 
 	if sesInitializationError == nil && awsSDKConfig.Region != "" {
 		notifier, err := NewSESEmailNotifier()
 		if err != nil {
-			log.Printf("AVISO: Falha ao inicializar o AWS SES Email Notifier: %v. O envio de emails reais estará desabilitado.", err)
+			phxlog.L.Warn("Failed to initialize AWS SES Email Notifier. Real email sending will be disabled.", zap.Error(err))
 		} else {
 			DefaultEmailNotifier = notifier
-			log.Println("AWS SES Email Notifier inicializado e configurado como padrão.")
+			phxlog.L.Info("AWS SES Email Notifier initialized and set as default.")
 		}
 	} else {
-		log.Println("AVISO: Sessão AWS não inicializada ou região não configurada. AWS SES Email Notifier não será ativado. O envio de emails reais estará desabilitado.")
+		phxlog.L.Warn("AWS session not initialized or region not configured. AWS SES Email Notifier will not be activated. Real email sending will be disabled.")
 	}
 }

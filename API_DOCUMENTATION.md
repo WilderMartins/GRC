@@ -186,13 +186,39 @@ A API é versionada e todos os endpoints protegidos estão sob o prefixo `/api/v
         *   `500 Internal Server Error`: Falha ao gerar token JWT ou atualizar códigos de backup.
 
 *   **Endpoints SAML 2.0 (Implementação Parcial - Requer Teste e Finalização)**
-    *   **Nota:** A biblioteca SAML (`github.com/crewjam/saml v0.5.1`) foi adicionada/atualizada e o código relacionado foi descomentado. No entanto, a compilação completa e testes funcionais não puderam ser realizados no ambiente atual. A lógica principal do Assertion Consumer Service (ACS) para processar a asserção, provisionar usuários e emitir tokens JWT ainda é um placeholder e precisa ser implementada. **Esta funcionalidade deve ser considerada experimental e requer testes e desenvolvimento adicionais antes do uso em produção.**
+    *   **Nota sobre o Estado da Implementação SAML:**
+        *   A funcionalidade SAML 2.0 está **parcialmente implementada** e deve ser considerada **experimental**.
+        *   **Funcional:**
+            *   Configuração de Provedores de Identidade SAML por organização via API (`/api/v1/organizations/{orgId}/identity-providers`).
+            *   Exposição de metadados do Service Provider (SP) por IdP: `GET /auth/saml/{idpId}/metadata`.
+            *   Início do fluxo de login SP-Initiated: `GET /auth/saml/{idpId}/login` redireciona para o IdP configurado.
+        *   **Pendências Críticas / Não Funcional:**
+            *   **Assertion Consumer Service (`POST /auth/saml/{idpId}/acs`):** A lógica para processar a asserção SAML recebida do IdP, validar assinaturas, extrair atributos do usuário, provisionar/logar o usuário no Phoenix GRC e emitir um token JWT da aplicação **NÃO ESTÁ IMPLEMENTADA**. Atualmente, este endpoint apenas loga a chamada e retorna uma mensagem de "não implementado".
+            *   **Busca de Configuração do IdP:** A função que carrega a configuração do IdP SAML do banco de dados (`getSAMLServiceProvider`) atualmente usa dados mockados e precisa ser finalizada para buscar do DB.
+            *   **Validação de Assinatura do IdP:** A configuração para carregar e usar os metadados/certificados do IdP para validar assinaturas de asserções precisa ser cuidadosamente implementada e testada no ACS.
+        *   **Requer Desenvolvimento e Testes Adicionais significativos antes do uso em produção.**
+    *   **Variáveis de Ambiente Globais para SAML SP:**
+        *   `APP_ROOT_URL`: URL base da aplicação, usada para construir URLs de ACS e Metadata.
+        *   `SAML_SP_KEY_PEM`: Conteúdo do arquivo PEM da chave privada do Service Provider.
+        *   `SAML_SP_CERT_PEM`: Conteúdo do arquivo PEM do certificado público do Service Provider.
+    *   **Configuração do `IdentityProvider` (tipo `saml`) no `config_json`:**
+        ```json
+        {
+            "idp_entity_id": "URL ou URN do EntityID do IdP SAML", // Obrigatório
+            "idp_sso_url": "URL do endpoint SSO (login) do IdP SAML", // Obrigatório
+            "idp_x509_cert": "-----BEGIN CERTIFICATE-----\nMIID...END CERTIFICATE-----", // Certificado público X.509 do IdP (formato PEM string) para validar assinaturas de resposta/asserção. Obrigatório.
+            "sp_entity_id": "URL ou URN EntityID deste SP para este IdP (opcional, default: URL de metadados do SP)",
+            "sign_request": "boolean (opcional, default: false, se o SP deve assinar AuthnRequests)"
+            // "idp_metadata_url": "URL para buscar os metadados do IdP dinamicamente" // Alternativa, não usada atualmente
+        }
+        ```
+
     *   **`GET /auth/saml/:idpId/login`**
-        *   **Descrição:** Tenta iniciar o fluxo de login SAML SP-initiated redirecionando o usuário para o IdP SAML configurado.
+        *   **Descrição:** Inicia o fluxo de login SAML SP-initiated redirecionando o usuário para o IdP SAML configurado (usando `idp_sso_url` do `config_json`). Requer que o `idpId` seja um UUID de um `IdentityProvider` do tipo `saml` ativo e corretamente configurado.
     *   **`GET /auth/saml/:idpId/metadata`**
-        *   **Descrição:** Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado.
+        *   **Descrição:** Expõe os metadados do Service Provider (Phoenix GRC) para o IdP SAML especificado. O IdP usará esta URL para configurar a confiança com o SP.
     *   **`POST /auth/saml/:idpId/acs`**
-        *   **Descrição:** Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido. **Lógica de processamento da asserção e provisionamento de usuário pendente.**
+        *   **Descrição:** Assertion Consumer Service (ACS). Endpoint para onde o IdP SAML redireciona o usuário com a asserção SAML após o login bem-sucedido no IdP. **Atualmente, não processa a asserção nem completa o login no Phoenix GRC.**
 
 ---
 
@@ -784,7 +810,11 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
                         "Status": "conforme",
                         "EvidenceURL": "objectName/ou/urlExterna", // Contém objectName ou URL externa
                         "Score": 100,
-                        "AssessmentDate": "timestamp"
+                        "AssessmentDate": "timestamp",
+                        "Comments": "Comentários da avaliação principal",
+                        "c2m2_maturity_level": 2, // Exemplo, pode ser null/omitido
+                        "c2m2_assessment_date": "timestamp", // Exemplo, pode ser null/omitido
+                        "c2m2_comments": "Comentários da avaliação C2M2" // Exemplo, pode ser null/omitido
                         // ... outros campos de AuditAssessment
                     }
                 }
@@ -803,20 +833,25 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             ```json
             {
                 "audit_control_id": "uuid-do-audit-control", // string UUID, obrigatório
-                "status": "string (obrigatório, um de: conforme, nao_conforme, parcialmente_conforme)",
-                "evidence_url": "string (opcional, URL externa)", // Usado se evidence_file não for enviado e for uma URL externa. Se um arquivo for carregado, este campo é ignorado.
-                "score": "integer (opcional, 0-100, default baseado no status)",
-                "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)"
+            "status": "string (obrigatório, um de: conforme, nao_conforme, parcialmente_conforme, nao_aplicavel)",
+            "evidence_url": "string (opcional, URL externa)",
+            "score": "integer (opcional, 0-100)",
+            "assessment_date": "string (opcional, YYYY-MM-DD, default: data atual)",
+            "comments": "string (opcional, comentários da avaliação principal)",
+            // Campos C2M2 (opcionais)
+            "c2m2_maturity_level": "integer (opcional, 0-3)",
+            "c2m2_assessment_date": "string (opcional, YYYY-MM-DD)",
+            "c2m2_comments": "string (opcional, comentários da avaliação C2M2)"
             }
             ```
         *   Campo `evidence_file` (arquivo, opcional): Arquivo de evidência (limite 10MB, tipos permitidos: JPEG, PNG, PDF, DOC, DOCX, XLS, XLSX, TXT). Se fornecido, o `objectName` do arquivo armazenado será salvo no campo `EvidenceURL` do modelo `AuditAssessment`.
     *   **Respostas:**
-        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado. O campo `EvidenceURL` conterá o `objectName` (se um arquivo foi carregado) ou a URL externa fornecida. Para acessar arquivos carregados, use o endpoint `GET /api/v1/files/signed-url`.
-        *   `400 Bad Request`: Formulário/JSON inválido, `audit_control_id` inválido, data inválida, arquivo muito grande ou tipo não permitido.
+        *   `200 OK`: Objeto `models.AuditAssessment` criado ou atualizado, podendo incluir campos C2M2. O campo `EvidenceURL` conterá o `objectName` (se um arquivo foi carregado) ou a URL externa fornecida. Para acessar arquivos carregados, use o endpoint `GET /api/v1/files/signed-url`.
+        *   `400 Bad Request`: Formulário/JSON inválido, `audit_control_id` inválido, data inválida, `c2m2_maturity_level` fora do range, arquivo muito grande ou tipo não permitido.
         *   `500 Internal Server Error`: Falha no upload ou ao salvar no banco.
 
 *   **`GET /api/v1/audit/assessments/control/:controlId`**
-    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado. O campo `EvidenceURL` conterá o `objectName` (se aplicável) ou uma URL externa.
+    *   **Descrição:** Obtém a avaliação de um controle específico (`controlId` é o UUID do `AuditControl`) para a organização do usuário autenticado. A resposta pode incluir campos C2M2. O campo `EvidenceURL` conterá o `objectName` (se aplicável) ou uma URL externa.
     *   **Autenticação:** JWT Obrigatório.
     *   **Parâmetros de Path:** `controlId` (string UUID).
     *   **Respostas:**
@@ -867,6 +902,41 @@ Endpoints para interagir com frameworks de auditoria, controles e avaliações.
             ```
         *   `400 Bad Request`: IDs inválidos.
         *   `403 Forbidden`.
+        *   `404 Not Found`: Framework não encontrado.
+        *   `500 Internal Server Error`.
+
+*   **`GET /api/v1/audit/organizations/:orgId/frameworks/:frameworkId/c2m2-maturity-summary`**
+    *   **Descrição:** Calcula e retorna um sumário da maturidade C2M2 para um framework específico dentro de uma organização, agregado por Função NIST.
+    *   **Autenticação:** JWT Obrigatório. O `organization_id` no token do usuário deve corresponder ao `:orgId` no path.
+    *   **Parâmetros de Path:** `orgId` (UUID da organização), `frameworkId` (UUID do framework).
+    *   **Respostas:**
+        *   `200 OK`: Objeto `C2M2MaturityFrameworkSummaryResponse`.
+            ```json
+            {
+                "framework_id": "uuid-framework",
+                "framework_name": "NIST Cybersecurity Framework 2.0",
+                "organization_id": "uuid-org",
+                "summary_by_function": [
+                    {
+                        "nist_component_type": "Function",
+                        "nist_component_name": "Identify",
+                        "achieved_mil": 2, // Nível C2M2 (0-3) agregado para esta função (ex: moda dos MILs dos controles)
+                        "evaluated_controls": 10, // Número de controles NIST com C2M2MaturityLevel preenchido nesta função
+                        "total_controls": 15,     // Número total de controles NIST nesta função
+                        "mil_distribution": {    // Distribuição dos MILs dos controles avaliados
+                            "mil0": 1,
+                            "mil1": 2,
+                            "mil2": 5,
+                            "mil3": 2
+                        }
+                    }
+                    // ... Outras Funções NIST (Protect, Detect, Respond, Recover, Govern)
+                ]
+                // "summary_by_category": [] // Opcional, pode ser adicionado no futuro se necessário
+            }
+            ```
+        *   `400 Bad Request`: IDs inválidos.
+        *   `403 Forbidden`: Acesso negado à organização.
         *   `404 Not Found`: Framework não encontrado.
         *   `500 Internal Server Error`.
 

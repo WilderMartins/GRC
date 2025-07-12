@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"phoenixgrc/backend/pkg/config" // Referência ao config da aplicação
+	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
+	"go.uber.org/zap"                 // Importar zap
 	"net/url"
 	"strings"
 	"time"
@@ -33,33 +34,26 @@ func InitializeS3Provider() (*S3StorageProvider, error) {
 	region := config.Cfg.AWSRegion // Reutiliza a região configurada para SES, mas pode ser específica para S3
 
 	if bucket == "" {
-		log.Println("AWS_S3_BUCKET not set. File upload to S3 will be disabled.")
+		phxlog.L.Warn("AWS_S3_BUCKET not set. File upload to S3 will be disabled.")
 		return nil, nil
 	}
 	if region == "" {
-		log.Println("AWS_REGION (for S3) not set. File upload to S3 will be disabled.")
+		phxlog.L.Warn("AWS_REGION (for S3) not set. File upload to S3 will be disabled.")
 		return nil, nil
 	}
 
 	// Carregar configuração AWS SDK (usa credenciais do ambiente: variáveis ou IAM role)
-	// A sessão AWS já pode ter sido inicializada por SES (InitializeAWSSession em webhook_notifier.go)
-	// Se não, precisamos garantir que seja carregada.
-	// Para evitar dependência de ordem de inicialização, podemos carregar a config aqui também se necessário.
-	// Reutilizando a lógica de InitializeAWSSession (se ela for global e segura para chamar múltiplas vezes)
-	// ou duplicando a carga de config específica para S3.
-	// Por simplicidade, vamos assumir que a config AWS será carregada globalmente ou aqui.
-
 	sdkConfig, err := awsGoConfig.LoadDefaultConfig(context.TODO(), awsGoConfig.WithRegion(region))
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS SDK config for S3: %w. Ensure AWS credentials and region are configured.", err)
+		phxlog.L.Error("Failed to load AWS SDK config for S3. Ensure AWS credentials and region are configured.", zap.Error(err))
+		return nil, fmt.Errorf("failed to load AWS SDK config for S3: %w", err)
 	}
-	log.Println("AWS SDK config loaded successfully for S3, region:", region)
+	phxlog.L.Info("AWS SDK config loaded successfully for S3", zap.String("region", region))
 
 	s3Client := s3.NewFromConfig(sdkConfig)
 	uploader := manager.NewUploader(s3Client)
 
-
-	log.Printf("Amazon S3 storage provider initialized for bucket %s, region %s", bucket, region)
+	phxlog.L.Info("Amazon S3 storage provider initialized", zap.String("bucket", bucket), zap.String("region", region))
 
 	return &S3StorageProvider{
 		client:     s3Client,
@@ -103,7 +97,10 @@ func (s *S3StorageProvider) UploadFile(ctx context.Context, organizationID strin
 	//	publicURL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucketName, s.region, objectName)
 	// }
 
-	log.Printf("File uploaded successfully to S3: s3://%s/%s", s.bucketName, objectName)
+	phxlog.L.Info("File uploaded successfully to S3",
+		zap.String("bucket", s.bucketName),
+		zap.String("objectName", objectName),
+		zap.String("location", uploadOutput.Location)) // Adicionar location que é a URL completa
 	return objectName, nil // Retorna o objectName (key)
 }
 
@@ -126,14 +123,22 @@ func (s *S3StorageProvider) DeleteFile(ctx context.Context, objectName string) e
 		// Em aws-sdk-go-v2, para verificar o tipo de erro específico:
 		// if errors.As(err, &nsk)
 		// Por simplicidade e compatibilidade com a verificação de string que pode já existir:
-		if strings.Contains(err.Error(), "NoSuchKey") {
-			log.Printf("S3 DeleteFile: Object %s not found in bucket %s (considered successful for idempotency).", objectName, s.bucketName)
+		if strings.Contains(err.Error(), "NoSuchKey") { // O SDK v2 pode não retornar NoSuchKey diretamente assim, pode ser um *types.NoSuchKey
+			phxlog.L.Info("S3 DeleteFile: Object not found (considered successful for idempotency)",
+				zap.String("objectName", objectName),
+				zap.String("bucket", s.bucketName))
 			return nil
 		}
+		phxlog.L.Error("Failed to delete object from S3",
+			zap.String("objectName", objectName),
+			zap.String("bucket", s.bucketName),
+			zap.Error(err))
 		return fmt.Errorf("failed to delete object '%s' from S3 bucket '%s': %w", objectName, s.bucketName, err)
 	}
 
-	log.Printf("File deleted successfully from S3: s3://%s/%s", s.bucketName, objectName)
+	phxlog.L.Info("File deleted successfully from S3",
+		zap.String("bucket", s.bucketName),
+		zap.String("objectName", objectName))
 	return nil
 }
 
