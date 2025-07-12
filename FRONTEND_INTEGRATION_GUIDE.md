@@ -191,20 +191,30 @@ O fluxo de login social envolve redirecionamentos entre o frontend, o backend e 
 
 ### 3.4. Login SAML 2.0 (Experimental / Parcialmente Implementado no Backend)
 
-*   **Estado Atual:** A funcionalidade SAML no backend está **parcialmente implementada** e é considerada **experimental**.
-    *   **O que o frontend PODE fazer:**
-        *   Se um `IdentityProvider` do tipo `saml` estiver configurado para uma organização, o frontend pode construir uma URL para iniciar o login SP-Initiated.
-        *   **URL de Início de Login SAML:** `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`
-            *   `{idpId}`: É o UUID do `IdentityProvider` do tipo `saml`. Este NÃO usa "global".
-            *   Ao acessar esta URL, o backend redirecionará o usuário para o IdP SAML configurado.
-    *   **O que está PENDENTE no Backend (e impacta o frontend):**
-        *   O Assertion Consumer Service (ACS) (`POST /auth/saml/{idpId}/acs`) do backend, que recebe a resposta do IdP, **não está funcionalmente implementado**. Ele não processa a asserção SAML, não provisiona usuários, nem emite um token JWT da aplicação Phoenix GRC.
-        *   Portanto, **o frontend NÃO receberá um redirecionamento de volta com um token JWT da aplicação após o login no IdP SAML.** O fluxo de login não será completado.
-*   **Ação do Frontend (Atualmente):**
-    *   Pode-se optar por exibir opções de login SAML se configuradas (obtidas via `GET /api/v1/organizations/{orgId}/identity-providers`, filtrando por `provider_type: "saml"`).
-    *   Ao clicar, redirecionar para `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`.
-    *   O usuário será redirecionado ao IdP e, após autenticação lá, será redirecionado de volta ao ACS do backend. O backend atualmente retornará uma mensagem de "Não Implementado" ou similar, sem redirecionar de volta ao frontend com uma sessão válida.
-*   **Conclusão para SAML:** Até que o ACS seja totalmente implementado no backend, o login SAML não resultará em uma sessão de usuário válida no Phoenix GRC.
+*   **Estado Atual:** A funcionalidade SAML 2.0 foi implementada no backend.
+*   **Fluxo para o Frontend:**
+    1.  **Listar Provedores SAML (Opcional, para UI de Configuração):**
+        *   Administradores da organização podem configurar Provedores de Identidade SAML através da API (`POST /api/v1/organizations/{orgId}/identity-providers` com `provider_type: "saml"`). O frontend precisará de uma interface para isso, coletando os dados do `config_json` e `attribute_mapping_json` (ver `API_DOCUMENTATION.md` para detalhes dos campos).
+    2.  **Iniciar Login SAML (SP-Initiated):**
+        *   Para um IdP SAML específico configurado (com ID `{idpId}`), o frontend deve redirecionar o navegador do usuário para:
+            `{NEXT_PUBLIC_API_BASE_URL}/auth/saml/{idpId}/login`
+        *   O backend então redirecionará o usuário para o IdP SAML para autenticação.
+    3.  **Tratamento do Callback SAML no Frontend:**
+        *   Após a autenticação bem-sucedida no IdP, o IdP redirecionará o usuário de volta para o endpoint ACS do backend (`/auth/saml/{idpId}/acs`).
+        *   O backend processará a asserção SAML, provisionará/logará o usuário e, se tudo ocorrer bem, redirecionará o usuário para uma URL no frontend, incluindo o token JWT da aplicação.
+        *   **URL de Redirecionamento para o Frontend (enviada pelo backend):**
+            `{NEXT_PUBLIC_APP_ROOT_URL}/saml/callback?token={JWT_TOKEN}&sso_success=true&provider=saml&idp_name={NOME_DO_IDP}`
+            *   Exemplo: `http://localhost:3000/saml/callback?token=ey...&sso_success=true&provider=saml&idp_name=MeuIdPSAML`
+        *   **Ação do Frontend na Rota `/saml/callback`:**
+            *   Extrair o `token` JWT dos query parameters.
+            *   Armazenar o token JWT (como no login padrão ou OAuth2).
+            *   Verificar `sso_success=true`.
+            *   Opcionalmente, usar `idp_name` para feedback.
+            *   Redirecionar o usuário para o dashboard ou página principal da aplicação.
+            *   Se `sso_success` não for `true` ou o token estiver ausente, exibir uma mensagem de erro apropriada.
+*   **Notas Importantes para SAML:**
+    *   A configuração correta do `IdentityProvider` no Phoenix GRC (especialmente `idp_entity_id`, `idp_sso_url`, `idp_x509_cert` e o `attribute_mapping_json`) e a configuração correspondente no IdP SAML (com o ACS URL e Entity ID do SP do Phoenix GRC) são cruciais.
+    *   O frontend deve instruir os administradores a obterem os metadados do SP do Phoenix GRC em `GET /auth/saml/{idpId}/metadata` para configurar o IdP.
 
 ## 4. Gerenciamento de Usuário Autenticado
 

@@ -7,49 +7,51 @@ import (
 	"phoenixgrc/backend/internal/models"
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
 	"go.uber.org/zap"                 // Importar zap
-	// "phoenixgrc/backend/internal/auth" // Para gerar token JWT da aplicação
-	// "phoenixgrc/backend/internal/database" // Para buscar/criar usuário
-	// "phoenixgrc/backend/pkg/config" // Para FRONTEND_SAML_CALLBACK_URL
+	"phoenixgrc/backend/internal/database" // Adicionado para buscar/criar usuário
+	"phoenixgrc/backend/internal/auth"     // Para gerar token JWT da aplicação
+	appConfig "phoenixgrc/backend/pkg/config" // Para FRONTEND_SAML_CALLBACK_URL e novas configs
+	"gorm.io/gorm" // Adicionado para gorm.ErrRecordNotFound
 
 	"github.com/crewjam/saml/samlsp"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-// getSAMLServiceProvider retrieves an IdentityProvider model from DB (TODO)
+// getSAMLServiceProvider retrieves an IdentityProvider model from DB
 // and configures a samlsp.Middleware instance for it.
 func getSAMLServiceProvider(c *gin.Context, idpID uuid.UUID) (*samlsp.Middleware, *models.IdentityProvider, error) {
-	// TODO: Fetch IdP model from database using idpID
-	// db := database.GetDB()
-	// var idpModel models.IdentityProvider
-	// if err := db.First(&idpModel, "id = ?", idpID).Error; err != nil {
-	// 	 return nil, nil, fmt.Errorf("failed to find IdP with ID %s: %w", idpID, err)
-	// }
-	// if !idpModel.IsActive || idpModel.ProviderType != models.IDPTypeSAML {
-	//	 return nil, nil, fmt.Errorf("IdP %s is not an active SAML provider", idpID)
-	// }
-
-	// ---- Placeholder for DB fetch ----
+	db := database.GetDB() // Obter instância do DB
 	var idpModel models.IdentityProvider
-	idpModel.ID = idpID
-	// ConfigJSON deve ser preenchido pelo DB. Exemplo mínimo para compilar:
-	idpModel.ConfigJSON = string([]byte(`{"sp_entity_id": "phoenix-grc-sp","sign_request":false, "idp_entity_id":"dummy-idp-entity", "idp_sso_url":"http://dummy.idp/sso", "idp_x509_cert":"..."}`))
-	idpModel.ProviderType = models.IDPTypeSAML
-	idpModel.IsActive = true
-	// ---- Fim do Placeholder ----
+
+	// Buscar o IdentityProvider no banco de dados
+	if err := db.First(&idpModel, "id = ?", idpID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil, fmt.Errorf("SAML Identity Provider with ID %s not found", idpID)
+		}
+		return nil, nil, fmt.Errorf("failed to query SAML Identity Provider with ID %s: %w", idpID, err)
+	}
+
+	// Validar se o IdP está ativo e é do tipo SAML
+	if !idpModel.IsActive {
+		return nil, &idpModel, fmt.Errorf("SAML Identity Provider %s (Name: %s) is not active", idpID, idpModel.Name)
+	}
+	if idpModel.ProviderType != models.IDPTypeSAML {
+		return nil, &idpModel, fmt.Errorf("Identity Provider %s (Name: %s) is not a SAML provider (Type: %s)", idpID, idpModel.Name, idpModel.ProviderType)
+	}
+
+	// ConfigJSON já deve estar preenchido pelo GORM a partir do DB.
 
 	opts, err := GetSAMLServiceProviderOptions(&idpModel)
 	if err != nil {
-		return nil, &idpModel, fmt.Errorf("failed to get SAML SP options for IdP %s: %w", idpID, err)
+		return nil, &idpModel, fmt.Errorf("failed to get SAML SP options for IdP %s (Name: %s): %w", idpID, idpModel.Name, err)
 	}
-	if opts == nil { // Should be caught by err check above, but defensive
-		return nil, &idpModel, fmt.Errorf("SAML SP options are nil for IdP %s", idpID)
+	if opts == nil { // Defensivo, GetSAMLServiceProviderOptions deve retornar erro se opts for nil
+		return nil, &idpModel, fmt.Errorf("SAML SP options are nil for IdP %s (Name: %s)", idpID, idpModel.Name)
 	}
-	// AcsURL e MetadataURL são construídas dinamicamente em GetSAMLServiceProviderOptions
 
 	spMiddleware, err := samlsp.New(*opts)
 	if err != nil {
-		return nil, &idpModel, fmt.Errorf("failed to create samlsp.Middleware for IdP %s: %w", idpID, err)
+		return nil, &idpModel, fmt.Errorf("failed to create samlsp.Middleware for IdP %s (Name: %s): %w", idpID, idpModel.Name, err)
 	}
 	return spMiddleware, &idpModel, nil
 }
@@ -162,7 +164,180 @@ func ACSHandler(c *gin.Context) {
 		"received_attributes_example":   samlAssertionAttributes, // Pode ser nil
 		"next_steps":                    "Backend needs to fully process assertion, provision user, and issue Phoenix GRC JWT.",
 	})
-	// c.String(http.StatusNotImplemented, "SAML ACS Handler for IdP %s (IdP Name: %s) - Not Fully Implemented. Assertion received, but processing logic is pending. User attributes would be extracted here, user provisioned/updated, and a session/JWT for Phoenix GRC would be issued, followed by a redirect to the frontend.", idpModel.ID, idpModel.Name)
+}
+
+// ACSAttributeMapping define a estrutura esperada para o AttributeMappingJSON
+type ACSAttributeMapping struct {
+	Email     string `json:"email"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	// Adicionar outros campos conforme necessário (ex: NameID, Role/Groups)
+}
+
+
+// --- Implementação do ACSHandler ---
+// O ACSHandler processa a SAMLResponse enviada pelo IdP.
+func ACSHandler(c *gin.Context) {
+	idpIDStr := c.Param("idpId")
+	idpID, err := uuid.Parse(idpIDStr)
+	if err != nil {
+		phxlog.L.Warn("Invalid IdP ID format in ACS request", zap.String("idpIDStr", idpIDStr), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid IdP ID format"})
+		return
+	}
+
+	spMiddleware, idpModel, err := getSAMLServiceProvider(c, idpID)
+	if err != nil {
+		phxlog.L.Error("Error getting SAML SP for ACS processing", zap.String("idpID", idpIDStr), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to configure SAML service provider for ACS."})
+		return
+	}
+
+	// Fazer o middleware SAML processar a requisição.
+	// Isso validará a SAMLResponse e, se bem-sucedido, criará uma sessão SAML.
+	spMiddleware.ServeHTTP(c.Writer, c.Request)
+
+	// Verificar se o middleware já escreveu uma resposta (ex: em caso de erro SAML)
+	if c.Writer.Written() {
+		phxlog.L.Info("SAML middleware handled the response directly (e.g. error or redirect). ACS processing finished by middleware.",
+			zap.String("idpID", idpIDStr),
+			zap.Int("status", c.Writer.Status()))
+		return
+	}
+
+	// Se o middleware não escreveu uma resposta, a asserção foi válida e uma sessão foi criada.
+	// Obter a sessão e os atributos.
+	s, err := spMiddleware.Session.GetSession(c.Request)
+	if err != nil {
+		phxlog.L.Error("Failed to get SAML session after middleware processing (expected session)",
+			zap.String("idpID", idpIDStr), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve SAML session after successful assertion."})
+		return
+	}
+	if s == nil {
+		phxlog.L.Error("SAML session is nil after middleware processing (expected session)", zap.String("idpID", idpIDStr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "SAML session not found after successful assertion."})
+		return
+	}
+
+	// Extrair atributos da asserção
+	samlSession, ok := s.(samlsp.SessionWithAttributes)
+	if !ok {
+		phxlog.L.Error("SAML session does not contain attributes", zap.String("idpID", idpIDStr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "SAML session attributes not available."})
+		return
+	}
+	attrs := samlSession.GetAttributes()
+	nameID := samlSession.GetNameID() // NameID da asserção
+
+	// Parsear o mapeamento de atributos do IdP
+	var attrMapping ACSAttributeMapping
+	if idpModel.AttributeMappingJSON != "" {
+		if err := json.Unmarshal([]byte(idpModel.AttributeMappingJSON), &attrMapping); err != nil {
+			phxlog.L.Error("Failed to parse AttributeMappingJSON for SAML IdP",
+				zap.String("idpID", idpIDStr), zap.String("idpName", idpModel.Name), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error processing IdP attribute mapping."})
+			return
+		}
+	} else {
+		// Mapeamentos padrão se não configurado (ajustar conforme necessidade)
+		attrMapping.Email = "email" // Ou "mail", "EmailAddress", etc.
+		attrMapping.FirstName = "firstName" // Ou "givenName"
+		attrMapping.LastName = "lastName"   // Ou "sn", "surname"
+	}
+
+	email := strings.ToLower(strings.TrimSpace(attrs.Get(attrMapping.Email)))
+	if email == "" {
+		phxlog.L.Warn("Email attribute not found or empty in SAML assertion",
+			zap.String("idpID", idpIDStr), zap.String("idpName", idpModel.Name),
+			zap.String("expectedEmailAttribute", attrMapping.Email), zap.Any("allAttributes", attrs))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email attribute missing or empty in SAML assertion."})
+		return
+	}
+
+	firstName := strings.TrimSpace(attrs.Get(attrMapping.FirstName))
+	lastName := strings.TrimSpace(attrs.Get(attrMapping.LastName))
+	fullName := strings.TrimSpace(firstName + " " + lastName)
+	if fullName == "" {
+		fullName = email // Fallback para nome completo
+	}
+
+
+	// Provisionamento/Login de Usuário
+	db := database.GetDB()
+	var user models.User
+	err = db.Where("email = ? AND organization_id = ?", email, idpModel.OrganizationID).First(&user).Error
+
+	if err == gorm.ErrRecordNotFound { // Usuário não existe, provisionar
+		if !appConfig.Cfg.AllowSAMLUserCreation { // Usar a nova config
+			phxlog.L.Warn("SAML user creation disabled, user not provisioned",
+				zap.String("email", email), zap.String("idpName", idpModel.Name))
+			c.JSON(http.StatusForbidden, gin.H{"error": "New user registration via this SAML provider is disabled."})
+			return
+		}
+
+		user = models.User{
+			OrganizationID: idpModel.OrganizationID,
+			Name:           fullName,
+			Email:          email,
+			PasswordHash:   "SAML_USER_NO_PASSWORD_" + uuid.New().String(), // Senha não usada, mas campo é NOT NULL
+			SSOProvider:    idpModel.Name,
+			SocialLoginID:  nameID, // Usar NameID da asserção SAML
+			Role:           models.RoleUser, // Ou buscar de um atributo SAML mapeado para role
+			IsActive:       true,
+		}
+		if createErr := db.Create(&user).Error; createErr != nil {
+			phxlog.L.Error("Failed to create new SAML user",
+				zap.String("email", email), zap.String("idpName", idpModel.Name), zap.Error(createErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to provision SAML user."})
+			return
+		}
+		phxlog.L.Info("New SAML user provisioned",
+			zap.String("userID", user.ID.String()), zap.String("email", email), zap.String("idpName", idpModel.Name))
+	} else if err != nil { // Outro erro de DB
+		phxlog.L.Error("Database error fetching user for SAML login",
+			zap.String("email", email), zap.String("idpName", idpModel.Name), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error during SAML login."})
+		return
+	} else { // Usuário existe
+		user.SSOProvider = idpModel.Name
+		user.SocialLoginID = nameID
+		user.IsActive = true // Garantir que esteja ativo
+		// Opcional: Atualizar nome se mudou no IdP
+		if user.Name == "" || user.Name == user.Email { // Só atualiza se nome atual for placeholder
+			user.Name = fullName
+		}
+		if saveErr := db.Save(&user).Error; saveErr != nil {
+			phxlog.L.Error("Failed to update existing SAML user",
+				zap.String("userID", user.ID.String()), zap.String("email", email), zap.Error(saveErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user during SAML login."})
+			return
+		}
+		phxlog.L.Info("Existing SAML user logged in and updated",
+			zap.String("userID", user.ID.String()), zap.String("email", email))
+	}
+
+	// Gerar token JWT da aplicação
+	appToken, err := auth.GenerateToken(&user, user.OrganizationID)
+	if err != nil {
+		phxlog.L.Error("Failed to generate application token after SAML login",
+			zap.String("userID", user.ID.String()), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate session token."})
+		return
+	}
+
+	// Redirecionar para o frontend com o token
+	// O frontend precisa ter uma rota /saml/callback para processar este token
+	frontendSAMLCallbackURL := strings.TrimSuffix(appConfig.Cfg.AppRootURL, "/") + "/saml/callback"
+	targetURL := fmt.Sprintf("%s?token=%s&sso_success=true&provider=saml&idp_name=%s",
+		frontendSAMLCallbackURL,
+		url.QueryEscape(appToken),
+		url.QueryEscape(idpModel.Name),
+	)
+	phxlog.L.Info("SAML login successful, redirecting to frontend",
+		zap.String("userID", user.ID.String()),
+		zap.String("redirectURL", targetURL))
+	c.Redirect(http.StatusFound, targetURL)
 }
 
 func SAMLLoginHandler(c *gin.Context) {
