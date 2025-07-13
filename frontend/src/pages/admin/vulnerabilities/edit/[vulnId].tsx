@@ -100,6 +100,7 @@ const EditVulnerabilityPageContent = (props: InferGetServerSidePropsType<typeof 
                 severity: initialData.severity as VulnerabilitySeverity,
                 status: initialData.status as VulnerabilityStatus,
                 asset_affected: initialData.asset_affected,
+                owner_id: initialData.owner_id,
               }}
               isEditing={true}
               onSubmitSuccess={handleSuccess}

@@ -288,6 +288,7 @@ func startServer() {
 		{
 			vulnerabilityRoutes.POST("", handlers.CreateVulnerabilityHandler)
 			vulnerabilityRoutes.GET("", handlers.ListVulnerabilitiesHandler)
+			vulnerabilityRoutes.POST("/import-csv", handlers.ImportVulnerabilitiesCSVHandler)
 			vulnerabilityRoutes.GET("/:vulnId", handlers.GetVulnerabilityHandler)
 			vulnerabilityRoutes.PUT("/:vulnId", handlers.UpdateVulnerabilityHandler)
 			vulnerabilityRoutes.DELETE("/:vulnId", handlers.DeleteVulnerabilityHandler)

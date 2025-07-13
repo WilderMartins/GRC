@@ -17,6 +17,7 @@ import {
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import type { GetStaticProps, InferGetStaticPropsType } from 'next';
+import ImportVulnerabilitiesModal from '@/components/vulnerabilities/ImportVulnerabilitiesModal';
 
 type Props = {
   // Props from getStaticProps
@@ -47,6 +48,7 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
 
   const [sortBy, setSortBy] = useState<string>('created_at');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const fetchVulnerabilities = useCallback(async () => {
     setIsLoading(true);
@@ -151,12 +153,29 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             {t('list.header')}
           </h1>
-          <Link href="/admin/vulnerabilities/new" legacyBehavior>
-            <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-brand-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition-colors">
-              {t('list.add_new_button')}
-            </a>
-          </Link>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="inline-flex items-center justify-center rounded-md border border-transparent bg-gray-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition-colors"
+            >
+              {t('list.import_csv_button')}
+            </button>
+            <Link href="/admin/vulnerabilities/new" legacyBehavior>
+              <a className="inline-flex items-center justify-center rounded-md border border-transparent bg-brand-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition-colors">
+                {t('list.add_new_button')}
+              </a>
+            </Link>
+          </div>
         </div>
+
+        <ImportVulnerabilitiesModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          onImportSuccess={() => {
+            setIsImportModalOpen(false);
+            fetchVulnerabilities();
+          }}
+        />
 
         <div className="my-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg shadow">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-end">
