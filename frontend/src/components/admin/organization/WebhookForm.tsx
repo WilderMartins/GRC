@@ -57,7 +57,22 @@ const WebhookForm: React.FC<WebhookFormProps> = ({
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSendingTest, setIsSendingTest] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const handleSendTest = async () => {
+    setIsSendingTest(true);
+    notify.info(t('form.sending_test_notification'));
+    try {
+      await apiClient.post(`/organizations/${organizationId}/webhooks/${initialData?.id}/test`);
+      notify.success(t('form.send_test_success_message'));
+    } catch (err: any) {
+      console.error("Erro ao enviar webhook de teste:", err);
+      notify.error(t('form.send_test_error_message', { message: err.response?.data?.error || t('common:unknown_error') }));
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
 
   useEffect(() => {
     if (isEditing && initialData) {
@@ -190,14 +205,27 @@ const WebhookForm: React.FC<WebhookFormProps> = ({
         </div>
       </div>
 
-      <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
-        <button type="button" onClick={onSubmitSuccess} // Ou router.back()
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white dark:bg-gray-600 dark:text-gray-200 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50"
-                disabled={isLoading}>
-          {t('common:cancel_button')}
-        </button>
-        <button type="submit" disabled={isLoading || formData.event_types.length === 0}
-                className="px-4 py-2 text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 rounded-md shadow-sm disabled:opacity-50 flex items-center">
+      <div className="flex justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-700 mt-6">
+        <div>
+          {isEditing && (
+            <button
+              type="button"
+              onClick={handleSendTest}
+              disabled={isLoading || isSendingTest}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white dark:bg-gray-600 dark:text-gray-200 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50"
+            >
+              {isSendingTest ? t('form.sending_test_button') : t('form.send_test_button')}
+            </button>
+          )}
+        </div>
+        <div className="flex space-x-3">
+          <button type="button" onClick={() => router.back()}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white dark:bg-gray-600 dark:text-gray-200 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary disabled:opacity-50"
+                  disabled={isLoading}>
+            {t('common:cancel_button')}
+          </button>
+          <button type="submit" disabled={isLoading || formData.event_types.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:ring-offset-2 rounded-md shadow-sm disabled:opacity-50 flex items-center">
           {isLoading && (
             <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>

@@ -82,6 +82,9 @@ func CreateRiskHandler(c *gin.Context) {
 		notifications.NotifyUserByEmail(risk.OwnerID, emailSubject, emailBody)
 	}
 	c.JSON(http.StatusCreated, risk)
+
+	// Trigger webhook
+	go TriggerWebhooks(risk.OrganizationID, EventRiskCreated, risk)
 }
 
 // GetRiskHandler handles fetching a single risk by its ID.

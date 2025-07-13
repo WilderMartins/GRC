@@ -272,6 +272,7 @@ func startServer() {
 				webhookRoutes.GET("/:webhookId", handlers.GetWebhookHandler)
 				webhookRoutes.PUT("/:webhookId", handlers.UpdateWebhookHandler)
 				webhookRoutes.DELETE("/:webhookId", handlers.DeleteWebhookHandler)
+				webhookRoutes.POST("/:webhookId/test", handlers.SendTestWebhookHandler)
 			}
 			userManagementRoutes := orgRoutes.Group("/users")
 			{

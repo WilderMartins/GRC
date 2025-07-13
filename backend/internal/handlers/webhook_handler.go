@@ -1,15 +1,105 @@
 package handlers
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	phxlog "phoenixgrc/backend/pkg/log"
 	"strings" // Para manipular EventTypes
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// EventType defines the types of events that can trigger a webhook.
+type EventType string
+
+const (
+	EventRiskCreated          EventType = "risk_created"
+	EventVulnerabilityAssigned EventType = "vulnerability_assigned"
+)
+
+// WebhookPayloadData defines the structure of the data sent in the webhook.
+type WebhookPayloadData struct {
+	Event     EventType   `json:"event"`
+	Timestamp time.Time   `json:"timestamp"`
+	Data      interface{} `json:"data"`
+}
+
+// TriggerWebhooks finds relevant webhooks and sends the payload.
+func TriggerWebhooks(orgID uuid.UUID, eventType EventType, data interface{}) {
+	log := phxlog.L.Named("TriggerWebhooks")
+	db := database.GetDB()
+
+	var webhooks []models.WebhookConfiguration
+	// Find active webhooks for the organization that are subscribed to the event type.
+	if err := db.Where("organization_id = ? AND is_active = ? AND event_types LIKE ?", orgID, true, "%"+string(eventType)+"%").Find(&webhooks).Error; err != nil {
+		log.Error("Failed to retrieve webhooks for triggering", zap.Error(err), zap.String("organization_id", orgID.String()))
+		return
+	}
+
+	if len(webhooks) == 0 {
+		return // No webhooks to trigger for this event
+	}
+
+	payload := WebhookPayloadData{
+		Event:     eventType,
+		Timestamp: time.Now(),
+		Data:      data,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		log.Error("Failed to marshal webhook payload", zap.Error(err))
+		return
+	}
+
+	for _, wh := range webhooks {
+		go sendWebhook(wh, payloadBytes)
+	}
+}
+
+func sendWebhook(webhook models.WebhookConfiguration, payload []byte) {
+	log := phxlog.L.Named("sendWebhook").With(zap.String("webhook_id", webhook.ID.String()), zap.String("url", webhook.URL))
+
+	req, err := http.NewRequest("POST", webhook.URL, bytes.NewBuffer(payload))
+	if err != nil {
+		log.Error("Failed to create webhook request", zap.Error(err))
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "PhoenixGRC-Webhook/1.0")
+
+	if webhook.SecretToken != "" {
+		mac := hmac.New(sha256.New, []byte(webhook.SecretToken))
+		mac.Write(payload)
+		signature := fmt.Sprintf("sha256=%x", mac.Sum(nil))
+		req.Header.Set("X-Phoenix-Signature-256", signature)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Error("Failed to send webhook", zap.Error(err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		log.Info("Webhook sent successfully")
+	} else {
+		log.Warn("Webhook sent but received non-success status code", zap.Int("status_code", resp.StatusCode))
+	}
+}
 
 // WebhookPayload defines the structure for creating or updating a WebhookConfiguration.
 type WebhookPayload struct {
@@ -291,4 +381,46 @@ func DeleteWebhookHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Webhook configuration deleted successfully"})
+}
+
+// SendTestWebhookHandler sends a test event to a specific webhook.
+func SendTestWebhookHandler(c *gin.Context) {
+	orgIDStr := c.Param("orgId")
+	targetOrgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid organization ID format"})
+		return
+	}
+	webhookIDStr := c.Param("webhookId")
+	webhookID, err := uuid.Parse(webhookIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid webhook ID format"})
+		return
+	}
+
+	tokenOrgID, orgOk := c.Get("organizationID")
+	if !orgOk || tokenOrgID.(uuid.UUID) != targetOrgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	db := database.GetDB()
+	var webhook models.WebhookConfiguration
+	if err := db.Where("id = ? AND organization_id = ?", webhookID, targetOrgID).First(&webhook).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Webhook configuration not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch webhook configuration"})
+		return
+	}
+
+	testData := gin.H{
+		"message": "This is a test event from Phoenix GRC.",
+		"webhook_name": webhook.Name,
+	}
+
+	go TriggerWebhooks(targetOrgID, "test_event", testData)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Test event sent successfully"})
 }
