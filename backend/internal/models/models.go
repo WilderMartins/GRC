@@ -99,7 +99,7 @@ func (org *Organization) BeforeCreate(tx *gorm.DB) (err error) {
 
 type User struct {
 	ID             uuid.UUID `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;not null;index;constraint:OnDelete:CASCADE;"`
 	Name           string    `gorm:"size:255;not null"`
 	Email          string    `gorm:"size:255;not null;uniqueIndex"`
 	PasswordHash   string    `gorm:"size:255;not null"`
@@ -127,14 +127,14 @@ func (user *User) BeforeCreate(tx *gorm.DB) (err error) {
 
 type Risk struct {
 	ID             uuid.UUID       `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID       `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
+	OrganizationID uuid.UUID       `gorm:"type:uuid;not null;index;constraint:OnDelete:CASCADE;"`
 	Title          string          `gorm:"size:255;not null"`
 	Description    string          `gorm:"type:text"`
 	Category       RiskCategory    `gorm:"type:varchar(50)"`
 	Impact         RiskImpact      `gorm:"type:varchar(20)"`
 	Probability    RiskProbability `gorm:"type:varchar(20)"`
 	RiskLevel      string          `gorm:"type:varchar(20);default:'Indefinido'"` // Nível de Risco Calculado
-	Status         RiskStatus      `gorm:"type:varchar(20);default:'aberto'"`
+	Status         RiskStatus      `gorm:"type:varchar(20);default:'aberto';index"`
 	OwnerID        uuid.UUID       `gorm:"type:uuid;constraint:OnDelete:SET NULL;"` // FK to User
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -152,12 +152,12 @@ func (risk *Risk) BeforeCreate(tx *gorm.DB) (err error) {
 
 type Vulnerability struct {
 	ID             uuid.UUID             `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID             `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
+	OrganizationID uuid.UUID             `gorm:"type:uuid;not null;index;constraint:OnDelete:CASCADE;"`
 	Title          string                `gorm:"size:255;not null"`
 	Description    string                `gorm:"type:text"`
 	CVEID          string                `gorm:"size:50;index"` // Optional
-	Severity       VulnerabilitySeverity `gorm:"type:varchar(20)"`
-	Status         VulnerabilityStatus   `gorm:"type:varchar(20);default:'descoberta'"`
+	Severity       VulnerabilitySeverity `gorm:"type:varchar(20);index"`
+	Status         VulnerabilityStatus   `gorm:"type:varchar(20);default:'descoberta';index"`
 	AssetAffected  string                `gorm:"size:255"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -238,9 +238,9 @@ func (ac *AuditControl) BeforeCreate(tx *gorm.DB) (err error) {
 
 type AuditAssessment struct {
 	ID             uuid.UUID          `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID          `gorm:"type:uuid;not null;constraint:OnDelete:CASCADE;"`
+	OrganizationID uuid.UUID          `gorm:"type:uuid;not null;index;constraint:OnDelete:CASCADE;"`
 	// Storing AuditControl's UUID for a more robust FK relationship
-	AuditControlID uuid.UUID          `gorm:"type:uuid;not null"` // FK to AuditControl's ID
+	AuditControlID uuid.UUID          `gorm:"type:uuid;not null;index"` // FK to AuditControl's ID
 	Status         AuditControlStatus `gorm:"type:varchar(30)" json:"status"`
 	EvidenceURL    string             `gorm:"size:255" json:"evidence_url"`
 	Score          *int               `json:"score,omitempty"` // Integer score, ponteiro para ser omitempty

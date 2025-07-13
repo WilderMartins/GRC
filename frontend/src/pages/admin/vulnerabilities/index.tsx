@@ -18,6 +18,8 @@ import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import type { GetStaticProps, InferGetStaticPropsType } from 'next';
 import ImportVulnerabilitiesModal from '@/components/vulnerabilities/ImportVulnerabilitiesModal';
+import LoadingSpinner from '@/components/common/LoadingSpinner';
+import ApiErrorDisplay from '@/components/common/ApiErrorDisplay';
 
 type Props = {
   // Props from getStaticProps
@@ -215,8 +217,12 @@ const VulnerabilitiesPageContent = (props: InferGetStaticPropsType<typeof getSta
           </div>
         </div>
 
-        {isLoading && <p className="text-center text-gray-500 dark:text-gray-400 py-4">{t('list.loading_vulnerabilities')}</p>}
-        {error && <p className="text-center text-red-500 py-4">{error}</p>}
+        {isLoading && (
+          <div className="text-center py-10">
+            <LoadingSpinner />
+          </div>
+        )}
+        {error && <ApiErrorDisplay error={error} />}
 
         {!isLoading && !error && vulnerabilities.length === 0 && (
             <div className="text-center py-10">

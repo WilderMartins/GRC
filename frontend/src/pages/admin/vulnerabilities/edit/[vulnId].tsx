@@ -10,6 +10,8 @@ import { Vulnerability, VulnerabilitySeverity, VulnerabilityStatus } from '@/typ
 import { useTranslation } from 'next-i18next';
 import { serverSideTranslations } from 'next-i18next/serverSideTranslations';
 import type { GetServerSideProps, InferGetServerSidePropsType } from 'next';
+import LoadingSpinner from '@/components/common/LoadingSpinner';
+import ApiErrorDisplay from '@/components/common/ApiErrorDisplay';
 
 type Props = {
   // Props from getServerSideProps
@@ -60,15 +62,27 @@ const EditVulnerabilityPageContent = (props: InferGetServerSidePropsType<typeof 
   const appName = t('common:app_name');
   const dynamicPageTitle = initialData?.title ? `${pageTitleBase}: ${initialData.title} - ${appName}` : `${pageTitleBase} - ${appName}`;
 
-  if (isLoading && !initialData && !error) { // Mostrar loading apenas se não houver erro ainda e não houver dados
-    return <AdminLayout title={t('common:loading_data')}><div className="text-center p-10">{t('common:loading_data_entity', {entity: t('common:vulnerability_singular')})}</div></AdminLayout>;
+  if (isLoading) {
+    return (
+      <AdminLayout title={t('common:loading_data')}>
+        <div className="text-center p-10">
+          <LoadingSpinner />
+        </div>
+      </AdminLayout>
+    );
   }
 
   if (error) {
-    return <AdminLayout title={t('common:error_page_title')}><div className="text-center p-10 text-red-500">{error}</div></AdminLayout>;
+    return (
+      <AdminLayout title={t('common:error_page_title')}>
+        <div className="p-10">
+          <ApiErrorDisplay error={error} />
+        </div>
+      </AdminLayout>
+    );
   }
 
-  if (!initialData && !isLoading) { // Se não está carregando, não houve erro, mas não há dados
+  if (!initialData) {
      return <AdminLayout title={t('common:error_not_found_title')}><div className="text-center p-10">{t('common:error_entity_not_found', {entity: t('common:vulnerability_singular')})}</div></AdminLayout>;
   }
 
