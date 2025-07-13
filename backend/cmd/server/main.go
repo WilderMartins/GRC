@@ -352,6 +352,14 @@ func startServer() {
 				settingsRoutes.POST("/test-email", handlers.SendTestEmailHandler)
 			}
 		}
+
+		dashboardRoutes := apiV1.Group("/dashboard")
+		{
+			dashboardRoutes.GET("/risk-matrix", handlers.GetRiskMatrixHandler)
+			dashboardRoutes.GET("/vulnerability-summary", handlers.GetVulnerabilitySummaryHandler)
+			dashboardRoutes.GET("/compliance-overview", handlers.GetComplianceOverviewHandler)
+			dashboardRoutes.GET("/recent-activity", handlers.GetRecentActivityHandler)
+		}
 	}
 
 	serverPort := os.Getenv("SERVER_PORT")
