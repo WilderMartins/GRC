@@ -11,7 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"phoenixgrc/backend/internal/auth"
-	"phoenixgrc/backend/internal/config"
+	"phoenixgrc/backend/pkg/config"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	"regexp"

@@ -2,26 +2,19 @@ package notifications
 
 import (
 	"bytes"
-	"context" // Adicionado
-	"bytes"
-	"context" // Adicionado
+	"context"
 	"encoding/json"
 	"fmt"
-	"io" // Adicionado de volta
+	"io"
 	"net/http"
-	// "os" // Removido, pois appCfg é usado
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
-	"go.uber.org/zap"                 // Importar zap
+	"go.uber.org/zap"                   // Importar zap
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	appCfg "phoenixgrc/backend/pkg/config" // Nosso config da aplicação
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsGoConfig "github.com/aws/aws-sdk-go-v2/config" // Config do SDK AWS com alias
-	"github.com/aws/aws-sdk-go-v2/service/sesv2"
-	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"github.com/google/uuid"
 )
 
@@ -167,27 +160,6 @@ func NotifyRiskEvent(orgID uuid.UUID, risk models.Risk, eventType models.Webhook
 	}
 }
 
-func SendEmailNotification(toEmail string, subject string, htmlBody string, textBody string) error {
-	if toEmail == "" {
-		return fmt.Errorf("destinatário do email (toEmail) não pode ser vazio")
-	}
-
-	if DefaultEmailNotifier != nil {
-		return DefaultEmailNotifier.SendEmail(toEmail, subject, htmlBody, textBody)
-	}
-
-	phxlog.L.Info("--- SIMULATING EMAIL SEND (Fallback) ---",
-		zap.String("to", toEmail),
-		zap.String("subject", subject))
-	if textBody != "" {
-		phxlog.L.Debug("Email Body (Text)", zap.String("body", textBody))
-	}
-	if htmlBody != "" {
-		phxlog.L.Debug("Email Body (HTML)", zap.String("body", htmlBody))
-	}
-	phxlog.L.Info("--- END OF EMAIL SIMULATION (Fallback) ---")
-	return nil
-}
 
 func NotifyUserByEmail(userID uuid.UUID, subject string, textBody string) {
 	if userID == uuid.Nil {
@@ -219,130 +191,3 @@ func NotifyUserByEmail(userID uuid.UUID, subject string, textBody string) {
 	}(user.Email, subject, textBody, htmlBody, userID)
 }
 
-type EmailNotifier interface {
-	SendEmail(toEmail, subject, htmlBody, textBody string) error
-}
-
-type SESEmailNotifier struct {
-	client      *sesv2.Client
-	senderEmail string
-}
-
-var awsSDKConfig aws.Config
-var sesInitializationError error
-
-func InitializeAWSSession() error {
-	region := appCfg.Cfg.AWSRegion // Usar config da app
-	if region == "" {
-		sesInitializationError = fmt.Errorf("AWS_REGION não está configurada na app config")
-		phxlog.L.Warn("AWS_REGION not configured. Real email sending will be disabled.", zap.Error(sesInitializationError))
-		return nil
-	}
-
-	var err error
-	awsSDKConfig, err = awsGoConfig.LoadDefaultConfig(context.TODO(), awsGoConfig.WithRegion(region)) // Usar alias
-	if err != nil {
-		sesInitializationError = fmt.Errorf("falha ao carregar configuração AWS: %w", err)
-		phxlog.L.Error("Failed to load AWS SDK config. Real email sending will be disabled.", zap.Error(sesInitializationError))
-		return nil
-	}
-	phxlog.L.Info("AWS SDK session initialized successfully", zap.String("region", region))
-	return nil
-}
-
-func NewSESEmailNotifier() (*SESEmailNotifier, error) {
-	if sesInitializationError != nil {
-		// Este erro já foi logado em InitializeAWSSession
-		return nil, fmt.Errorf("cannot create SESEmailNotifier because AWS session was not initialized: %w", sesInitializationError)
-	}
-	if awsSDKConfig.Region == "" { // Checagem adicional
-		return nil, fmt.Errorf("AWS config not loaded (region is empty). Call InitializeAWSSession first")
-	}
-
-	sender := appCfg.Cfg.AWSSESEmailSender // Usar config da app
-	if sender == "" {
-		return nil, fmt.Errorf("EMAIL_SENDER_ADDRESS (AWSSESEmailSender in app config) is not configured")
-	}
-
-	sesClient := sesv2.NewFromConfig(awsSDKConfig) // Usar awsSDKConfig
-
-	return &SESEmailNotifier{
-		client:      sesClient,
-		senderEmail: sender,
-	}, nil
-}
-
-func (s *SESEmailNotifier) SendEmail(toEmail, subject, htmlBody, textBody string) error {
-	if s.client == nil {
-		return fmt.Errorf("SES client not initialized")
-	}
-
-	input := &sesv2.SendEmailInput{
-		FromEmailAddress: &s.senderEmail,
-		Destination: &types.Destination{
-			ToAddresses: []string{toEmail},
-		},
-		Content: &types.EmailContent{
-			Simple: &types.Message{
-				Subject: &types.Content{
-					Data:    aws.String(subject), // Usar aws.String
-					Charset: aws.String("UTF-8"),
-				},
-				Body: &types.Body{},
-			},
-		},
-	}
-
-	if textBody != "" {
-		input.Content.Simple.Body.Text = &types.Content{
-			Data:    aws.String(textBody), // Usar aws.String
-			Charset: aws.String("UTF-8"),
-		}
-	}
-	if htmlBody != "" {
-		input.Content.Simple.Body.Html = &types.Content{
-			Data:    aws.String(htmlBody), // Usar aws.String
-			Charset: aws.String("UTF-8"),
-		}
-	}
-
-    if textBody == "" && htmlBody == "" {
-        return fmt.Errorf("o corpo do email (texto ou HTML) não pode estar vazio")
-    }
-
-	_, err := s.client.SendEmail(context.TODO(), input)
-	if err != nil {
-		phxlog.L.Error("Failed to send email via SES",
-			zap.String("to", toEmail),
-			zap.String("subject", subject),
-			zap.Error(err))
-		return fmt.Errorf("falha ao enviar email via SES: %w", err)
-	}
-
-	phxlog.L.Info("Email sent successfully via AWS SES",
-		zap.String("to", toEmail),
-		zap.String("subject", subject))
-	return nil
-}
-
-var DefaultEmailNotifier EmailNotifier
-
-func InitEmailService() {
-	if err := InitializeAWSSession(); err != nil {
-		// Erro já logado em InitializeAWSSession se sesInitializationError foi setado.
-		// Se InitializeAWSSession retornasse um erro real, poderíamos logá-lo aqui.
-		// Como ela retorna nil e seta uma var global de erro, a lógica abaixo lida com isso.
-	}
-
-	if sesInitializationError == nil && awsSDKConfig.Region != "" {
-		notifier, err := NewSESEmailNotifier()
-		if err != nil {
-			phxlog.L.Warn("Failed to initialize AWS SES Email Notifier. Real email sending will be disabled.", zap.Error(err))
-		} else {
-			DefaultEmailNotifier = notifier
-			phxlog.L.Info("AWS SES Email Notifier initialized and set as default.")
-		}
-	} else {
-		phxlog.L.Warn("AWS session not initialized or region not configured. AWS SES Email Notifier will not be activated. Real email sending will be disabled.")
-	}
-}

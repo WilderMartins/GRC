@@ -21,8 +21,6 @@ import (
 
 	"phoenixgrc/backend/pkg/config"                        // Importar config para Cfg.Environment
 	phxmiddleware "phoenixgrc/backend/internal/middleware" // Importar o pacote de middleware
-	"phoenixgrc/backend/cmd/setup"                         // Descomentado para permitir a chamada do setup
-	// "phoenixgrc/backend/cmd/setup" // Comentado para permitir compilação do server isoladamente. Refatorar setup.
 
 	"github.com/gin-gonic/gin"
 	// "golang.org/x/crypto/bcrypt" // Moved to setup package

@@ -8,7 +8,7 @@ import (
 	"log"
 	"net/http/httptest"
 	"os"
-	"phoenixgrc/backend/internal/config"
+	"phoenixgrc/backend/pkg/config"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	"regexp"

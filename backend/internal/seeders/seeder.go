@@ -1,7 +1,6 @@
 package seeders
 
 import (
-	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	phxlog "phoenixgrc/backend/pkg/log"
 
@@ -26,7 +25,7 @@ func RunMigrations(db *gorm.DB) error {
 		&models.AuditControl{},
 		&models.AuditAssessment{},
 		&models.IdentityProvider{},
-		&models.Webhook{},
+		&models.WebhookConfiguration{},
 		&models.C2M2Domain{},
 		&models.C2M2Practice{},
 		&models.SystemSetting{},

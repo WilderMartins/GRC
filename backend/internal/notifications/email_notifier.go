@@ -3,23 +3,31 @@ package notifications
 import (
 	"context"
 	"errors"
+	"os"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
 	phxlog "phoenixgrc/backend/pkg/log"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"go.uber.org/zap"
 )
 
-// EmailNotifier é responsável por enviar e-mails.
-type EmailNotifier struct {
+// EmailNotifier define a interface para um notificador de email.
+type EmailNotifier interface {
+	SendEmail(to, subject, bodyHTML, bodyText string) error
+}
+
+// SESEmailNotifier implementa EmailNotifier usando AWS SES.
+type SESEmailNotifier struct {
 	client *sesv2.Client
 	sender string
 }
 
-var emailNotifier *EmailNotifier
+// DefaultEmailNotifier é o notificador padrão usado pela aplicação.
+var DefaultEmailNotifier EmailNotifier
 
 // InitEmailService inicializa o notificador de e-mail.
 // Ele tenta carregar a configuração do banco de dados primeiro,
@@ -35,38 +43,49 @@ func InitEmailService() {
 	if errRegion != nil || errSender != nil {
 		log.Warn("Could not retrieve email settings from database, falling back to environment variables.")
 		// Fallback para variáveis de ambiente (comportamento original)
-		awsRegion = phxlog.GetEnv("AWS_REGION", "")
-		senderEmail = phxlog.GetEnv("AWS_SES_EMAIL_SENDER", "")
+		awsRegion = os.Getenv("AWS_REGION")
+		senderEmail = os.Getenv("AWS_SES_EMAIL_SENDER")
 	}
 
 	if awsRegion == "" || senderEmail == "" {
 		log.Warn("AWS SES email service is not configured (missing AWS_REGION or AWS_SES_EMAIL_SENDER). Email notifications will be disabled.")
-		emailNotifier = nil
+		DefaultEmailNotifier = nil
 		return
 	}
 
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(awsRegion))
 	if err != nil {
 		log.Error("Failed to load AWS SDK config for SES", zap.Error(err))
-		emailNotifier = nil
+		DefaultEmailNotifier = nil
 		return
 	}
 
-	emailNotifier = &EmailNotifier{
+	DefaultEmailNotifier = &SESEmailNotifier{
 		client: sesv2.NewFromConfig(cfg),
 		sender: senderEmail,
 	}
 	log.Info("AWS SES email service initialized successfully.", zap.String("sender", senderEmail), zap.String("region", awsRegion))
 }
 
-// SendEmail envia um e-mail usando o serviço configurado.
-func SendEmail(to, subject, bodyHTML, bodyText string) error {
-	if emailNotifier == nil {
-		return errors.New("email service is not initialized")
+// SendEmailNotification envia um e-mail usando o serviço configurado.
+func SendEmailNotification(to, subject, bodyHTML, bodyText string) error {
+	if DefaultEmailNotifier == nil {
+		phxlog.L.Info("--- SIMULATING EMAIL SEND (Fallback) ---",
+			zap.String("to", to),
+			zap.String("subject", subject))
+		return nil
+	}
+	return DefaultEmailNotifier.SendEmail(to, subject, bodyHTML, bodyText)
+}
+
+// SendEmail é o método da implementação SESEmailNotifier.
+func (s *SESEmailNotifier) SendEmail(to, subject, bodyHTML, bodyText string) error {
+	if s.client == nil {
+		return errors.New("SES client not initialized")
 	}
 
 	input := &sesv2.SendEmailInput{
-		FromEmailAddress: &emailNotifier.sender,
+		FromEmailAddress: &s.sender,
 		Destination: &types.Destination{
 			ToAddresses: []string{to},
 		},
@@ -74,20 +93,23 @@ func SendEmail(to, subject, bodyHTML, bodyText string) error {
 			Simple: &types.Message{
 				Body: &types.Body{
 					Html: &types.Content{
-						Data: &bodyHTML,
+						Data:    aws.String(bodyHTML),
+						Charset: aws.String("UTF-8"),
 					},
 					Text: &types.Content{
-						Data: &bodyText,
+						Data:    aws.String(bodyText),
+						Charset: aws.String("UTF-8"),
 					},
 				},
 				Subject: &types.Content{
-					Data: &subject,
+					Data:    aws.String(subject),
+					Charset: aws.String("UTF-8"),
 				},
 			},
 		},
 	}
 
-	_, err := emailNotifier.client.SendEmail(context.TODO(), input)
+	_, err := s.client.SendEmail(context.TODO(), input)
 	if err != nil {
 		phxlog.L.Error("Failed to send email via SES", zap.Error(err), zap.String("recipient", to))
 		return err

@@ -3,8 +3,7 @@ package database
 import (
 	"fmt"
 	"os"
-	"phoenixgrc/backend/internal/models" // Mantido para referência futura, não usado diretamente aqui
-	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
 
 	"github.com/golang-migrate/migrate/v4"
 	postgresdriver "github.com/golang-migrate/migrate/v4/database/postgres" // Renomeado para evitar conflito com gorm/driver/postgres

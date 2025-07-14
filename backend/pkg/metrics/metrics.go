@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"os"
-	"phoenixgrc/backend/internal/config" // Para obter a versão da app, se disponível
+	"phoenixgrc/backend/pkg/config" // Para obter a versão da app, se disponível
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
