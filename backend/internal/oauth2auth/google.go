@@ -13,7 +13,6 @@ import (
 	"phoenixgrc/backend/internal/models"
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
 	"go.uber.org/zap"                 // Importar zap
-	phxmetrics "phoenixgrc/backend/pkg/metrics" // Importar métricas
 	"strings"
 	"time"
 
@@ -271,7 +270,6 @@ func GoogleCallbackHandler(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new global Google SSO user: " + createErr.Error()})
 				return
 			}
-			phxmetrics.UsersCreated.WithLabelValues("oauth2_google").Inc()
 		} else { // User exists, update
 			user.SSOProvider = ssoProviderName
 			user.SocialLoginID = externalID
@@ -316,7 +314,6 @@ func GoogleCallbackHandler(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new org Google SSO user: " + createErr.Error()})
 				return
 			}
-			phxmetrics.UsersCreated.WithLabelValues("oauth2_google").Inc()
 		} else { // User exists, update
 			user.SSOProvider = ssoProviderName
 			user.SocialLoginID = externalID

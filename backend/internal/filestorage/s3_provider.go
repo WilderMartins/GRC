@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"io"
 	"phoenixgrc/backend/pkg/config" // Referência ao config da aplicação
-	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
-	"go.uber.org/zap"                 // Importar zap
-	"net/url"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                // Importar zap
 	"strings"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	awsGoConfig "github.com/aws/aws-sdk-go-v2/config" // Alias para evitar conflito com pkg/config
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager" // Para S3 Upload Manager
-	"github.com/aws/aws-sdk-go-v2/service/s3/types" // Para types.NoSuchKey
 	// "github.com/aws/smithy-go" // Para error handling mais específico, se necessário
 )
 
@@ -119,7 +117,6 @@ func (s *S3StorageProvider) DeleteFile(ctx context.Context, objectName string) e
 	})
 
 	if err != nil {
-		var nsk *types.NoSuchKey
 		// Em aws-sdk-go-v2, para verificar o tipo de erro específico:
 		// if errors.As(err, &nsk)
 		// Por simplicidade e compatibilidade com a verificação de string que pode já existir:

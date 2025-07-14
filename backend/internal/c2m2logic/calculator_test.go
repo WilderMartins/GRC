@@ -38,9 +38,9 @@ func setupTestDB(t *testing.T) {
 	)
 	mockDB, err = gorm.Open(postgres.New(postgres.Config{Conn: db}), &gorm.Config{Logger: gormLogger})
 	if err != nil {
-		t.Fatalf("An error '%s' was not expected when opening gorm database: %v", err)
+		t.Fatal(err)
 	}
-	database.SetDB(mockDB)
+	database.DB = mockDB
 }
 
 func TestCalculateAndUpdateMaturityLevel(t *testing.T) {
@@ -116,7 +116,7 @@ func TestCalculateAndUpdateMaturityLevel(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Redefinir mocks para cada caso de teste
-			sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "c2m2_practices"`)).WillReturnRows(practiceRows)
+			sqlMock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "c2_m2_practices"`)).WillReturnRows(practiceRows)
 
 			evalRows := sqlmock.NewRows([]string{"practice_id", "status"})
 			for _, e := range tc.evaluations {

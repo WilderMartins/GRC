@@ -3,41 +3,101 @@ package middleware
 import (
 	"strconv"
 	"time"
-
-	phxmetrics "phoenixgrc/backend/pkg/metrics" // Importar o pacote de métricas
+	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Metrics é um middleware Gin para coletar métricas Prometheus para requisições HTTP.
+var (
+	HTTPRequestCounter *prometheus.CounterVec
+	HTTPRequestDuration *prometheus.HistogramVec
+	AppInfo             *prometheus.GaugeVec
+	UsersCreated        *prometheus.CounterVec
+	RisksCreated        prometheus.Counter
+	AssessmentsUpdated  prometheus.Counter
+)
+
+func init() {
+	appVersion := os.Getenv("APP_VERSION")
+	if appVersion == "" {
+		appVersion = "unknown"
+	}
+
+	HTTPRequestCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "phoenixgrc_http_requests_total",
+			Help: "Total number of HTTP requests processed.",
+		},
+		[]string{"method", "path", "status_code"},
+	)
+
+	HTTPRequestDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "phoenixgrc_http_request_duration_seconds",
+			Help:    "Histogram of HTTP request latencies.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path"},
+	)
+
+	AppInfo = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "phoenixgrc_app_info",
+			Help: "Information about the Phoenix GRC application.",
+		},
+		[]string{"version"},
+	)
+	AppInfo.With(prometheus.Labels{"version": appVersion}).Set(1)
+
+	UsersCreated = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "phoenixgrc_users_created_total",
+			Help: "Total number of users created.",
+		},
+		[]string{"source"},
+	)
+
+	RisksCreated = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "phoenixgrc_risks_created_total",
+			Help: "Total number of risks created.",
+		},
+	)
+
+	AssessmentsUpdated = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "phoenixgrc_assessments_updated_total",
+			Help: "Total number of audit assessments created or updated.",
+		},
+	)
+}
+
+// Metrics é um middleware Gin para coletar métricas do Prometheus.
 func Metrics() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 
-		// Processar a requisição
-		c.Next()
+		c.Next() // Processa a requisição
 
-		// Coletar métricas após a requisição ser processada
-		status := c.Writer.Status()
-		method := c.Request.Method
+		duration := time.Since(start)
+		statusCode := c.Writer.Status()
 
-		// Usar c.FullPath() para obter o template da rota, o que é melhor para cardinalidade de labels.
-		// Se FullPath() estiver vazio (ex: rota não encontrada), usar o Path.
+		// Ignorar métricas para o endpoint /metrics para não poluir os dados
+		if c.Request.URL.Path == "/metrics" {
+			return
+		}
+
+		// Usar c.FullPath() para agrupar rotas parametrizadas (ex: /users/:id)
 		path := c.FullPath()
 		if path == "" {
-			path = c.Request.URL.Path
+			path = "unmatched_route"
 		}
 
-		latency := time.Since(start)
 
-		// Incrementar contador de requisições
-		if phxmetrics.HTTPRequestCounter != nil {
-			phxmetrics.HTTPRequestCounter.WithLabelValues(method, path, strconv.Itoa(status)).Inc()
-		}
-
-		// Observar duração da requisição
-		if phxmetrics.HTTPRequestDuration != nil {
-			phxmetrics.HTTPRequestDuration.WithLabelValues(method, path).Observe(latency.Seconds())
-		}
+		// Contadores e Histogramas
+		HTTPRequestDuration.WithLabelValues(c.Request.Method, path).Observe(duration.Seconds())
+		HTTPRequestCounter.WithLabelValues(c.Request.Method, path, strconv.Itoa(statusCode)).Inc()
 	}
 }

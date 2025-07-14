@@ -14,7 +14,6 @@ import (
 	"phoenixgrc/backend/internal/models"
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
 	"go.uber.org/zap"                 // Importar zap
-	phxmetrics "phoenixgrc/backend/pkg/metrics" // Importar métricas
 	"strings"
 	"time"
 
@@ -54,9 +53,9 @@ type GithubUserEmailResponse struct {
 }
 
 func getGithubOAuthConfig(idpIDStr string, db *gorm.DB) (*oauth2.Config, *GithubOAuthConfig, *models.IdentityProvider, error) {
-	currentAppRootURL := appConfig.Cfg.AppRootURL
+	currentAppRootURL := appConfig.Cfg.FrontendBaseURL
 	if currentAppRootURL == "" {
-		return nil, nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized or empty")
+		return nil, nil, nil, fmt.Errorf("OAuth2 global configuration (FRONTEND_BASE_URL) not initialized or empty")
 	}
 
 	var cfg GithubOAuthConfig
@@ -148,7 +147,7 @@ func GithubCallbackHandler(c *gin.Context) {
 	}
 	http.SetCookie(c.Writer, &http.Cookie{Name: githubOAuthStateCookie, Value: "", MaxAge: -1, Path: "/"})
 
-	if c.Query("state") != stateCookie.Value { // Compare with stateCookie.Value
+	if c.Query("state") != stateCookie { // Compare with stateCookie
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OAuth state"})
 		return
 	}
@@ -284,7 +283,6 @@ func GithubCallbackHandler(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new global Github SSO user: " + createErr.Error()})
 				return
 			}
-			phxmetrics.UsersCreated.WithLabelValues("oauth2_github").Inc()
 		} else { // User exists
 			user.SSOProvider = ssoProviderName // Ensure it's marked as global_github
 			user.SocialLoginID = githubUserIDStr
@@ -328,7 +326,6 @@ func GithubCallbackHandler(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new org Github SSO user: " + createErr.Error()})
 				return
 			}
-			phxmetrics.UsersCreated.WithLabelValues("oauth2_github").Inc()
 		} else { // User exists, update
 			user.SSOProvider = ssoProviderName
 			user.SocialLoginID = githubUserIDStr
@@ -355,7 +352,7 @@ func GithubCallbackHandler(c *gin.Context) {
 
 	frontendRedirectURL := os.Getenv("FRONTEND_OAUTH2_CALLBACK_URL")
 	if frontendRedirectURL == "" {
-		frontendRedirectURL = appConfig.Cfg.AppRootURL // Use configured AppRootURL
+		frontendRedirectURL = appConfig.Cfg.FrontendBaseURL // Use configured AppRootURL
 		if frontendRedirectURL == "" {
 			frontendRedirectURL = "/" // Fallback
 		}

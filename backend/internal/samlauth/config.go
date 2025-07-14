@@ -105,7 +105,7 @@ func GetSAMLServiceProviderOptions(idpModel *models.IdentityProvider) (*samlsp.O
 		Certificate: spCertificate,
 		EntityID:    spEntityID,    // EntityID do Service Provider
 		SignRequest: cfg.SignRequest, // Se as AuthNRequests devem ser assinadas
-		AcsURL:      acsURL,        // Assertion Consumer Service URL
+		ACSURL:      *acsURL,        // Assertion Consumer Service URL
 		// IDPMetadataURL: idpModel.IDPMetadataURL, // Se o metadata do IdP for buscado de uma URL
 		// IDPMetadata: &idpModel.IDPMetadata, // Se o metadata do IdP for fornecido diretamente (XML)
 		// ForceAuthn: false, // Se o IdP deve forçar re-autenticação do usuário

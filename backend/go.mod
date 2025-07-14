@@ -1,8 +1,6 @@
 module phoenixgrc/backend
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.24.3
 
 require (
 	cloud.google.com/go/storage v1.40.0
@@ -25,7 +23,6 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.40.0
 	golang.org/x/oauth2 v0.28.0
-	golang.org/x/term v0.33.0
 	google.golang.org/api v0.180.0
 	gorm.io/driver/postgres v1.5.7
 	gorm.io/gorm v1.25.9

@@ -2,97 +2,107 @@ package notifications
 
 import (
 	"context"
-	"errors"
-	"phoenixgrc/backend/internal/database"
-	"phoenixgrc/backend/internal/models"
+	"fmt"
+
+	"phoenixgrc/backend/pkg/config"
 	phxlog "phoenixgrc/backend/pkg/log"
 
-	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsGoConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"go.uber.org/zap"
 )
 
-// EmailNotifier é responsável por enviar e-mails.
-type EmailNotifier struct {
-	client *sesv2.Client
-	sender string
+// Notifier é uma interface genérica para enviar notificações.
+type Notifier interface {
+	Send(ctx context.Context, to, subject, body string) error
 }
 
-var emailNotifier *EmailNotifier
+// SESEmailNotifier implementa a interface Notifier para o Amazon SES.
+type SESEmailNotifier struct {
+	client      *sesv2.Client
+	senderEmail string
+}
 
-// InitEmailService inicializa o notificador de e-mail.
-// Ele tenta carregar a configuração do banco de dados primeiro,
-// e usa as variáveis de ambiente como fallback.
+// DefaultEmailNotifier é a instância padrão do notificador de e-mail.
+var DefaultEmailNotifier Notifier
+
+// InitEmailService inicializa o notificador de e-mail padrão.
 func InitEmailService() {
-	log := phxlog.L.Named("InitEmailService")
-	db := database.GetDB()
+	log := phxlog.L.Named("EmailService")
+	region := config.Cfg.AWSRegion
+	sender := config.Cfg.AWSSESEmailSender
 
-	// Tenta obter configurações do banco de dados
-	awsRegion, errRegion := models.GetSystemSetting(db, "AWS_REGION")
-	senderEmail, errSender := models.GetSystemSetting(db, "AWS_SES_EMAIL_SENDER")
-
-	if errRegion != nil || errSender != nil {
-		log.Warn("Could not retrieve email settings from database, falling back to environment variables.")
-		// Fallback para variáveis de ambiente (comportamento original)
-		awsRegion = phxlog.GetEnv("AWS_REGION", "")
-		senderEmail = phxlog.GetEnv("AWS_SES_EMAIL_SENDER", "")
-	}
-
-	if awsRegion == "" || senderEmail == "" {
-		log.Warn("AWS SES email service is not configured (missing AWS_REGION or AWS_SES_EMAIL_SENDER). Email notifications will be disabled.")
-		emailNotifier = nil
+	if region == "" || sender == "" {
+		log.Warn("AWS SES email service is not configured (missing AWS_REGION or AWS_SENDER_EMAIL). Email notifications will be disabled.")
+		DefaultEmailNotifier = &logNotifier{} // Fallback para um notificador que apenas loga
 		return
 	}
 
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(awsRegion))
+	sdkConfig, err := awsGoConfig.LoadDefaultConfig(context.TODO(), awsGoConfig.WithRegion(region))
 	if err != nil {
 		log.Error("Failed to load AWS SDK config for SES", zap.Error(err))
-		emailNotifier = nil
+		DefaultEmailNotifier = &logNotifier{}
 		return
 	}
 
-	emailNotifier = &EmailNotifier{
-		client: sesv2.NewFromConfig(cfg),
-		sender: senderEmail,
+	DefaultEmailNotifier = &SESEmailNotifier{
+		client:      sesv2.NewFromConfig(sdkConfig),
+		senderEmail: sender,
 	}
-	log.Info("AWS SES email service initialized successfully.", zap.String("sender", senderEmail), zap.String("region", awsRegion))
+	log.Info("AWS SES email service initialized successfully.", zap.String("sender", sender), zap.String("region", region))
 }
 
-// SendEmail envia um e-mail usando o serviço configurado.
-func SendEmail(to, subject, bodyHTML, bodyText string) error {
-	if emailNotifier == nil {
-		return errors.New("email service is not initialized")
-	}
-
+// Send envia um e-mail usando o Amazon SES.
+func (s *SESEmailNotifier) Send(ctx context.Context, to, subject, body string) error {
 	input := &sesv2.SendEmailInput{
-		FromEmailAddress: &emailNotifier.sender,
+		FromEmailAddress: &s.senderEmail,
 		Destination: &types.Destination{
 			ToAddresses: []string{to},
 		},
 		Content: &types.EmailContent{
 			Simple: &types.Message{
-				Body: &types.Body{
-					Html: &types.Content{
-						Data: &bodyHTML,
-					},
-					Text: &types.Content{
-						Data: &bodyText,
-					},
-				},
 				Subject: &types.Content{
-					Data: &subject,
+					Data:    aws.String(subject),
+					Charset: aws.String("UTF-8"),
+				},
+				Body: &types.Body{
+					Text: &types.Content{
+						Data:    aws.String(body),
+						Charset: aws.String("UTF-8"),
+					},
+					Html: &types.Content{
+						Data:    aws.String(body), // Usando o mesmo corpo para HTML por simplicidade
+						Charset: aws.String("UTF-8"),
+					},
 				},
 			},
 		},
 	}
 
-	_, err := emailNotifier.client.SendEmail(context.TODO(), input)
+	_, err := s.client.SendEmail(ctx, input)
 	if err != nil {
-		phxlog.L.Error("Failed to send email via SES", zap.Error(err), zap.String("recipient", to))
-		return err
+		phxlog.L.Error("Failed to send email via SES",
+			zap.String("to", to),
+			zap.String("subject", subject),
+			zap.Error(err))
+		return fmt.Errorf("failed to send email via SES: %w", err)
 	}
 
-	phxlog.L.Info("Successfully sent email", zap.String("recipient", to), zap.String("subject", subject))
+	phxlog.L.Info("Email sent successfully via AWS SES",
+		zap.String("to", to),
+		zap.String("subject", subject))
+	return nil
+}
+
+// logNotifier é um notificador que apenas registra as mensagens, usado como fallback.
+type logNotifier struct{}
+
+func (n *logNotifier) Send(ctx context.Context, to, subject, body string) error {
+	phxlog.L.Info("--- SIMULATING EMAIL SEND (Fallback) ---",
+		zap.String("to", to),
+		zap.String("subject", subject),
+		zap.String("body", body))
 	return nil
 }
