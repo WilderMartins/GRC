@@ -214,11 +214,12 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 
 	var parsedAssessmentDate time.Time
 	if payload.AssessmentDate != "" {
-		parsedAssessmentDate, err = time.Parse("2006-01-02", payload.AssessmentDate)
+		_, err = time.Parse("2006-01-02", payload.AssessmentDate)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assessment_date format, use YYYY-MM-DD: " + err.Error()})
 			return
 		}
+	}
 	// assessmentEvidenceIdentifier armazenará o objectName se um arquivo for carregado,
 	// ou a URL externa fornecida no payload se nenhum arquivo for carregado.
 	assessmentEvidenceIdentifier := payload.EvidenceURL
@@ -428,7 +429,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		// Não falhar a requisição por isso, retornar o que temos.
 	}
 
-	phxmetrics.AssessmentsUpdated.Inc()
 	c.JSON(http.StatusOK, resultAssessment) // OK for both create and update via upsert
 }
 
@@ -466,7 +466,6 @@ func GetAssessmentForControlHandler(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, assessment)
 }
-
 
 // ListOrgAssessmentsByFrameworkHandler lists all assessments for a given organization and framework.
 func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
@@ -541,8 +540,12 @@ func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
 	if totalItems%int64(pageSize) != 0 {
 		totalPages++
 	}
-    if totalItems == 0 { totalPages = 0 }
-    if totalPages == 0 && totalItems > 0 { totalPages = 1 }
+	if totalItems == 0 {
+		totalPages = 0
+	}
+	if totalPages == 0 && totalItems > 0 {
+		totalPages = 1
+	}
 
 	response := PaginatedResponse{
 		Items:      assessments,
@@ -648,7 +651,7 @@ func GetComplianceScoreHandler(c *gin.Context) {
 	conformantControls := 0
 	partiallyConformantControls := 0
 	nonConformantControls := 0
-	totalScoreSum := 0
+	var totalScoreSum int
 
 	assessmentMap := make(map[uuid.UUID]models.AuditAssessment)
 	for _, assess := range assessments {
@@ -658,7 +661,9 @@ func GetComplianceScoreHandler(c *gin.Context) {
 	for _, ctrl := range controls {
 		if assessment, found := assessmentMap[ctrl.ID]; found {
 			evaluatedControls++
-			totalScoreSum += assessment.Score // Assumes Score is 0-100
+			if assessment.Score != nil {
+				totalScoreSum += *assessment.Score // Assumes Score is 0-100
+			}
 			switch assessment.Status {
 			case models.ControlStatusConformant:
 				conformantControls++
@@ -684,7 +689,6 @@ func GetComplianceScoreHandler(c *gin.Context) {
 	if evaluatedControls == 0 && totalScoreSum != 0 { // Should not happen if logic is correct
 		complianceScore = 0.0
 	}
-
 
 	resp := ComplianceScoreResponse{
 		FrameworkID:                 frameworkID,
@@ -881,7 +885,6 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 		milDistInFunction[fn] = &C2M2MaturityDistribution{} // Inicializar
 	}
 
-
 	for _, ctrl := range controls {
 		var nistFunction string
 		// Tentar extrair a função da família. Ex: "Identify (ID.AM)" -> "Identify"
@@ -917,17 +920,20 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 			continue // Pular controles sem função clara para este sumário
 		}
 
-
 		controlsInFunction[nistFunction]++
 		if assessment, found := assessmentMap[ctrl.ID]; found && assessment.C2M2MaturityLevel != nil {
 			summaryByFunction[nistFunction] = append(summaryByFunction[nistFunction], *assessment.C2M2MaturityLevel)
 			evaluatedInFunction[nistFunction]++
 			if dist, ok := milDistInFunction[nistFunction]; ok {
 				switch *assessment.C2M2MaturityLevel {
-				case 0: dist.MIL0++
-				case 1: dist.MIL1++
-				case 2: dist.MIL2++
-				case 3: dist.MIL3++
+				case 0:
+					dist.MIL0++
+				case 1:
+					dist.MIL1++
+				case 2:
+					dist.MIL2++
+				case 3:
+					dist.MIL3++
 				}
 			}
 		}
@@ -935,7 +941,7 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 
 	var resultSummaries []C2M2NISTComponentSummary
 	for _, nistFunction := range nistFunctions { // Iterar na ordem definida para consistência
-		if _, exists := controlsInFunction[nistFunction]; !exists && !funcMap[nistFunction]{ // Pular se não for uma função conhecida ou não tiver controles
+		if _, exists := controlsInFunction[nistFunction]; !exists && !funcMap[nistFunction] { // Pular se não for uma função conhecida ou não tiver controles
 			continue
 		}
 
@@ -974,7 +980,6 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 			dist = &C2M2MaturityDistribution{}
 		}
 
-
 		resultSummaries = append(resultSummaries, C2M2NISTComponentSummary{
 			NISTComponentType: "Function",
 			NISTComponentName: nistFunction,
@@ -987,7 +992,6 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 
 	// Ordenar resultSummaries pela ordem de nistFunctions para consistência
 	// (já está implícito pela iteração em nistFunctions, mas uma ordenação explícita seria mais robusta se a fonte de funções mudasse)
-
 
 	response := C2M2MaturityFrameworkSummaryResponse{
 		FrameworkID:     frameworkID,

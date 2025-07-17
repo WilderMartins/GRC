@@ -69,10 +69,12 @@ const (
 	// Add other categories as needed
 
 	// C2M2 Practice Evaluation Status
-	PracticeStatusNotImplemented      string = "not_implemented"
-	PracticeStatusPartiallyImplemented string = "partially_implemented"
-	PracticeStatusFullyImplemented    string = "fully_implemented"
+	PracticeStatusNotImplemented      PracticeStatus = "not_implemented"
+	PracticeStatusPartiallyImplemented PracticeStatus = "partially_implemented"
+	PracticeStatusFullyImplemented    PracticeStatus = "fully_implemented"
 )
+
+type PracticeStatus string
 
 type Organization struct {
 	ID             uuid.UUID `gorm:"type:uuid;primary_key;"`
@@ -308,7 +310,7 @@ type C2M2PracticeEvaluation struct {
 	ID                uuid.UUID `gorm:"type:uuid;primary_key;" json:"id"`
 	AuditAssessmentID uuid.UUID `gorm:"type:uuid;not null;index" json:"audit_assessment_id"`
 	PracticeID        uuid.UUID `gorm:"type:uuid;not null;index" json:"practice_id"`
-	Status            string    `gorm:"type:varchar(50);not null" json:"status"` // not_implemented, partially_implemented, fully_implemented
+	Status            PracticeStatus    `gorm:"type:varchar(50);not null" json:"status"` // not_implemented, partially_implemented, fully_implemented
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }

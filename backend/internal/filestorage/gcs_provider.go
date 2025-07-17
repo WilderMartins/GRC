@@ -6,10 +6,8 @@ import (
 	"io"
 	// "os" // Removido, config.Cfg é usado
 	"phoenixgrc/backend/pkg/config" // Adicionado para acessar config.Cfg
-	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
-	"go.uber.org/zap"                 // Importar zap
-	"net/url"
-	"strings"
+	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
+	"go.uber.org/zap"                // Importar zap
 	"time"
 
 	// "path/filepath" // Para manipulação de nomes de arquivo, se necessário

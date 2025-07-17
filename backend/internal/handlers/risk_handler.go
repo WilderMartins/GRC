@@ -10,7 +10,6 @@ import (
 	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
 	"go.uber.org/zap"                 // Importar zap
 	"phoenixgrc/backend/internal/notifications"
-	phxmetrics "phoenixgrc/backend/pkg/metrics" // Importar métricas
 	"phoenixgrc/backend/internal/riskutils"
 	"phoenixgrc/backend/pkg/features"
 	"strings"
@@ -71,20 +70,15 @@ func CreateRiskHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create risk: " + err.Error()})
 		return
 	}
-	// Incrementar métrica
-	phxmetrics.RisksCreated.Inc()
 
-	go notifications.NotifyRiskEvent(risk.OrganizationID, risk, models.EventTypeRiskCreated)
+	go notifications.NotifyRiskEvent(c, risk.OrganizationID, risk, models.EventTypeRiskCreated)
 	if risk.OwnerID != uuid.Nil {
 		emailSubject := fmt.Sprintf("Novo Risco Criado: %s", risk.Title)
 		emailBody := fmt.Sprintf("Um novo risco foi criado e atribuído a você ou à sua equipe:\n\nTítulo: %s\nDescrição: %s\nImpacto: %s\nProbabilidade: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
 			risk.Title, risk.Description, risk.Impact, risk.Probability)
-		notifications.NotifyUserByEmail(risk.OwnerID, emailSubject, emailBody)
+		go notifications.NotifyUserByEmail(c.Request.Context(), risk.OwnerID, emailSubject, emailBody)
 	}
 	c.JSON(http.StatusCreated, risk)
-
-	// Trigger webhook
-	go TriggerWebhooks(risk.OrganizationID, EventRiskCreated, risk)
 }
 
 // GetRiskHandler handles fetching a single risk by its ID.
@@ -240,12 +234,12 @@ func UpdateRiskHandler(c *gin.Context) {
 	db.Preload("Owner").Where("id = ?", risk.ID).First(&updatedRisk) // Re-fetch to get preloaded owner if changed
 
 	if updatedRisk.Status != originalStatus {
-		go notifications.NotifyRiskEvent(updatedRisk.OrganizationID, updatedRisk, models.EventTypeRiskStatusChanged)
+		go notifications.NotifyRiskEvent(c, updatedRisk.OrganizationID, updatedRisk, models.EventTypeRiskStatusChanged)
 		if updatedRisk.OwnerID != uuid.Nil {
 			emailSubject := fmt.Sprintf("Status do Risco '%s' Alterado para '%s'", updatedRisk.Title, updatedRisk.Status)
 			emailBody := fmt.Sprintf("O status do risco '%s' foi alterado de '%s' para '%s'.\n\nAcesse o Phoenix GRC para mais detalhes.",
 				updatedRisk.Title, originalStatus, updatedRisk.Status)
-			notifications.NotifyUserByEmail(updatedRisk.OwnerID, emailSubject, emailBody)
+			go notifications.NotifyUserByEmail(c.Request.Context(), updatedRisk.OwnerID, emailSubject, emailBody)
 		}
 	}
 	c.JSON(http.StatusOK, updatedRisk)
@@ -360,7 +354,7 @@ func SubmitRiskForAcceptanceHandler(c *gin.Context) {
 			approverUser.Name, risk.Title, risk.Description, requesterUser.Name,
 			risk.Impact, risk.Probability, risk.RiskLevel,
 		)
-		notifications.NotifyUserByEmail(approverUser.ID, emailSubject, emailBody)
+		go notifications.NotifyUserByEmail(c.Request.Context(), approverUser.ID, emailSubject, emailBody)
 		phxlog.L.Info("Risk submission approval notification sent",
 			zap.String("approverEmail", approverUser.Email),
 			zap.String("riskTitle", risk.Title),
@@ -420,7 +414,7 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
 				emailSubjectOwner := fmt.Sprintf("Risco '%s' Aceito (Status: %s)", approvedRisk.Title, approvedRisk.Status)
 				emailBodyOwner := fmt.Sprintf("O risco '%s' que você aprovou foi atualizado para o status '%s'.\n\nComentários da aprovação: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
 					approvedRisk.Title, approvedRisk.Status, approvalWorkflow.Comments)
-				notifications.NotifyUserByEmail(approvedRisk.OwnerID, emailSubjectOwner, emailBodyOwner)
+				go notifications.NotifyUserByEmail(c.Request.Context(), approvedRisk.OwnerID, emailSubjectOwner, emailBodyOwner)
 			}
 			if approvalWorkflow.RequesterID != uuid.Nil && approvalWorkflow.RequesterID != approvedRisk.OwnerID {
 				var approverDetails models.User
@@ -428,7 +422,7 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
 					emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
 					emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada por %s.\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
 						approvedRisk.Title, approverDetails.Name, approvedRisk.Status, approvalWorkflow.Comments)
-					notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+					go notifications.NotifyUserByEmail(c.Request.Context(), approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
 				} else {
 					phxlog.L.Error("Failed to fetch approver details for notification",
 						zap.String("approverID", tokenUserID.(uuid.UUID).String()),
@@ -437,7 +431,7 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
 					emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
 					emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada.\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
 						approvedRisk.Title, approvedRisk.Status, approvalWorkflow.Comments)
-					notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+					go notifications.NotifyUserByEmail(c.Request.Context(), approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
 				}
 			}
 		}
@@ -448,10 +442,17 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
             emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Rejeitada", rejectedRisk.Title)
             emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi rejeitada.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes e para discutir os próximos passos.",
                 rejectedRisk.Title, approvalWorkflow.Comments)
-            notifications.NotifyUserByEmail(approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
+            go notifications.NotifyUserByEmail(c.Request.Context(), approvalWorkflow.RequesterID, emailSubjectRequester, emailBodyRequester)
         }
     }
 	c.JSON(http.StatusOK, approvalWorkflow)
+}
+
+type UserStakeholderResponse struct {
+	ID    uuid.UUID       `json:"id"`
+	Name  string          `json:"name"`
+	Email string          `json:"email"`
+	Role  models.UserRole `json:"role"`
 }
 
 func GetRiskApprovalHistoryHandler(c *gin.Context) {
@@ -499,16 +500,11 @@ func GetRiskApprovalHistoryHandler(c *gin.Context) {
 }
 
 // --- Risk Stakeholder Handlers ---
-type UserStakeholderResponse struct { // DTO definido aqui
-	ID    uuid.UUID       `json:"id"`
-	Name  string          `json:"name"`
-	Email string          `json:"email"`
-	Role  models.UserRole `json:"role"`
-}
 
 type AddStakeholderPayload struct {
 	UserID string `json:"user_id" binding:"required"`
 }
+
 
 func AddRiskStakeholderHandler(c *gin.Context) {
 	riskIDStr := c.Param("riskId")

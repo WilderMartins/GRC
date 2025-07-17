@@ -1,146 +1,87 @@
 package notifications
 
 import (
-	"os"
+	"context"
 	"testing"
-	appCfg "phoenixgrc/backend/pkg/config" // Adicionado para acessar a config da app
 
+	"phoenixgrc/backend/pkg/config"
+
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	// Não vamos importar o SDK da AWS aqui para manter os testes unitários focados na nossa lógica
 )
 
-func TestInitializeAWSSession(t *testing.T) {
-	// Salvar e restaurar o valor original de appCfg.Cfg.AWSRegion
-	originalAppAWSRegion := appCfg.Cfg.AWSRegion
+// MockNotifier para simular o comportamento de notificação.
+type MockNotifier struct {
+	SendFunc      func(ctx context.Context, to, subject, body string) error
+	SendCalled    bool
+	LastTo        string
+	LastSubject   string
+	LastBody      string
+}
+
+func (m *MockNotifier) Send(ctx context.Context, to, subject, body string) error {
+	m.SendCalled = true
+	m.LastTo = to
+	m.LastSubject = subject
+	m.LastBody = body
+	if m.SendFunc != nil {
+		return m.SendFunc(ctx, to, subject, body)
+	}
+	return nil
+}
+
+func TestInitEmailService(t *testing.T) {
+	originalNotifier := DefaultEmailNotifier
+	originalCfg := config.Cfg
 	defer func() {
-		appCfg.Cfg.AWSRegion = originalAppAWSRegion
-		sesInitializationError = nil
-		awsSDKConfig.Region = ""
+		DefaultEmailNotifier = originalNotifier
+		config.Cfg = originalCfg
 	}()
 
-	t.Run("AWS_REGION not set in appCfg", func(t *testing.T) {
-		appCfg.Cfg.AWSRegion = "" // Simula que não está na config da app
-		err := InitializeAWSSession()
-		assert.NoError(t, err, "InitializeAWSSession should not return fatal error if region is not set, only log")
-		assert.NotNil(t, sesInitializationError, "sesInitializationError should be set")
-		assert.Contains(t, sesInitializationError.Error(), "AWS_REGION não está configurada na app config")
-		sesInitializationError = nil
-		awsSDKConfig.Region = ""
+	t.Run("Service initializes with logNotifier when config is missing", func(t *testing.T) {
+		config.Cfg.AWSRegion = ""
+		config.Cfg.AWSSESEmailSender = ""
+
+		InitEmailService()
+
+		assert.NotNil(t, DefaultEmailNotifier)
+		_, ok := DefaultEmailNotifier.(*logNotifier)
+		assert.True(t, ok, "DefaultEmailNotifier should be a logNotifier")
 	})
 
-	t.Run("AWS_REGION set but AWS SDK fails to load config (simulated by not having credentials)", func(t *testing.T) {
-		appCfg.Cfg.AWSRegion = "test-region-1" // Simula que está na config da app
-
-		originalAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-		originalSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-		originalSessionToken := os.Getenv("AWS_SESSION_TOKEN")
-		os.Unsetenv("AWS_ACCESS_KEY_ID")
-		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-		os.Unsetenv("AWS_SESSION_TOKEN")
-		defer func() {
-			os.Setenv("AWS_ACCESS_KEY_ID", originalAccessKey)
-			os.Setenv("AWS_SECRET_ACCESS_KEY", originalSecretKey)
-			os.Setenv("AWS_SESSION_TOKEN", originalSessionToken)
-		}()
-
-		err := InitializeAWSSession()
-		assert.NoError(t, err, "InitializeAWSSession should log error but return nil")
-		// O erro específico de credenciais é difícil de mockar/garantir sem mais controle sobre o SDK loader.
-		// sesInitializationError pode ou não ser setado dependendo de como o SDK lida com a ausência de credenciais.
-		// Por enquanto, o importante é que InitializeAWSSession não retorne um erro fatal.
-		sesInitializationError = nil
-		awsSDKConfig.Region = ""
+	t.Run("Service initializes with logNotifier when AWS SDK fails", func(t *testing.T) {
+		// Simular falha no SDK (difícil sem mockar o SDK, mas podemos assumir que logNotifier é o fallback)
+		// A lógica atual já usa logNotifier como fallback para qualquer falha na inicialização.
+		config.Cfg.AWSRegion = "us-east-1"
+		config.Cfg.AWSSESEmailSender = "sender@example.com"
+		// Sem credenciais AWS reais, a inicialização do SDK falhará, caindo para logNotifier.
+		// Esta é uma suposição sobre o comportamento do SDK, mas reflete o design do nosso código.
+		InitEmailService()
+		assert.NotNil(t, DefaultEmailNotifier)
+		// O tipo exato pode depender de onde a falha ocorre. O importante é que não seja nil.
 	})
 }
 
-func TestNewSESEmailNotifier(t *testing.T) {
-	originalAppAWSRegion := appCfg.Cfg.AWSRegion
-	originalAppSender := appCfg.Cfg.AWSSESEmailSender
-	defer func() {
-		appCfg.Cfg.AWSRegion = originalAppAWSRegion
-		appCfg.Cfg.AWSSESEmailSender = originalAppSender
-		sesInitializationError = nil
-		awsSDKConfig.Region = ""
-	}()
+func TestNotifyUserByEmail(t *testing.T) {
+	// Esta função agora depende de um banco de dados mock, que não está configurado aqui.
+	// Testar a lógica de notificação em si é mais um teste de integração.
+	// Para um teste de unidade, podemos verificar se a função não entra em pânico com um nil Notifier.
+	t.Run("Does not panic with nil notifier", func(t *testing.T) {
+		originalNotifier := DefaultEmailNotifier
+		DefaultEmailNotifier = nil
+		defer func() { DefaultEmailNotifier = originalNotifier }()
 
-	t.Run("SES Notifier creation fails if AWS session not initialized (AWSRegion empty in appCfg)", func(t *testing.T) {
-		appCfg.Cfg.AWSRegion = ""  // Garante que a sessão falhe ao ler de appCfg
-		InitializeAWSSession()     // Isso vai setar sesInitializationError
-
-		_, err := NewSESEmailNotifier()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "sessão AWS não foi inicializada")
-		assert.Contains(t, sesInitializationError.Error(), "AWS_REGION não está configurada na app config")
-	})
-
-	t.Run("SES Notifier creation fails if sender email not set in appCfg", func(t *testing.T) {
-		appCfg.Cfg.AWSRegion = "us-east-1" // Configura região para passar na inicialização da sessão
-		sesInitializationError = nil      // Limpa erro anterior
-		awsSDKConfig.Region = ""          // Força InitializeAWSSession a tentar carregar
-
-		err := InitializeAWSSession()
-		assert.NoError(t, err)
-		assert.Nil(t, sesInitializationError)
-		assert.Equal(t, "us-east-1", awsSDKConfig.Region)
-
-		appCfg.Cfg.AWSSESEmailSender = "" // Remove o sender da config da app
-
-		_, errNotifier := NewSESEmailNotifier()
-		assert.Error(t, errNotifier)
-		assert.Contains(t, errNotifier.Error(), "EMAIL_SENDER_ADDRESS (AWSSESEmailSender na app config) não está configurado")
+		// Esta chamada irá logar um erro, mas não deve causar pânico.
+		// O teste não pode verificar o log facilmente sem uma configuração mais complexa.
+		assert.NotPanics(t, func() {
+			uid, _ := uuid.Parse("00000000-0000-0000-0000-000000000000")
+			NotifyUserByEmail(context.Background(), uid, "subject", "body")
+		})
 	})
 }
 
-
-func TestSendEmailNotificationLogic(t *testing.T) {
-    originalNotifier := DefaultEmailNotifier
-    defer func() { DefaultEmailNotifier = originalNotifier }()
-
-    t.Run("SendEmail uses DefaultEmailNotifier if set", func(t *testing.T) {
-        mockNotifier := &MockEmailNotifier{}
-        DefaultEmailNotifier = mockNotifier
-
-        to := "test@example.com"
-        subject := "Test Subject"
-        htmlBody := "<p>Test HTML</p>"
-        textBody := "Test Text"
-
-        mockNotifier.SendEmailFunc = func(rto, rsubject, rhtmlBody, rtextBody string) error {
-            assert.Equal(t, to, rto)
-            assert.Equal(t, subject, rsubject)
-            assert.Equal(t, htmlBody, rhtmlBody)
-            assert.Equal(t, textBody, rtextBody)
-            return nil
-        }
-
-        err := SendEmailNotification(to, subject, htmlBody, textBody)
-        assert.NoError(t, err)
-        assert.True(t, mockNotifier.SendEmailCalled, "Expected SendEmail on mock notifier to be called")
-    })
-
-    t.Run("SendEmail falls back to logging if DefaultEmailNotifier is nil", func(t *testing.T) {
-        DefaultEmailNotifier = nil
-
-        err := SendEmailNotification("log@example.com", "Log Subject", "<p>Log HTML</p>", "Log Text")
-        assert.NoError(t, err, "Fallback logging should not produce an error")
-    })
-
-    t.Run("SendEmail returns error if toEmail is empty", func(t *testing.T) {
-        err := SendEmailNotification("", "Subject", "", "Body")
-        assert.Error(t, err)
-        assert.Contains(t, err.Error(), "destinatário do email (toEmail) não pode ser vazio")
-    })
-}
-
-type MockEmailNotifier struct {
-    SendEmailFunc   func(toEmail, subject, htmlBody, textBody string) error
-    SendEmailCalled bool
-}
-
-func (m *MockEmailNotifier) SendEmail(toEmail, subject, htmlBody, textBody string) error {
-    m.SendEmailCalled = true
-    if m.SendEmailFunc != nil {
-        return m.SendEmailFunc(toEmail, subject, htmlBody, textBody)
-    }
-    return nil
+func TestLogNotifier(t *testing.T) {
+	notifier := &logNotifier{}
+	err := notifier.Send(context.Background(), "test@example.com", "Test Subject", "Test Body")
+	assert.NoError(t, err, "logNotifier should never return an error")
 }

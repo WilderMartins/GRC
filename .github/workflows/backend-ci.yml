@@ -27,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22' # Manter sincronizado com o go.mod ou usar go-version-file
+          go-version-file: 'backend/go.mod' # Usa a versão do go.mod
 
       - name: GolangCI Lint
         uses: golangci/golangci-lint-action@v6
@@ -51,8 +51,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-          # go-version-file: 'backend/go.mod' # Alternativa para ler a versão do go.mod
+          go-version-file: 'backend/go.mod' # Usa a versão do go.mod
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -98,8 +97,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-          # go-version-file: 'backend/go.mod'
+          go-version-file: 'backend/go.mod' # Usa a versão do go.mod
 
       - name: Build application
         working-directory: backend

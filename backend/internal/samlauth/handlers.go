@@ -1,22 +1,63 @@
 package samlauth
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"phoenixgrc/backend/internal/auth"
+	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
-	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
-	"go.uber.org/zap"                 // Importar zap
-	"phoenixgrc/backend/internal/database" // Adicionado para buscar/criar usuário
-	"phoenixgrc/backend/internal/auth"     // Para gerar token JWT da aplicação
-	appConfig "phoenixgrc/backend/pkg/config" // Para FRONTEND_SAML_CALLBACK_URL e novas configs
-	phxmetrics "phoenixgrc/backend/pkg/metrics"   // Importar métricas
-	"gorm.io/gorm" // Adicionado para gorm.ErrRecordNotFound
+	"phoenixgrc/backend/pkg/config"
+	phxlog "phoenixgrc/backend/pkg/log"
+	"strings"
 
+	"github.com/crewjam/saml"
 	"github.com/crewjam/saml/samlsp"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
+
+// getSAMLServiceProvider retrieves an IdentityProvider model from DB
+// and configures a samlsp.Middleware instance for it.
+func getSAMLServiceProvider(c *gin.Context, idpID uuid.UUID) (*samlsp.Middleware, *models.IdentityProvider, error) {
+	db := database.GetDB() // Obter instância do DB
+	var idpModel models.IdentityProvider
+
+	// Buscar o IdentityProvider no banco de dados
+	if err := db.First(&idpModel, "id = ?", idpID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil, fmt.Errorf("SAML Identity Provider with ID %s not found", idpID)
+		}
+		return nil, nil, fmt.Errorf("failed to query SAML Identity Provider with ID %s: %w", idpID, err)
+	}
+
+	// Validar se o IdP está ativo e é do tipo SAML
+	if !idpModel.IsActive {
+		return nil, &idpModel, fmt.Errorf("SAML Identity Provider %s (Name: %s) is not active", idpID, idpModel.Name)
+	}
+	if idpModel.ProviderType != models.IDPTypeSAML {
+		return nil, &idpModel, fmt.Errorf("Identity Provider %s (Name: %s) is not a SAML provider (Type: %s)", idpID, idpModel.Name, idpModel.ProviderType)
+	}
+
+	// ConfigJSON já deve estar preenchido pelo GORM a partir do DB.
+
+	opts, err := GetSAMLServiceProviderOptions(&idpModel)
+	if err != nil {
+		return nil, &idpModel, fmt.Errorf("failed to get SAML SP options for IdP %s (Name: %s): %w", idpID, idpModel.Name, err)
+	}
+	if opts == nil { // Defensivo, GetSAMLServiceProviderOptions deve retornar erro se opts for nil
+		return nil, &idpModel, fmt.Errorf("SAML SP options are nil for IdP %s (Name: %s)", idpID, idpModel.Name)
+	}
+
+	spMiddleware, err := samlsp.New(*opts)
+	if err != nil {
+		return nil, &idpModel, fmt.Errorf("failed to create samlsp.Middleware for IdP %s (Name: %s): %w", idpID, idpModel.Name, err)
+	}
+	return spMiddleware, &idpModel, nil
+}
 
 // getSAMLServiceProvider retrieves an IdentityProvider model from DB
 // and configures a samlsp.Middleware instance for it.
@@ -139,7 +180,7 @@ func ACSHandler(c *gin.Context) {
 		return
 	}
 	attrs := samlSession.GetAttributes()
-	nameID := samlSession.GetNameID() // NameID da asserção
+	nameID := samlSession.NameID // NameID da asserção
 
 	// Parsear o mapeamento de atributos do IdP
 	var attrMapping ACSAttributeMapping
@@ -171,6 +212,66 @@ func ACSHandler(c *gin.Context) {
 	fullName := strings.TrimSpace(firstName + " " + lastName)
 	if fullName == "" {
 		fullName = email // Fallback para nome completo
+	}
+
+	// --- User Provisioning/Login ---
+	db := database.GetDB()
+	var user models.User
+	err = db.Where("email = ? AND organization_id = ?", email, idpModel.OrganizationID).First(&user).Error
+
+	if err == gorm.ErrRecordNotFound { // Usuário não existe, provisionar
+		allowUserCreation, err := models.GetSystemSetting(db, "ALLOW_SAML_USER_CREATION")
+		if err != nil {
+			// Se a configuração não existir, assuma um padrão seguro (não permitir criação)
+			allowUserCreation = "false"
+		}
+
+		if allowUserCreation != "true" {
+			phxlog.L.Warn("SAML user creation disabled, user not provisioned",
+				zap.String("email", email), zap.String("idpName", idpModel.Name))
+			c.JSON(http.StatusForbidden, gin.H{"error": "New user registration via this SAML provider is disabled."})
+			return
+		}
+
+		user = models.User{
+			OrganizationID: idpModel.OrganizationID,
+			Name:           fullName,
+			Email:          email,
+			PasswordHash:   "SAML_USER_NO_PASSWORD_" + uuid.New().String(), // Senha não usada, mas campo é NOT NULL
+			SSOProvider:    idpModel.Name,
+			SocialLoginID:  nameID, // Usar NameID da asserção SAML
+			Role:           models.RoleUser, // Ou buscar de um atributo SAML mapeado para role
+			IsActive:       true,
+		}
+		if createErr := db.Create(&user).Error; createErr != nil {
+			phxlog.L.Error("Failed to create new SAML user",
+				zap.String("email", email), zap.String("idpName", idpModel.Name), zap.Error(createErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to provision SAML user."})
+			return
+		}
+		phxlog.L.Info("New SAML user provisioned",
+			zap.String("userID", user.ID.String()), zap.String("email", email), zap.String("idpName", idpModel.Name))
+	} else if err != nil { // Outro erro de DB
+		phxlog.L.Error("Database error fetching user for SAML login",
+			zap.String("email", email), zap.String("idpName", idpModel.Name), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error during SAML login."})
+		return
+	} else { // Usuário existe
+		user.SSOProvider = idpModel.Name
+		user.SocialLoginID = nameID
+		user.IsActive = true // Garantir que esteja ativo
+		// Opcional: Atualizar nome se mudou no IdP
+		if user.Name == "" || user.Name == user.Email { // Só atualiza se nome atual for placeholder
+			user.Name = fullName
+		}
+		if saveErr := db.Save(&user).Error; saveErr != nil {
+			phxlog.L.Error("Failed to update existing SAML user",
+				zap.String("userID", user.ID.String()), zap.String("email", email), zap.Error(saveErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user during SAML login."})
+			return
+		}
+		phxlog.L.Info("Existing SAML user logged in and updated",
+			zap.String("userID", user.ID.String()), zap.String("email", email))
 	}
 
 
@@ -209,7 +310,6 @@ func ACSHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to provision SAML user."})
 			return
 		}
-			phxmetrics.UsersCreated.WithLabelValues("saml").Inc() // Incrementar métrica
 		phxlog.L.Info("New SAML user provisioned",
 			zap.String("userID", user.ID.String()), zap.String("email", email), zap.String("idpName", idpModel.Name))
 	} else if err != nil { // Outro erro de DB
@@ -246,7 +346,7 @@ func ACSHandler(c *gin.Context) {
 
 	// Redirecionar para o frontend com o token
 	// O frontend precisa ter uma rota /saml/callback para processar este token
-	frontendSAMLCallbackURL := strings.TrimSuffix(appConfig.Cfg.AppRootURL, "/") + "/saml/callback"
+	frontendSAMLCallbackURL := strings.TrimSuffix(appConfig.Cfg.FrontendBaseURL, "/") + "/saml/callback"
 	targetURL := fmt.Sprintf("%s?token=%s&sso_success=true&provider=saml&idp_name=%s",
 		frontendSAMLCallbackURL,
 		url.QueryEscape(appToken),
@@ -329,7 +429,7 @@ func SAMLLoginHandler(c *gin.Context) {
 	// Para este handler, precisamos simular o que o middleware faria.
 
 	// Uma forma mais direta com crewjam/saml pode ser usar o middleware.ServiceProvider:
-	authReq, err := middleware.ServiceProvider.MakeAuthenticationRequest(middleware.ServiceProvider.GetSSOBindingLocation(samlsp.HTTPRedirectBinding))
+	authReq, err := middleware.ServiceProvider.MakeAuthenticationRequest(middleware.ServiceProvider.GetSSOBindingLocation(saml.HTTPRedirectBinding))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create SAML AuthnRequest"})
 		return
