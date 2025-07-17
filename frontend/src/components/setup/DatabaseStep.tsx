@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'next-i18next';
+import axios from '@/lib/axios';
+import { useNotifier } from '@/hooks/useNotifier';
 
 interface DatabaseStepProps {
   onVerifyAndContinue: () => void;
@@ -9,67 +11,138 @@ interface DatabaseStepProps {
 
 const DatabaseStep: React.FC<DatabaseStepProps> = ({ onVerifyAndContinue, isLoading, errorMessage }) => {
   const { t } = useTranslation('setupWizard');
+  const { showError, showSuccess } = useNotifier();
+  const [dbConfig, setDbConfig] = useState({
+    host: 'db',
+    port: '5432',
+    user: 'admin',
+    password: 'password123',
+    dbname: 'phoenix_grc_dev',
+  });
+  const [isTesting, setIsTesting] = useState(false);
 
-  // As variáveis de ambiente agora são gerenciadas de forma mais inteligente.
-  // O foco aqui é na verificação e no feedback de erro.
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setDbConfig(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    try {
+      await axios.post('/api/public/setup/test-db', dbConfig);
+      showSuccess(t('notifications.db_connection_successful'));
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        showError(error.response.data.error || t('notifications.db_connection_failed'));
+      } else {
+        showError(t('notifications.db_connection_failed'));
+      }
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-2xl font-bold text-gray-900 dark:text-white text-center">
-          {t('steps.db_config.title_v2', 'Verificação do Sistema')}
+          {t('steps.db_config.title_v2', 'Configuração do Banco de Dados')}
         </h3>
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
-          {t('steps.db_config.intro_paragraph_v2', 'Vamos verificar se o servidor backend e a conexão com o banco de dados estão prontos. Clique no botão abaixo para iniciar a verificação.')}
+          {t('steps.db_config.intro_paragraph_v2', 'Insira os detalhes de conexão do seu banco de dados PostgreSQL.')}
         </p>
       </div>
 
-      {/* Exibição de Erro */}
+      <div className="grid grid-cols-1 gap-y-6 sm:grid-cols-2 sm:gap-x-8">
+        <div>
+          <label htmlFor="host" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('steps.db_config.form.host_label')}
+          </label>
+          <input
+            type="text"
+            name="host"
+            id="host"
+            value={dbConfig.host}
+            onChange={handleInputChange}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+        <div>
+          <label htmlFor="port" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('steps.db_config.form.port_label')}
+          </label>
+          <input
+            type="text"
+            name="port"
+            id="port"
+            value={dbConfig.port}
+            onChange={handleInputChange}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+        <div>
+          <label htmlFor="user" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('steps.db_config.form.user_label')}
+          </label>
+          <input
+            type="text"
+            name="user"
+            id="user"
+            value={dbConfig.user}
+            onChange={handleInputChange}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+        <div>
+          <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('steps.db_config.form.password_label')}
+          </label>
+          <input
+            type="password"
+            name="password"
+            id="password"
+            value={dbConfig.password}
+            onChange={handleInputChange}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label htmlFor="dbname" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {t('steps.db_config.form.dbname_label')}
+          </label>
+          <input
+            type="text"
+            name="dbname"
+            id="dbname"
+            value={dbConfig.dbname}
+            onChange={handleInputChange}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          />
+        </div>
+      </div>
+
       {errorMessage && (
         <div className="bg-red-50 dark:bg-red-700/30 border-l-4 border-red-400 dark:border-red-500 p-4 rounded-md">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400 dark:text-red-300" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
-                {t('steps.db_config.error_title', 'Falha na Verificação')}
-              </h3>
-              <div className="mt-2 text-sm text-red-700 dark:text-red-300">
-                <p>{errorMessage}</p>
-                <p className="mt-2">
-                  {t('steps.db_config.error_instructions', 'Por favor, verifique se o Docker está em execução e se as variáveis no seu arquivo `.env` estão corretas (especialmente as de banco de dados). Após ajustar, reinicie a aplicação com `docker-compose down && docker-compose up -d` e tente novamente.')}
-                </p>
-              </div>
-            </div>
-          </div>
+          <p className="text-sm text-red-700 dark:text-red-300">{errorMessage}</p>
         </div>
       )}
 
-      <div className="bg-blue-50 dark:bg-blue-700/30 border-l-4 border-blue-400 dark:border-blue-500 p-4 rounded-md">
-          <div className="flex">
-            <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-blue-400 dark:text-blue-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
-                </svg>
-            </div>
-            <div className="ml-3">
-              <p className="text-sm text-blue-700 dark:text-blue-200">
-                {t('steps.db_config.info_text', 'Esta etapa verifica se o frontend consegue se comunicar com o backend e se o backend consegue se conectar ao banco de dados. As chaves de segurança também são validadas neste momento.')}
-              </p>
-            </div>
-          </div>
-      </div>
-
-      <div>
+      <div className="flex justify-end space-x-4">
+        <button
+          type="button"
+          onClick={handleTestConnection}
+          disabled={isTesting || isLoading}
+          className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600"
+        >
+          {isTesting ? t('steps.db_config.testing_button') : t('steps.db_config.test_button')}
+        </button>
         <button
           type="button"
           onClick={onVerifyAndContinue}
-          disabled={isLoading}
+          disabled={isLoading || isTesting}
           className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-brand-primary hover:bg-brand-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary transition-colors disabled:opacity-50"
         >
-          {isLoading ? t('steps.db_config.verifying_button', 'Verificando...') : t('steps.db_config.verify_button_v2', 'Verificar e Continuar')}
+          {isLoading ? t('steps.db_config.verifying_button') : t('steps.db_config.verify_button_v2')}
         </button>
       </div>
     </div>

@@ -3,8 +3,6 @@ package handlers
 import (
 	"bytes"
 	"crypto/rand" // Adicionado para gerar códigos de backup
-	"bytes"
-	"crypto/rand" // Adicionado para gerar códigos de backup
 	"encoding/base64"
 	"encoding/json" // Adicionado para Marshal/Unmarshal de backup codes
 	"fmt"

@@ -237,7 +237,7 @@ func ACSHandler(c *gin.Context) {
 	}
 
 	// Gerar token JWT da aplicação
-	appToken, err := auth.GenerateToken(&user, user.OrganizationID)
+	appToken, err := auth.GenerateToken(&user, user.OrganizationID.UUID)
 	if err != nil {
 		phxlog.L.Error("Failed to generate application token after SAML login",
 			zap.String("userID", user.ID.String()), zap.Error(err))

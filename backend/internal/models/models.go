@@ -62,6 +62,7 @@ const (
 	ControlStatusConformant         AuditControlStatus = "conforme"
 	ControlStatusNonConformant      AuditControlStatus = "nao_conforme"
 	ControlStatusPartiallyConformant AuditControlStatus = "parcialmente_conforme"
+	ControlStatusNotApplicable      AuditControlStatus = "nao_aplicavel"
 
 	CategoryTechnological RiskCategory = "tecnologico"
 	CategoryOperational   RiskCategory = "operacional"
