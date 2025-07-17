@@ -20,6 +20,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause" // Para Upsert
+	phxlog "phoenixgrc/backend/pkg/log"
+	"go.uber.org/zap"
 )
 
 // --- Framework and Control Handlers ---
@@ -228,7 +230,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		OrganizationID: organizationID,
 		AuditControlID: auditControlUUID,
 		Status:         payload.Status,
-		Comments:       payload.Comments,       // Pode ser nil
 		C2M2Comments:      payload.C2M2Comments, // Pode ser nil
 		// C2M2MaturityLevel é calculado pelo backend
 	}
@@ -271,7 +272,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		assessmentModel.Score = &defaultScore
 	}
 
-
 	// Handle file upload if "evidence_file" is provided
 	file, header, errFile := c.Request.FormFile("evidence_file")
 	if errFile == nil { // File was provided
@@ -306,7 +306,7 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			// (DetectContentType pode retornar "application/zip" para .docx, .xlsx)
 			ext := strings.ToLower(filepath.Ext(header.Filename))
 			if (ext == ".docx" && mimeType == "application/zip" && allowedMimeTypes["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]) ||
-			   (ext == ".xlsx" && mimeType == "application/zip" && allowedMimeTypes["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]) {
+				(ext == ".xlsx" && mimeType == "application/zip" && allowedMimeTypes["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]) {
 				// Permitir se a extensão for conhecida e o MIME for application/zip (comum para formatos OOXML)
 				log.Printf("Permitting ZIP file with known Office extension: %s", ext)
 			} else {
@@ -319,7 +319,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			}
 		}
 
-
 		if filestorage.DefaultFileStorageProvider == nil {
 			log.Println("Attempted file upload, but no file storage provider is configured.")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "File storage service is not configured."})
@@ -330,15 +329,12 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		newFileName := fmt.Sprintf("%s_%s", uuid.New().String(), filepath.Base(header.Filename))
 		objectPath := fmt.Sprintf("%s/audit_evidences/%s/%s", organizationID.String(), auditControlUUID.String(), newFileName)
 
-		fileURL, errUpload := filestorage.DefaultFileStorageProvider.UploadFile(c.Request.Context(), organizationID.String(), objectPath, file)
+		uploadedFileObjectName, errUpload := filestorage.DefaultFileStorageProvider.UploadFile(c.Request.Context(), organizationID.String(), objectPath, file)
 		if errUpload != nil {
 			log.Printf("Failed to upload evidence file to GCS: %v", errUpload)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload evidence file: " + errUpload.Error()})
 			return
 		}
-		uploadedFileURL = fileURL // Override with the GCS URL
-		// uploadedFileURL agora é objectName
-		uploadedFileObjectName := fileURL
 		log.Printf("Evidence file uploaded for org %s, control %s. ObjectName: %s", organizationID, auditControlUUID, uploadedFileObjectName)
 		// O campo EvidenceURL no payload JSON (payload.EvidenceURL) é ignorado se um arquivo for enviado.
 		// Armazenaremos o objectName no campo EvidenceURL do modelo.
@@ -391,9 +387,9 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			}
 			// Validar status
 			validStatuses := map[string]bool{
-				models.PracticeStatusNotImplemented:      true,
-				models.PracticeStatusPartiallyImplemented: true,
-				models.PracticeStatusFullyImplemented:    true,
+				string(models.PracticeStatusNotImplemented):      true,
+				string(models.PracticeStatusPartiallyImplemented): true,
+				string(models.PracticeStatusFullyImplemented):    true,
 			}
 			if !validStatuses[status] {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid status '%s' for practice ID %s", status, practiceIDStr)})
@@ -403,7 +399,7 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			eval := models.C2M2PracticeEvaluation{
 				AuditAssessmentID: resultAssessment.ID, // Associar com o assessment principal
 				PracticeID:        practiceID,
-				Status:            status,
+				Status:            models.PracticeStatus(status),
 			}
 			evalsToUpsert = append(evalsToUpsert, eval)
 		}

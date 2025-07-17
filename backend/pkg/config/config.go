@@ -32,11 +32,14 @@ type AppConfig struct {
 	AWSSESEmailSender   string
 	TOTPIssuerName      string
 	AWSS3Bucket         string // Novo para S3
-	FileStorageProvider                string // "gcs" ou "s3"
-	FrontendBaseURL                    string // Adicionado para links em emails/notificações
+	FileStorageProvider string // "gcs" ou "s3"
+	FrontendBaseURL     string // Adicionado para links em emails/notificações
 	DefaultOrganizationIDForGlobalSSO string `mapstructure:"DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO"`
 	AllowSAMLUserCreation             bool   `mapstructure:"ALLOW_SAML_USER_CREATION"` // Nova config para SAML
-	FeatureToggles                     map[string]bool
+	GithubClientID                    string `mapstructure:"GITHUB_CLIENT_ID"`
+	GithubClientSecret                string `mapstructure:"GITHUB_CLIENT_SECRET"`
+	AllowGlobalSSOUserCreation        bool   `mapstructure:"ALLOW_GLOBAL_SSO_USER_CREATION"`
+	FeatureToggles                    map[string]bool
 	// Adicionar outras configurações aqui
 }
 
@@ -88,7 +91,9 @@ func LoadConfig() {
 	Cfg.FrontendBaseURL = getEnv("FRONTEND_BASE_URL", "http://localhost:3000")
 	Cfg.DefaultOrganizationIDForGlobalSSO = getEnv("DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO", "")
 	Cfg.AllowSAMLUserCreation = getEnvAsBool("ALLOW_SAML_USER_CREATION", false) // Default false
-
+	Cfg.GithubClientID = getEnv("GITHUB_CLIENT_ID", "")
+	Cfg.GithubClientSecret = getEnv("GITHUB_CLIENT_SECRET", "")
+	Cfg.AllowGlobalSSOUserCreation = getEnvAsBool("ALLOW_GLOBAL_SSO_USER_CREATION", false)
 
 	// Carregar Feature Toggles
 	Cfg.FeatureToggles = make(map[string]bool)

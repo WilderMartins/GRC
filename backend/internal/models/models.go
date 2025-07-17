@@ -62,6 +62,7 @@ const (
 	ControlStatusConformant         AuditControlStatus = "conforme"
 	ControlStatusNonConformant      AuditControlStatus = "nao_conforme"
 	ControlStatusPartiallyConformant AuditControlStatus = "parcialmente_conforme"
+	ControlStatusNotApplicable      AuditControlStatus = "nao_aplicavel"
 
 	CategoryTechnological RiskCategory = "tecnologico"
 	CategoryOperational   RiskCategory = "operacional"
@@ -101,7 +102,7 @@ func (org *Organization) BeforeCreate(tx *gorm.DB) (err error) {
 
 type User struct {
 	ID             uuid.UUID `gorm:"type:uuid;primary_key;"`
-	OrganizationID uuid.UUID `gorm:"type:uuid;not null;index;constraint:OnDelete:CASCADE;"`
+	OrganizationID uuid.NullUUID `gorm:"type:uuid;index;constraint:OnDelete:CASCADE;"`
 	Name           string    `gorm:"size:255;not null"`
 	Email          string    `gorm:"size:255;not null;uniqueIndex"`
 	PasswordHash   string    `gorm:"size:255;not null"`
