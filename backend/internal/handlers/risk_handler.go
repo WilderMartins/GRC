@@ -710,4 +710,3 @@ func BulkUploadRisksCSVHandler(c *gin.Context) {
 	} else if len(failedRows) > 0 && len(risksToCreate) == 0 { c.JSON(http.StatusBadRequest, response)
 	} else { c.JSON(http.StatusOK, response) }
 }
-```

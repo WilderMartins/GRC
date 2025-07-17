@@ -29,6 +29,7 @@ import (
 )
 
 const googleOAuthStateCookie = "phoenixgrc_google_oauth_state"
+import "os"
 // appRootURL var não é mais necessária aqui se InitializeOAuth2GlobalConfig não a usa mais.
 // var appRootURL string // To be initialized
 
@@ -42,24 +43,16 @@ type GoogleOAuthConfig struct {
 
 // InitializeOAuth2GlobalConfig loads global OAuth2 settings like APP_ROOT_URL
 func InitializeOAuth2GlobalConfig() error {
-	appRootURL = os.Getenv("APP_ROOT_URL")
-	if appRootURL == "" {
+	if appConfig.Cfg.FrontendBaseURL == "" {
 		return fmt.Errorf("APP_ROOT_URL environment variable not set (required for OAuth2 Redirect URIs)")
 	}
 	return nil
 }
 
 func getGoogleOAuthConfig(idpIDStr string, db *gorm.DB) (*oauth2.Config, *GoogleOAuthConfig, *models.IdentityProvider, error) {
-	currentAppRootURL := appConfig.Cfg.AppRootURL
+	currentAppRootURL := appConfig.Cfg.FrontendBaseURL
 	if currentAppRootURL == "" {
-		// Fallback for older initialization if appConfig is not yet fully propagated
-		// This might happen if InitializeOAuth2GlobalConfig was called before appConfig was ready.
-		// Ideally, appConfig.Cfg.AppRootURL should be the single source of truth.
-		if appRootURL != "" {
-			currentAppRootURL = appRootURL
-		} else {
-			return nil, nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized or empty")
-		}
+		return nil, nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized or empty")
 	}
 
 
@@ -301,7 +294,7 @@ func GoogleCallbackHandler(c *gin.Context) {
 
 		if err == gorm.ErrRecordNotFound { // User does not exist in this org, provision
 			user = models.User{
-				OrganizationID: idpModelFromDB.OrganizationID,
+				OrganizationID: uuid.NullUUID{UUID: idpModelFromDB.OrganizationID, Valid: true},
 				Name:           fullName,
 				Email:          email,
 				PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
@@ -320,8 +313,8 @@ func GoogleCallbackHandler(c *gin.Context) {
 			if user.Name == "" || user.Name == user.Email { user.Name = fullName }
 			user.IsActive = true
 			// Ensure the user is associated with this IdP's organization if they somehow existed without it but matched email
-			if !user.OrganizationID.Valid || user.OrganizationID.UUID != idpModelFromDB.OrganizationID.UUID {
-				user.OrganizationID = idpModelFromDB.OrganizationID
+			if !user.OrganizationID.Valid || user.OrganizationID.UUID != idpModelFromDB.OrganizationID {
+				user.OrganizationID = uuid.NullUUID{UUID: idpModelFromDB.OrganizationID, Valid: true}
 			}
 			if saveErr := db.Save(&user).Error; saveErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update org Google SSO user: " + saveErr.Error()})

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	// "os" // log e fmt.Fprintf(os.Stderr,...) serão substituídos
+	"os"
 	"phoenixgrc/backend/internal/auth"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
@@ -313,7 +313,7 @@ func GithubCallbackHandler(c *gin.Context) {
 
 		if err == gorm.ErrRecordNotFound { // User does not exist in this org with this IdP, provision
 			user = models.User{
-				OrganizationID: idpModelFromDB.OrganizationID,
+				OrganizationID: uuid.NullUUID{UUID: idpModelFromDB.OrganizationID, Valid: true},
 				Name:           fullName,
 				Email:          email,
 				PasswordHash:   "OAUTH2_USER_NO_PASSWORD",
@@ -332,8 +332,8 @@ func GithubCallbackHandler(c *gin.Context) {
 			if user.Name == "" || user.Name == user.Email { user.Name = fullName }
 			user.IsActive = true
 			// Ensure the user is associated with this IdP's organization
-			if !user.OrganizationID.Valid || user.OrganizationID.UUID != idpModelFromDB.OrganizationID.UUID {
-				user.OrganizationID = idpModelFromDB.OrganizationID
+			if !user.OrganizationID.Valid || user.OrganizationID.UUID != idpModelFromDB.OrganizationID {
+				user.OrganizationID = uuid.NullUUID{UUID: idpModelFromDB.OrganizationID, Valid: true}
 			}
 			if saveErr := db.Save(&user).Error; saveErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update org Github SSO user: " + saveErr.Error()})
