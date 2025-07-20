@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
+	"phoenixgrc/backend/internal/notifications"
 	phxlog "phoenixgrc/backend/pkg/log"
 
 	"github.com/gin-gonic/gin"
@@ -118,14 +119,12 @@ func SendTestEmailHandler(c *gin.Context) {
 	to := userEmail.(string)
 	subject := "Phoenix GRC - Test Email"
 	bodyHTML := "<h1>Success!</h1><p>This is a test email from your Phoenix GRC instance.</p><p>Your email settings are configured correctly.</p>"
-	bodyText := "Success! This is a test email from your Phoenix GRC instance. Your email settings are configured correctly."
 
 	// Re-inicializa o serviço de e-mail para garantir que ele use as configurações mais recentes
 	// que podem ter sido acabadas de salvar pelo usuário.
 	notifications.InitEmailService()
 
-	err := notifications.SendEmail(to, subject, bodyHTML, bodyText)
-	if err != nil {
+	if err := notifications.DefaultEmailNotifier.Send(c.Request.Context(), to, subject, bodyHTML); err != nil {
 		log.Error("Failed to send test email", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send test email: " + err.Error()})
 		return

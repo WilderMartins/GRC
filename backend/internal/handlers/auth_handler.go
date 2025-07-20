@@ -56,7 +56,13 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	tokenString, err := auth.GenerateToken(&user, user.OrganizationID)
+	if !user.OrganizationID.Valid {
+		phxlog.L.Error("User without a valid OrganizationID attempted to log in", zap.String("userID", user.ID.String()))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User is not associated with an organization"})
+		return
+	}
+
+	tokenString, err := auth.GenerateToken(&user, user.OrganizationID.UUID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token: " + err.Error()})
 		return
@@ -77,13 +83,17 @@ func LoginHandler(c *gin.Context) {
 	}
 
 	// If 2FA is not enabled, proceed with normal login and token issuance
+	var orgIDStr string
+	if user.OrganizationID.Valid {
+		orgIDStr = user.OrganizationID.UUID.String()
+	}
 	c.JSON(http.StatusOK, LoginResponse{
 		Token:          tokenString,
 		UserID:         user.ID.String(),
 		Email:          user.Email,
 		Name:           user.Name,
 		Role:           user.Role,
-		OrganizationID: user.OrganizationID.String(),
+		OrganizationID: orgIDStr,
 	})
 }
 
@@ -162,19 +172,28 @@ func LoginVerifyBackupCodeHandler(c *gin.Context) {
 	}
 
 	// Backup code is valid, issue JWT
-	tokenString, err := auth.GenerateToken(&user, user.OrganizationID)
+	if !user.OrganizationID.Valid {
+		phxlog.L.Error("User without a valid OrganizationID attempted to log in with backup code", zap.String("userID", user.ID.String()))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User is not associated with an organization"})
+		return
+	}
+	tokenString, err := auth.GenerateToken(&user, user.OrganizationID.UUID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token: " + err.Error()})
 		return
 	}
 
+	var orgIDStr string
+	if user.OrganizationID.Valid {
+		orgIDStr = user.OrganizationID.UUID.String()
+	}
 	c.JSON(http.StatusOK, LoginResponse{
 		Token:          tokenString,
 		UserID:         user.ID.String(),
 		Email:          user.Email,
 		Name:           user.Name,
 		Role:           user.Role,
-		OrganizationID: user.OrganizationID.String(),
+		OrganizationID: orgIDStr,
 	})
 }
 
@@ -233,18 +252,27 @@ func LoginVerifyTOTPHandler(c *gin.Context) {
 	}
 
 	// TOTP is valid, now issue the full JWT token.
-	tokenString, err := auth.GenerateToken(&user, user.OrganizationID)
+	if !user.OrganizationID.Valid {
+		phxlog.L.Error("User without a valid OrganizationID attempted to log in with TOTP", zap.String("userID", user.ID.String()))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User is not associated with an organization"})
+		return
+	}
+	tokenString, err := auth.GenerateToken(&user, user.OrganizationID.UUID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token: " + err.Error()})
 		return
 	}
 
+	var orgIDStr string
+	if user.OrganizationID.Valid {
+		orgIDStr = user.OrganizationID.UUID.String()
+	}
 	c.JSON(http.StatusOK, LoginResponse{
 		Token:          tokenString,
 		UserID:         user.ID.String(),
 		Email:          user.Email,
 		Name:           user.Name,
 		Role:           user.Role,
-		OrganizationID: user.OrganizationID.String(),
+		OrganizationID: orgIDStr,
 	})
 }

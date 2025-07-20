@@ -27,9 +27,13 @@ type UserResponse struct {
 }
 
 func newUserResponse(user models.User) UserResponse {
+	var orgID uuid.UUID
+	if user.OrganizationID.Valid {
+		orgID = user.OrganizationID.UUID
+	}
 	return UserResponse{
 		ID:             user.ID,
-		OrganizationID: user.OrganizationID,
+		OrganizationID: orgID,
 		Name:           user.Name,
 		Email:          user.Email,
 		Role:           user.Role,

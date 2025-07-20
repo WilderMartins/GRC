@@ -16,7 +16,6 @@ type IdentityProviderPayload struct {
 	ProviderType         models.IdentityProviderType `json:"provider_type" binding:"required,oneof=saml oauth2_google oauth2_github"`
 	Name                 string                    `json:"name" binding:"required,min=3,max=100"`
 	IsActive             *bool                     `json:"is_active"` // Pointer to distinguish between false and not provided
-	IsPublic             *bool                     `json:"is_public"` // Pointer for optional public flag
 	ConfigJSON           json.RawMessage           `json:"config_json" binding:"required"` // Keep as RawMessage for flexibility
 	AttributeMappingJSON json.RawMessage           `json:"attribute_mapping_json"`       // Optional
 }
@@ -72,17 +71,12 @@ func CreateIdentityProviderHandler(c *gin.Context) {
 	if payload.IsActive != nil {
 		isActive = *payload.IsActive
 	}
-	isPublic := false // Default to false
-	if payload.IsPublic != nil {
-		isPublic = *payload.IsPublic
-	}
 
 	idp := models.IdentityProvider{
 		OrganizationID:       targetOrgID,
 		ProviderType:         payload.ProviderType,
 		Name:                 payload.Name,
 		IsActive:             isActive,
-		IsPublic:             isPublic, // Adicionado
 		ConfigJSON:           string(payload.ConfigJSON),
 		AttributeMappingJSON: string(payload.AttributeMappingJSON),
 	}
@@ -242,9 +236,6 @@ func UpdateIdentityProviderHandler(c *gin.Context) {
 	idp.Name = payload.Name
 	if payload.IsActive != nil {
 		idp.IsActive = *payload.IsActive
-	}
-	if payload.IsPublic != nil { // Adicionado para atualizar IsPublic
-		idp.IsPublic = *payload.IsPublic
 	}
 	idp.ConfigJSON = string(payload.ConfigJSON)
 	idp.AttributeMappingJSON = string(payload.AttributeMappingJSON)

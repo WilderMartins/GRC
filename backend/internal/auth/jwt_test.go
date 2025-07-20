@@ -37,10 +37,10 @@ func TestGenerateToken(t *testing.T) {
 		ID:    userID,
 		Email: "test@example.com",
 		Role:  models.RoleUser,
-		OrganizationID: orgID,
+		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 	}
 
-	tokenString, err := GenerateToken(user, user.OrganizationID)
+	tokenString, err := GenerateToken(user, user.OrganizationID.UUID)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, tokenString)
 
@@ -51,7 +51,7 @@ func TestGenerateToken(t *testing.T) {
 	assert.Equal(t, userID, claims.UserID)
 	assert.Equal(t, user.Email, claims.Email)
 	assert.Equal(t, user.Role, claims.Role)
-	assert.Equal(t, user.OrganizationID, claims.OrganizationID)
+	assert.Equal(t, user.OrganizationID.UUID, claims.OrganizationID)
 	assert.Equal(t, "phoenix-grc", claims.Issuer)
 	assert.WithinDuration(t, time.Now().Add(1*time.Hour), claims.ExpiresAt.Time, 5*time.Second) // Allow 5s clock skew
 }
@@ -63,9 +63,9 @@ func TestValidateToken_Valid(t *testing.T) {
 		ID:    userID,
 		Email: "valid@example.com",
 		Role:  models.RoleAdmin,
-		OrganizationID: orgID,
+		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 	}
-	tokenString, _ := GenerateToken(user, user.OrganizationID)
+	tokenString, _ := GenerateToken(user, user.OrganizationID.UUID)
 
 	claims, err := ValidateToken(tokenString)
 	assert.NoError(t, err)
@@ -77,8 +77,13 @@ func TestValidateToken_InvalidSignature(t *testing.T) {
 	// Generate a token with the correct key
 	userID := uuid.New()
 	orgID := uuid.New()
-	user := &models.User{ID: userID, Email: "test@example.com", Role: models.RoleUser, OrganizationID: orgID}
-	tokenString, _ := GenerateToken(user, user.OrganizationID)
+	user := &models.User{
+		ID:             userID,
+		Email:          "test@example.com",
+		Role:           models.RoleUser,
+		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
+	}
+	tokenString, _ := GenerateToken(user, user.OrganizationID.UUID)
 
 	// Tamper with the token or try to validate with a different key (simulated by re-initializing with wrong key)
 	// For simplicity, we'll just check against a known invalid token structure.
@@ -107,9 +112,14 @@ func TestValidateToken_Expired(t *testing.T) {
 
 	userID := uuid.New()
 	orgID := uuid.New()
-	user := &models.User{ID: userID, Email: "expired@example.com", Role: models.RoleUser, OrganizationID: orgID}
+	user := &models.User{
+		ID:             userID,
+		Email:          "expired@example.com",
+		Role:           models.RoleUser,
+		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
+	}
 
-	tokenString, err := GenerateToken(user, user.OrganizationID)
+	tokenString, err := GenerateToken(user, user.OrganizationID.UUID)
 	assert.NoError(t, err) // Token generation itself should be fine
 
 	// Wait a tiny moment to ensure it's definitely past the "expiry" if clock skew is an issue
@@ -172,8 +182,13 @@ func TestAuthMiddleware(t *testing.T) {
 	// Case 4: Valid Token
 	userID := uuid.New()
 	orgID := uuid.New()
-	user := &models.User{ID: userID, Email: "authmiddleware@example.com", Role: models.RoleManager, OrganizationID: orgID}
-	validToken, _ := GenerateToken(user, user.OrganizationID)
+	user := &models.User{
+		ID:             userID,
+		Email:          "authmiddleware@example.com",
+		Role:           models.RoleManager,
+		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
+	}
+	validToken, _ := GenerateToken(user, user.OrganizationID.UUID)
 
 	reqValid, _ := http.NewRequest(http.MethodGet, "/testauth", nil)
 	reqValid.Header.Set("Authorization", "Bearer "+validToken)

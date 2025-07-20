@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/pkg/config" // Para acessar config.Cfg
 	phxlog "phoenixgrc/backend/pkg/log"  // Importar o logger zap
 	"go.uber.org/zap"                 // Importar zap
@@ -12,6 +13,7 @@ import (
 	"phoenixgrc/backend/internal/seeders"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -81,7 +83,7 @@ func PerformSetupHandler(c *gin.Context) {
 		PasswordHash:   string(hashedPassword),
 		Role:           models.RoleAdmin,
 		IsActive:       true,
-		OrganizationID: org.ID,
+		OrganizationID: uuid.NullUUID{UUID: org.ID, Valid: true},
 	}
 	if err := db.Create(&adminUser).Error; err != nil {
 		log.Error("Failed to create admin user", zap.Error(err))
@@ -119,18 +121,16 @@ type GlobalIdPResponse struct {
 func ListGlobalSocialIdentityProvidersHandler(c *gin.Context) {
 	var providers []GlobalIdPResponse
 
-	appRootURL := config.Cfg.AppRootURL
+	appRootURL := config.Cfg.FrontendBaseURL
 	if appRootURL == "" {
 		appRootURL = "http://localhost:8080" // Fallback para desenvolvimento se não configurado via .env
-		phxlog.L.Warn("APP_ROOT_URL is not configured. Social login URLs may use an insecure fallback.",
+		phxlog.L.Warn("FRONTEND_BASE_URL is not configured. Social login URLs may use an insecure fallback.",
 			zap.String("fallback_url", appRootURL))
 	}
 	// Remover quaisquer barras extras do final para evitar // no path
 	appRootURL = strings.TrimSuffix(appRootURL, "/")
 
 	// Verificar Google
-	// As variáveis config.Cfg.GoogleClientID e config.Cfg.GoogleClientSecret precisam ser adicionadas à struct AppConfig
-	// e carregadas a partir de variáveis de ambiente (ex: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET).
 	if config.Cfg.GoogleClientID != "" && config.Cfg.GoogleClientSecret != "" {
 		providers = append(providers, GlobalIdPResponse{
 			Key:      "google",
@@ -141,7 +141,6 @@ func ListGlobalSocialIdentityProvidersHandler(c *gin.Context) {
 	}
 
 	// Verificar GitHub
-	// As variáveis config.Cfg.GithubClientID e config.Cfg.GithubClientSecret precisam ser adicionadas.
 	if config.Cfg.GithubClientID != "" && config.Cfg.GithubClientSecret != "" {
 		providers = append(providers, GlobalIdPResponse{
 			Key:      "github",

@@ -23,13 +23,15 @@ import (
 	googleAPI "google.golang.org/api/oauth2/v2" // To get user info
 	"google.golang.org/api/option"
 	"gorm.io/gorm"
+	"phoenixgrc/backend/pkg/config"
 	// appConfig já deve estar importado por causa de InitializeOAuth2GlobalConfig e uso de Cfg
 	// mas se não, adicionar:
 	// appConfig "phoenixgrc/backend/pkg/config"
+	"os"
 )
 
 const googleOAuthStateCookie = "phoenixgrc_google_oauth_state"
-import "os"
+
 // appRootURL var não é mais necessária aqui se InitializeOAuth2GlobalConfig não a usa mais.
 // var appRootURL string // To be initialized
 
@@ -43,14 +45,14 @@ type GoogleOAuthConfig struct {
 
 // InitializeOAuth2GlobalConfig loads global OAuth2 settings like APP_ROOT_URL
 func InitializeOAuth2GlobalConfig() error {
-	if appConfig.Cfg.FrontendBaseURL == "" {
+	if config.Cfg.FrontendBaseURL == "" {
 		return fmt.Errorf("APP_ROOT_URL environment variable not set (required for OAuth2 Redirect URIs)")
 	}
 	return nil
 }
 
 func getGoogleOAuthConfig(idpIDStr string, db *gorm.DB) (*oauth2.Config, *GoogleOAuthConfig, *models.IdentityProvider, error) {
-	currentAppRootURL := appConfig.Cfg.FrontendBaseURL
+	currentAppRootURL := config.Cfg.FrontendBaseURL
 	if currentAppRootURL == "" {
 		return nil, nil, nil, fmt.Errorf("OAuth2 global configuration (APP_ROOT_URL) not initialized or empty")
 	}
@@ -62,8 +64,8 @@ func getGoogleOAuthConfig(idpIDStr string, db *gorm.DB) (*oauth2.Config, *Google
 	dynamicRedirectURI := fmt.Sprintf("%s/auth/oauth2/google/%s/callback", currentAppRootURL, idpIDStr)
 
 	if idpIDStr == GlobalIdPIdentifier {
-		cfg.ClientID = appConfig.Cfg.GoogleClientID
-		cfg.ClientSecret = appConfig.Cfg.GoogleClientSecret
+		cfg.ClientID = config.Cfg.GoogleClientID
+		cfg.ClientSecret = config.Cfg.GoogleClientSecret
 		if len(cfg.Scopes) == 0 { // Default scopes for global
 			cfg.Scopes = []string{googleAPI.UserinfoEmailScope, googleAPI.UserinfoProfileScope}
 		}
@@ -232,19 +234,19 @@ func GoogleCallbackHandler(c *gin.Context) {
 		}
 
 		if err == gorm.ErrRecordNotFound { // User does not exist
-			if !appConfig.Cfg.AllowGlobalSSOUserCreation {
+			if !config.Cfg.AllowGlobalSSOUserCreation {
 				c.JSON(http.StatusForbidden, gin.H{"error": "New user registration via global Google SSO is disabled. Please use an organization-specific login or contact support."})
 				return
 			}
 			// Create a new user for global SSO
 			orgIDForNewUser := uuid.NullUUID{}
-			if appConfig.Cfg.DefaultOrganizationIDForGlobalSSO != "" {
-				parsedOrgID, errParseOrg := uuid.Parse(appConfig.Cfg.DefaultOrganizationIDForGlobalSSO)
+			if config.Cfg.DefaultOrganizationIDForGlobalSSO != "" {
+				parsedOrgID, errParseOrg := uuid.Parse(config.Cfg.DefaultOrganizationIDForGlobalSSO)
 				if errParseOrg == nil {
 					orgIDForNewUser = uuid.NullUUID{UUID: parsedOrgID, Valid: true}
 				} else {
 					phxlog.L.Warn("DEFAULT_ORGANIZATION_ID_FOR_GLOBAL_SSO is not a valid UUID. User will be created without an organization.",
-						zap.String("configuredDefaultOrgID", appConfig.Cfg.DefaultOrganizationIDForGlobalSSO),
+						zap.String("configuredDefaultOrgID", config.Cfg.DefaultOrganizationIDForGlobalSSO),
 						zap.Error(errParseOrg))
 				}
 			}
@@ -327,7 +329,14 @@ func GoogleCallbackHandler(c *gin.Context) {
 	// Generate Phoenix GRC JWT token
 	// Pass userOrgID which might be null for global users not yet part of an org.
 	// The GenerateToken function should handle a potentially nil OrganizationID for the token claims.
-	jwtToken, jwtErr := auth.GenerateToken(&user, userOrgID)
+	var orgIDForToken uuid.UUID
+	if userOrgID.Valid {
+		orgIDForToken = userOrgID.UUID
+	} else {
+		orgIDForToken = uuid.Nil // Explicitly pass uuid.Nil if not valid
+	}
+
+	jwtToken, jwtErr := auth.GenerateToken(&user, orgIDForToken)
 	if jwtErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate session token: " + jwtErr.Error()})
 		return

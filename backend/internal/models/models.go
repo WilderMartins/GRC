@@ -55,9 +55,10 @@ const (
 	ApprovalApproved ApprovalStatus = "aprovado"
 	ApprovalRejected ApprovalStatus = "rejeitado"
 
-	RoleAdmin   UserRole = "admin"
-	RoleManager UserRole = "manager"
-	RoleUser    UserRole = "user"
+	RoleSystemAdmin UserRole = "system_admin"
+	RoleAdmin       UserRole = "admin"
+	RoleManager     UserRole = "manager"
+	RoleUser        UserRole = "user"
 
 	ControlStatusConformant         AuditControlStatus = "conforme"
 	ControlStatusNonConformant      AuditControlStatus = "nao_conforme"
