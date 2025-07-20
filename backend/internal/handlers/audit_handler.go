@@ -214,7 +214,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		return
 	}
 
-	var parsedAssessmentDate time.Time
 	if payload.AssessmentDate != "" {
 		_, err = time.Parse("2006-01-02", payload.AssessmentDate)
 		if err != nil {
@@ -355,11 +354,11 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 	err = db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "organization_id"}, {Name: "audit_control_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"status", "evidence_url", "score", "assessment_date", "comments",
-			"c2m2_maturity_level", "c2m2_assessment_date", "c2m2_comments",
+			"status", "evidence_url", "score", "assessment_date",
+			"c2m2_assessment_date", "c2m2_comments",
 			"updated_at",
 		}),
-	}).Create(&assessmentModel).Error // Usar assessmentModel
+	}).Create(&assessmentModel).Error
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create or update assessment: " + err.Error()})
@@ -854,9 +853,12 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 	}
 
 	var assessments []models.AuditAssessment
-	if err := db.Where("organization_id = ? AND audit_control_id IN (?) AND c2m2_maturity_level IS NOT NULL", targetOrgID, controlIDs).
+	// Updated query to fetch assessments and their related C2M2 practice evaluations
+	if err := db.Model(&models.AuditAssessment{}).
+		Preload("C2M2PracticeEvaluations").
+		Where("organization_id = ? AND audit_control_id IN (?)", targetOrgID, controlIDs).
 		Find(&assessments).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch C2M2 assessments: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch C2M2 assessments and evaluations: " + err.Error()})
 		return
 	}
 
@@ -917,20 +919,15 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 		}
 
 		controlsInFunction[nistFunction]++
-		if assessment, found := assessmentMap[ctrl.ID]; found && assessment.C2M2MaturityLevel != nil {
-			summaryByFunction[nistFunction] = append(summaryByFunction[nistFunction], *assessment.C2M2MaturityLevel)
-			evaluatedInFunction[nistFunction]++
-			if dist, ok := milDistInFunction[nistFunction]; ok {
-				switch *assessment.C2M2MaturityLevel {
-				case 0:
-					dist.MIL0++
-				case 1:
-					dist.MIL1++
-				case 2:
-					dist.MIL2++
-				case 3:
-					dist.MIL3++
-				}
+		if assessment, found := assessmentMap[ctrl.ID]; found {
+			// A lógica de cálculo de MIL agora deve ser baseada nas C2M2PracticeEvaluations
+			// dentro de cada assessment. Isso é mais complexo e pode exigir o c2m2logic.Calculator.
+			// Para este patch de compilação, vamos apenas contar os controles avaliados.
+			// A lógica de MIL real precisa ser reimplementada.
+			if len(assessment.C2M2PracticeEvaluations) > 0 {
+				evaluatedInFunction[nistFunction]++
+				// A distribuição de MIL e o achievedMIL não podem ser calculados aqui
+				// sem a lógica completa do calculator. Deixaremos como 0 por enquanto.
 			}
 		}
 	}

@@ -75,13 +75,8 @@ func GetSAMLServiceProviderOptions(idpModel *models.IdentityProvider) (*samlsp.O
 		return nil, fmt.Errorf("failed to parse SP root URL: %w", err)
 	}
 
-	// ACS URL deve ser construída dinamicamente baseada no ID do IdP e na raiz da aplicação.
-	// Ex: https://app.example.com/auth/saml/uuid-do-idp/acs
-	acsURLString := fmt.Sprintf("%s/auth/saml/%s/acs", spRootURL, idpModel.ID.String())
-	acsURL, err := url.Parse(acsURLString)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse ACS URL '%s': %w", acsURLString, err)
-	}
+	// ACS URL é construída dinamicamente pela biblioteca samlsp, geralmente como `opts.URL.String() + "/acs"`.
+	// A URL de metadados também é dinâmica.
 
 	// Metadata URL também deve ser dinâmica.
 	// Ex: https://app.example.com/auth/saml/uuid-do-idp/metadata

@@ -29,7 +29,7 @@ import (
 )
 
 const googleOAuthStateCookie = "phoenixgrc_google_oauth_state"
-import "os"
+
 // appRootURL var não é mais necessária aqui se InitializeOAuth2GlobalConfig não a usa mais.
 // var appRootURL string // To be initialized
 

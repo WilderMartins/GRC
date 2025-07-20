@@ -34,10 +34,10 @@ func TestGenerateToken(t *testing.T) {
 	userID := uuid.New()
 	orgID := uuid.New()
 	user := &models.User{
-		ID:    userID,
-		Email: "test@example.com",
-		Role:  models.RoleUser,
-		OrganizationID: orgID,
+		ID:             userID,
+		Email:          "test@example.com",
+		Role:           models.RoleUser,
+		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 	}
 
 	tokenString, err := GenerateToken(user, user.OrganizationID)
@@ -60,10 +60,10 @@ func TestValidateToken_Valid(t *testing.T) {
 	userID := uuid.New()
 	orgID := uuid.New()
 	user := &models.User{
-		ID:    userID,
-		Email: "valid@example.com",
-		Role:  models.RoleAdmin,
-		OrganizationID: orgID,
+		ID:             userID,
+		Email:          "valid@example.com",
+		Role:           models.RoleAdmin,
+		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 	}
 	tokenString, _ := GenerateToken(user, user.OrganizationID)
 
@@ -77,7 +77,7 @@ func TestValidateToken_InvalidSignature(t *testing.T) {
 	// Generate a token with the correct key
 	userID := uuid.New()
 	orgID := uuid.New()
-	user := &models.User{ID: userID, Email: "test@example.com", Role: models.RoleUser, OrganizationID: orgID}
+	user := &models.User{ID: userID, Email: "test@example.com", Role: models.RoleUser, OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true}}
 	tokenString, _ := GenerateToken(user, user.OrganizationID)
 
 	// Tamper with the token or try to validate with a different key (simulated by re-initializing with wrong key)
@@ -107,7 +107,7 @@ func TestValidateToken_Expired(t *testing.T) {
 
 	userID := uuid.New()
 	orgID := uuid.New()
-	user := &models.User{ID: userID, Email: "expired@example.com", Role: models.RoleUser, OrganizationID: orgID}
+	user := &models.User{ID: userID, Email: "expired@example.com", Role: models.RoleUser, OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true}}
 
 	tokenString, err := GenerateToken(user, user.OrganizationID)
 	assert.NoError(t, err) // Token generation itself should be fine
@@ -172,7 +172,7 @@ func TestAuthMiddleware(t *testing.T) {
 	// Case 4: Valid Token
 	userID := uuid.New()
 	orgID := uuid.New()
-	user := &models.User{ID: userID, Email: "authmiddleware@example.com", Role: models.RoleManager, OrganizationID: orgID}
+	user := &models.User{ID: userID, Email: "authmiddleware@example.com", Role: models.RoleManager, OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true}}
 	validToken, _ := GenerateToken(user, user.OrganizationID)
 
 	reqValid, _ := http.NewRequest(http.MethodGet, "/testauth", nil)

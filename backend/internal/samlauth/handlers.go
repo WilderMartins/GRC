@@ -141,7 +141,14 @@ func ACSHandler(c *gin.Context) {
 		return
 	}
 	attrs := samlSession.GetAttributes()
-	nameID := samlSession.Assertion.Subject.NameID.Value // NameID da asserção
+	// A asserção não é mais um campo público. Acessamos via método.
+	assertion := samlSession.GetAssertion()
+	if assertion == nil {
+		phxlog.L.Error("SAML session assertion is nil after GetAssertion()", zap.String("idpID", idpIDStr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "SAML assertion not found after successful login."})
+		return
+	}
+	nameID := assertion.Subject.NameID.Value // NameID da asserção
 
 	// Parsear o mapeamento de atributos do IdP
 	var attrMapping ACSAttributeMapping
@@ -237,7 +244,7 @@ func ACSHandler(c *gin.Context) {
 	}
 
 	// Gerar token JWT da aplicação
-	appToken, err := auth.GenerateToken(&user, user.OrganizationID.UUID)
+	appToken, err := auth.GenerateToken(&user, user.OrganizationID)
 	if err != nil {
 		phxlog.L.Error("Failed to generate application token after SAML login",
 			zap.String("userID", user.ID.String()), zap.Error(err))

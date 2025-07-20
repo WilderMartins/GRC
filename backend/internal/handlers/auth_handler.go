@@ -83,7 +83,7 @@ func LoginHandler(c *gin.Context) {
 		Email:          user.Email,
 		Name:           user.Name,
 		Role:           user.Role,
-		OrganizationID: user.OrganizationID.String(),
+		OrganizationID: nullUUIDToString(user.OrganizationID),
 	})
 }
 
@@ -174,8 +174,17 @@ func LoginVerifyBackupCodeHandler(c *gin.Context) {
 		Email:          user.Email,
 		Name:           user.Name,
 		Role:           user.Role,
-		OrganizationID: user.OrganizationID.String(),
+		OrganizationID: nullUUIDToString(user.OrganizationID),
 	})
+}
+
+// nullUUIDToString converts a uuid.NullUUID to a string.
+// It returns an empty string if the UUID is not valid.
+func nullUUIDToString(n uuid.NullUUID) string {
+	if n.Valid {
+		return n.UUID.String()
+	}
+	return ""
 }
 
 type LoginVerifyTOTPPayload struct {
@@ -245,6 +254,6 @@ func LoginVerifyTOTPHandler(c *gin.Context) {
 		Email:          user.Email,
 		Name:           user.Name,
 		Role:           user.Role,
-		OrganizationID: user.OrganizationID.String(),
+		OrganizationID: nullUUIDToString(user.OrganizationID),
 	})
 }
