@@ -18,7 +18,7 @@ var jwtKey []byte
 // Claims struct to be encoded to JWT
 type Claims struct {
 	UserID         uuid.UUID      `json:"user_id"`
-	OrganizationID uuid.UUID      `json:"org_id"`
+	OrganizationID uuid.NullUUID  `json:"org_id"`
 	Email          string         `json:"email"`
 	Role           models.UserRole `json:"role"`
 	jwt.RegisteredClaims
@@ -35,7 +35,7 @@ func InitializeJWT() error {
 }
 
 // GenerateToken generates a new JWT token for a given user.
-func GenerateToken(user *models.User, organizationID uuid.UUID) (string, error) {
+func GenerateToken(user *models.User, organizationID uuid.NullUUID) (string, error) {
 	if len(jwtKey) == 0 {
 		return "", fmt.Errorf("JWT secret key not initialized. Call InitializeJWT() first")
 	}
