@@ -129,3 +129,50 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RoleAuthMiddleware cria um middleware para verificar se o usuário tem a role necessária.
+// Ele assume que o AuthMiddleware já foi executado.
+func RoleAuthMiddleware(requiredRole models.UserRole) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userRole, exists := c.Get("userRole")
+		if !exists {
+			// Isso não deve acontecer se o AuthMiddleware for executado primeiro.
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User role not found in token"})
+			return
+		}
+
+		role, ok := userRole.(models.UserRole)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Invalid user role format in token"})
+			return
+		}
+
+		// Lógica de permissão hierárquica simples
+		// SystemAdmin > Admin > Manager > User
+		hasPermission := false
+		switch requiredRole {
+		case models.RoleSystemAdmin:
+			if role == models.RoleSystemAdmin {
+				hasPermission = true
+			}
+		case models.RoleAdmin:
+			if role == models.RoleSystemAdmin || role == models.RoleAdmin {
+				hasPermission = true
+			}
+		case models.RoleManager:
+			if role == models.RoleSystemAdmin || role == models.RoleAdmin || role == models.RoleManager {
+				hasPermission = true
+			}
+		case models.RoleUser:
+			// Todos os papéis autenticados são pelo menos "User"
+			hasPermission = true
+		}
+
+		if !hasPermission {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Insufficient privileges"})
+			return
+		}
+
+		c.Next()
+	}
+}

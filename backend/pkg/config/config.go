@@ -38,6 +38,8 @@ type AppConfig struct {
 	AllowSAMLUserCreation             bool   `mapstructure:"ALLOW_SAML_USER_CREATION"` // Nova config para SAML
 	GithubClientID                    string `mapstructure:"GITHUB_CLIENT_ID"`
 	GithubClientSecret                string `mapstructure:"GITHUB_CLIENT_SECRET"`
+	GoogleClientID                    string `mapstructure:"GOOGLE_CLIENT_ID"`
+	GoogleClientSecret                string `mapstructure:"GOOGLE_CLIENT_SECRET"`
 	AllowGlobalSSOUserCreation        bool   `mapstructure:"ALLOW_GLOBAL_SSO_USER_CREATION"`
 	FeatureToggles                    map[string]bool
 	// Adicionar outras configurações aqui
@@ -93,6 +95,8 @@ func LoadConfig() {
 	Cfg.AllowSAMLUserCreation = getEnvAsBool("ALLOW_SAML_USER_CREATION", false) // Default false
 	Cfg.GithubClientID = getEnv("GITHUB_CLIENT_ID", "")
 	Cfg.GithubClientSecret = getEnv("GITHUB_CLIENT_SECRET", "")
+	Cfg.GoogleClientID = getEnv("GOOGLE_CLIENT_ID", "")
+	Cfg.GoogleClientSecret = getEnv("GOOGLE_CLIENT_SECRET", "")
 	Cfg.AllowGlobalSSOUserCreation = getEnvAsBool("ALLOW_GLOBAL_SSO_USER_CREATION", false)
 
 	// Carregar Feature Toggles

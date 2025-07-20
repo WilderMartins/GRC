@@ -133,14 +133,15 @@ func ACSHandler(c *gin.Context) {
 		return
 	}
 
-	// Extrair atributos da asserção
-	samlSession, ok := s.(samlsp.SessionWithAttributes)
+	// Extrair atributos da asserção. O tipo concreto da sessão é JWTSessionClaims.
+	samlSession, ok := s.(samlsp.JWTSessionClaims)
 	if !ok {
-		phxlog.L.Error("SAML session does not contain attributes", zap.String("idpID", idpIDStr))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "SAML session attributes not available."})
+		phxlog.L.Error("SAML session is not of expected type JWTSessionClaims", zap.String("idpID", idpIDStr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "SAML session attributes not available in the expected format."})
 		return
 	}
 	attrs := samlSession.GetAttributes()
+
 	// A asserção não é mais um campo público. Acessamos via método.
 	assertion := samlSession.GetAssertion()
 	if assertion == nil {

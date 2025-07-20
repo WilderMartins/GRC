@@ -7,8 +7,7 @@ import (
 	"net/http"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
-	phxlog "phoenixgrc/backend/pkg/log" // Importar o logger zap
-	"go.uber.org/zap"                 // Importar zap
+	phxlog "phoenixgrc/backend/pkg/log"
 	"phoenixgrc/backend/internal/notifications"
 	"phoenixgrc/backend/internal/riskutils"
 	"phoenixgrc/backend/pkg/features"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -71,7 +71,7 @@ func CreateRiskHandler(c *gin.Context) {
 		return
 	}
 
-	go notifications.NotifyRiskEvent(c, risk.OrganizationID, risk, models.EventTypeRiskCreated)
+	go notifications.NotifyRiskEvent(c.Request.Context(), risk.OrganizationID, risk, models.EventTypeRiskCreated)
 	if risk.OwnerID != uuid.Nil {
 		emailSubject := fmt.Sprintf("Novo Risco Criado: %s", risk.Title)
 		emailBody := fmt.Sprintf("Um novo risco foi criado e atribuído a você ou à sua equipe:\n\nTítulo: %s\nDescrição: %s\nImpacto: %s\nProbabilidade: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
@@ -103,7 +103,7 @@ func GetRiskHandler(c *gin.Context) {
 	if features.IsEnabled("LOG_DETALHADO_RISCO") {
 		phxlog.L.Debug("Detailed risk information requested (feature flag enabled)",
 			zap.String("riskID", riskID.String()),
-			zap.Any("risk", risk), // zap.Any pode ser verboso; considerar campos específicos
+			zap.Any("risk", risk),
 		)
 	}
 	c.JSON(http.StatusOK, risk)
@@ -174,7 +174,6 @@ func UpdateRiskHandler(c *gin.Context) {
 	var risk models.Risk
 	var originalStatus models.RiskStatus
 
-	// Fetch the risk
 	if err := db.Where("id = ? AND organization_id = ?", riskID, orgID).First(&risk).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
@@ -184,7 +183,6 @@ func UpdateRiskHandler(c *gin.Context) {
 		return
 	}
 
-	// Authorization check
 	currentUserRole := userRoleToken.(models.UserRole)
 	currentUserID := userIDToken.(uuid.UUID)
 	isOwner := risk.OwnerID == currentUserID
@@ -204,15 +202,14 @@ func UpdateRiskHandler(c *gin.Context) {
 	if payload.Probability != "" { risk.Probability = payload.Probability }
 	if payload.Status != "" { risk.Status = payload.Status }
 
-	// Handle OwnerID change authorization
 	if payload.OwnerID != "" {
 		parsedOwnerID, err := uuid.Parse(payload.OwnerID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OwnerID format for update"})
 			return
 		}
-		if risk.OwnerID != parsedOwnerID { // If owner is being changed
-			if isAdmin || isManager { // Only admin/manager can change owner
+		if risk.OwnerID != parsedOwnerID {
+			if isAdmin || isManager {
 				risk.OwnerID = parsedOwnerID
 			} else {
 				c.JSON(http.StatusForbidden, gin.H{"error": "Only Admins or Managers can change the risk owner."})
@@ -231,10 +228,10 @@ func UpdateRiskHandler(c *gin.Context) {
 	}
 
 	var updatedRisk models.Risk
-	db.Preload("Owner").Where("id = ?", risk.ID).First(&updatedRisk) // Re-fetch to get preloaded owner if changed
+	db.Preload("Owner").Where("id = ?", risk.ID).First(&updatedRisk)
 
 	if updatedRisk.Status != originalStatus {
-		go notifications.NotifyRiskEvent(c, updatedRisk.OrganizationID, updatedRisk, models.EventTypeRiskStatusChanged)
+		go notifications.NotifyRiskEvent(c.Request.Context(), updatedRisk.OrganizationID, updatedRisk, models.EventTypeRiskStatusChanged)
 		if updatedRisk.OwnerID != uuid.Nil {
 			emailSubject := fmt.Sprintf("Status do Risco '%s' Alterado para '%s'", updatedRisk.Title, updatedRisk.Status)
 			emailBody := fmt.Sprintf("O status do risco '%s' foi alterado de '%s' para '%s'.\n\nAcesse o Phoenix GRC para mais detalhes.",
@@ -259,7 +256,6 @@ func DeleteRiskHandler(c *gin.Context) {
 	db := database.GetDB()
 	var risk models.Risk
 
-	// Fetch the risk
 	if err := db.Where("id = ? AND organization_id = ?", riskID, orgID).First(&risk).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Risk not found or not part of your organization"})
@@ -269,7 +265,6 @@ func DeleteRiskHandler(c *gin.Context) {
 		return
 	}
 
-	// Authorization check
 	currentUserRole := userRoleToken.(models.UserRole)
 	currentUserID := userIDToken.(uuid.UUID)
 	isOwner := risk.OwnerID == currentUserID
@@ -281,12 +276,7 @@ func DeleteRiskHandler(c *gin.Context) {
 		return
 	}
 
-	// Proceed with deletion
-	// Note: Consider implications of deleting a risk, e.g., related approval workflows or audit items.
-	// GORM's default behavior for Delete might not cascade unless explicitly configured with constraints
-	// or through GORM settings (e.g., Select(clause.Associations) for many2many, or manual cleanup).
-	// For now, directly deleting the risk.
-	if err := db.Delete(&risk).Error; err != nil { // Changed from db.Delete(&models.Risk{}, riskID) to db.Delete(&risk) to allow GORM hooks on the specific instance if any.
+	if err := db.Delete(&risk).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete risk: " + err.Error()})
 		return
 	}
@@ -409,7 +399,7 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
 	if approvalWorkflow.Status == models.ApprovalApproved {
 		var approvedRisk models.Risk
 		if err := db.First(&approvedRisk, approvalWorkflow.RiskID).Error; err == nil {
-			go notifications.NotifyRiskEvent(approvedRisk.OrganizationID, approvedRisk, models.EventTypeRiskStatusChanged)
+			go notifications.NotifyRiskEvent(c.Request.Context(), approvedRisk.OrganizationID, approvedRisk, models.EventTypeRiskStatusChanged)
 			if approvedRisk.OwnerID != uuid.Nil {
 				emailSubjectOwner := fmt.Sprintf("Risco '%s' Aceito (Status: %s)", approvedRisk.Title, approvedRisk.Status)
 				emailBodyOwner := fmt.Sprintf("O risco '%s' que você aprovou foi atualizado para o status '%s'.\n\nComentários da aprovação: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
@@ -427,7 +417,6 @@ func ApproveOrRejectRiskAcceptanceHandler(c *gin.Context) {
 					phxlog.L.Error("Failed to fetch approver details for notification",
 						zap.String("approverID", tokenUserID.(uuid.UUID).String()),
 						zap.Error(errDb))
-					// Fallback notification without approver name
 					emailSubjectRequester := fmt.Sprintf("Sua solicitação de aceite para o Risco '%s' foi Aprovada", approvedRisk.Title)
 					emailBodyRequester := fmt.Sprintf("A solicitação de aceite para o risco '%s' foi aprovada.\nO status do risco foi atualizado para '%s'.\n\nComentários: %s\n\nAcesse o Phoenix GRC para mais detalhes.",
 						approvedRisk.Title, approvedRisk.Status, approvalWorkflow.Comments)
@@ -523,7 +512,6 @@ func AddRiskStakeholderHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch risk: " + err.Error()}); return
 	}
 
-	// Authorization Check: Only risk owner, admin, or manager can add stakeholders
 	tokenUserID, _ := c.Get("userID")
 	tokenUserRole, _ := c.Get("userRole")
 	isOwner := risk.OwnerID == tokenUserID.(uuid.UUID)
@@ -561,7 +549,6 @@ func RemoveRiskStakeholderHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify risk before stakeholder removal: " + err.Error()}); return
 	}
 
-	// Authorization Check: Only risk owner, admin, or manager can remove stakeholders
 	tokenUserID, _ := c.Get("userID")
 	tokenUserRole, _ := c.Get("userRole")
 	isOwner := risk.OwnerID == tokenUserID.(uuid.UUID)
@@ -687,7 +674,7 @@ func BulkUploadRisksCSVHandler(c *gin.Context) {
 		risk.OrganizationID = organizationID
 		risk.OwnerID = ownerID
 		risk.Status = models.StatusOpen
-		risk.RiskLevel = riskutils.CalculateRiskLevel(risk.Impact, risk.Probability) // Calculate risk level for bulk uploaded risks
+		risk.RiskLevel = riskutils.CalculateRiskLevel(risk.Impact, risk.Probability)
 		risksToCreate = append(risksToCreate, risk)
 	}
 	if len(risksToCreate) > 0 {

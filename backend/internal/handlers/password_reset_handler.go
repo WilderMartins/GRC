@@ -72,9 +72,10 @@ func ForgotPasswordHandler(c *gin.Context) {
         <p><a href="%s">Reset Password</a></p>
         <p>This link is valid for 1 hour. If you did not request this, please ignore this email.</p>
     `, resetLink)
-	bodyText := fmt.Sprintf("You requested a password reset. Please go to the following link to reset your password: %s", resetLink)
 
-	if err := notifications.SendEmail(user.Email, "Password Reset Request", bodyHTML, bodyText); err != nil {
+	// O corpo do e-mail para SES pode ser o mesmo para HTML e Texto por simplicidade,
+	// ou você pode criar versões diferentes. Usando bodyHTML para ambos.
+	if err := notifications.DefaultEmailNotifier.Send(c.Request.Context(), user.Email, "Password Reset Request", bodyHTML); err != nil {
 		log.Error("Failed to send password reset email", zap.Error(err))
 		// Não retorne o erro ao usuário por segurança.
 	}

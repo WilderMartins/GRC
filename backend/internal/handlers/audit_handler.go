@@ -1,27 +1,24 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"path/filepath"
 	"phoenixgrc/backend/internal/database"
+	"phoenixgrc/backend/internal/filestorage"
 	"phoenixgrc/backend/internal/models"
-	"strings" // Adicionado para strings.ToLower e strings.Join
+	phxlog "phoenixgrc/backend/pkg/log"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"encoding/json"
-	"fmt"
-	"log"
-	// "mime/multipart" // Removido - não usado diretamente aqui, o Gin lida com isso
-	"path/filepath"
-	"phoenixgrc/backend/internal/filestorage"
-	"io" // Necessário para file.Seek e http.DetectContentType
-	// "net/http/httputil" // Removido - não usado
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause" // Para Upsert
-	phxlog "phoenixgrc/backend/pkg/log"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // --- Framework and Control Handlers ---
@@ -144,7 +141,6 @@ type AssessmentPayload struct {
 	Comments       *string                   `json:"comments,omitempty"`                               // Comentários da avaliação principal
 
 	// Campos C2M2
-	C2M2MaturityLevel *int    `json:"c2m2_maturity_level,omitempty" binding:"omitempty,min=0,max=3"` // 0-3 // Este campo será calculado pelo backend, mas pode ser mantido para override manual
 	C2M2AssessmentDate *string `json:"c2m2_assessment_date,omitempty" binding:"omitempty,datetime=2006-01-02"` // YYYY-MM-DD
 	C2M2Comments      *string `json:"c2m2_comments,omitempty"`
 
@@ -165,21 +161,15 @@ var allowedMimeTypes = map[string]bool{
 	"application/vnd.ms-excel":                                         true, // .xls
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":   true, // .xlsx
 	"text/plain":                                                       true, // .txt
-	// Adicionar outros tipos conforme necessário
 }
 
-
 // CreateOrUpdateAssessmentHandler creates a new assessment or updates an existing one.
-// An assessment is unique per (OrganizationID, AuditControlID).
 func CreateOrUpdateAssessmentHandler(c *gin.Context) {
-	// Multipart form processing
-	// Max 10 MB files
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse multipart form: " + err.Error()})
 		return
 	}
 
-	// Get JSON payload from "data" form field
 	payloadString := c.Request.FormValue("data")
 	if payloadString == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'data' field in multipart form"})
@@ -191,15 +181,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON in 'data' field: " + err.Error()})
 		return
 	}
-
-	// Re-validate the unmarshalled payload using Gin's validator (optional, but good practice)
-	// This requires payload to be bound again, or use a custom validator.
-	// For now, we assume basic JSON unmarshalling is enough if `ShouldBindJSON` was to be used.
-	// A better way would be to bind the JSON part specifically if Gin supports it for multipart.
-	// Or, manually trigger validation:
-	// validate := validator.New()
-	// if err := validate.Struct(payload); err != nil { ... }
-
 
 	orgID, orgExists := c.Get("organizationID")
 	if !orgExists {
@@ -215,31 +196,22 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 	}
 
 	if payload.AssessmentDate != "" {
-		_, err = time.Parse("2006-01-02", payload.AssessmentDate)
-		if err != nil {
+		if _, err := time.Parse("2006-01-02", payload.AssessmentDate); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assessment_date format, use YYYY-MM-DD: " + err.Error()})
 			return
 		}
 	}
-	// assessmentEvidenceIdentifier armazenará o objectName se um arquivo for carregado,
-	// ou a URL externa fornecida no payload se nenhum arquivo for carregado.
 	assessmentEvidenceIdentifier := payload.EvidenceURL
 
 	assessmentModel := models.AuditAssessment{
 		OrganizationID: organizationID,
 		AuditControlID: auditControlUUID,
 		Status:         payload.Status,
-		C2M2Comments:      payload.C2M2Comments, // Pode ser nil
-		// C2M2MaturityLevel é calculado pelo backend
+		C2M2Comments:      payload.C2M2Comments,
 	}
 
-	// Processar datas
 	if payload.AssessmentDate != "" {
-		parsedDate, err := time.Parse("2006-01-02", payload.AssessmentDate)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assessment_date format, use YYYY-MM-DD: " + err.Error()})
-			return
-		}
+		parsedDate, _ := time.Parse("2006-01-02", payload.AssessmentDate)
 		assessmentModel.AssessmentDate = &parsedDate
 	} else {
 		now := time.Now()
@@ -255,7 +227,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		assessmentModel.C2M2AssessmentDate = &parsedDate
 	}
 
-	// Processar score
 	if payload.Score != nil {
 		assessmentModel.Score = payload.Score
 	} else {
@@ -271,26 +242,21 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		assessmentModel.Score = &defaultScore
 	}
 
-	// Handle file upload if "evidence_file" is provided
 	file, header, errFile := c.Request.FormFile("evidence_file")
-	if errFile == nil { // File was provided
+	if errFile == nil {
 		defer file.Close()
 
-		// Validação de Tamanho do Arquivo
 		if header.Size > maxEvidenceFileSize {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("File size exceeds limit of %d MB", maxEvidenceFileSize/(1024*1024))})
 			return
 		}
 
-		// Validação de Tipo MIME
-		// Ler os primeiros 512 bytes para detectar o tipo MIME
 		buffer := make([]byte, 512)
 		_, err := file.Read(buffer)
 		if err != nil && err != io.EOF {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file for MIME type detection"})
 			return
 		}
-		// Resetar o ponteiro do arquivo para o início, para que o upload leia o arquivo completo
 		_, err = file.Seek(0, io.SeekStart)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset file pointer"})
@@ -301,12 +267,9 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		log.Printf("Detected MIME type for uploaded file '%s': %s", header.Filename, mimeType)
 
 		if !allowedMimeTypes[mimeType] {
-			// Tentar verificar pela extensão se o DetectContentType falhar para alguns tipos Office
-			// (DetectContentType pode retornar "application/zip" para .docx, .xlsx)
 			ext := strings.ToLower(filepath.Ext(header.Filename))
 			if (ext == ".docx" && mimeType == "application/zip" && allowedMimeTypes["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]) ||
 				(ext == ".xlsx" && mimeType == "application/zip" && allowedMimeTypes["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]) {
-				// Permitir se a extensão for conhecida e o MIME for application/zip (comum para formatos OOXML)
 				log.Printf("Permitting ZIP file with known Office extension: %s", ext)
 			} else {
 				allowedTypesStr := []string{}
@@ -324,7 +287,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			return
 		}
 
-		// Construct a unique object name for GCS
 		newFileName := fmt.Sprintf("%s_%s", uuid.New().String(), filepath.Base(header.Filename))
 		objectPath := fmt.Sprintf("%s/audit_evidences/%s/%s", organizationID.String(), auditControlUUID.String(), newFileName)
 
@@ -335,22 +297,15 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			return
 		}
 		log.Printf("Evidence file uploaded for org %s, control %s. ObjectName: %s", organizationID, auditControlUUID, uploadedFileObjectName)
-		// O campo EvidenceURL no payload JSON (payload.EvidenceURL) é ignorado se um arquivo for enviado.
-		// Armazenaremos o objectName no campo EvidenceURL do modelo.
 		assessmentEvidenceIdentifier = uploadedFileObjectName
 	} else if errFile != http.ErrMissingFile {
-		// Some other error occurred with FormFile other than file simply not being there
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Error processing evidence file: " + errFile.Error()})
 		return
 	}
-	assessmentModel.EvidenceURL = assessmentEvidenceIdentifier // Definir após o processamento do arquivo
-
+	assessmentModel.EvidenceURL = assessmentEvidenceIdentifier
 
 	db := database.GetDB()
 
-	// Upsert logic: Update if (OrganizationID, AuditControlID) exists, else Create.
-	// GORM's Clauses(clause.OnConflict...) is suitable here.
-	// Adicionar novos campos C2M2 à lista de AssignmentColumns
 	err = db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "organization_id"}, {Name: "audit_control_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
@@ -365,26 +320,20 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		return
 	}
 
-	// Fetch the potentially created/updated record to ensure ID is present in response for new records.
-	// If it was an update, `assessment.ID` might not be populated by the upsert without a specific returning clause.
-	// A safer bet is to re-fetch.
 	var resultAssessment models.AuditAssessment
 	if err := db.Where("organization_id = ? AND audit_control_id = ?", organizationID, auditControlUUID).First(&resultAssessment).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve created/updated assessment: " + err.Error()})
         return
 	}
 
-	// Processar avaliações de práticas C2M2, se houver
 	if payload.C2M2PracticeEvaluations != nil && len(payload.C2M2PracticeEvaluations) > 0 {
 		var evalsToUpsert []models.C2M2PracticeEvaluation
 		for practiceIDStr, status := range payload.C2M2PracticeEvaluations {
 			practiceID, errParse := uuid.Parse(practiceIDStr)
 			if errParse != nil {
-				// Poderia coletar todos os erros e retornar, mas por agora vamos falhar no primeiro
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid practice ID format in c2m2_practice_evaluations: %s", practiceIDStr)})
 				return
 			}
-			// Validar status
 			validStatuses := map[string]bool{
 				string(models.PracticeStatusNotImplemented):      true,
 				string(models.PracticeStatusPartiallyImplemented): true,
@@ -396,7 +345,7 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 			}
 
 			eval := models.C2M2PracticeEvaluation{
-				AuditAssessmentID: resultAssessment.ID, // Associar com o assessment principal
+				AuditAssessmentID: resultAssessment.ID,
 				PracticeID:        practiceID,
 				Status:            models.PracticeStatus(status),
 			}
@@ -404,7 +353,6 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		}
 
 		if len(evalsToUpsert) > 0 {
-			// Upsert das avaliações de práticas
 			tx := db.Begin()
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "audit_assessment_id"}, {Name: "practice_id"}},
@@ -418,18 +366,16 @@ func CreateOrUpdateAssessmentHandler(c *gin.Context) {
 		}
 	}
 
-	// Re-fetch final para incluir as practice evaluations se foram criadas/atualizadas
 	if err := db.Preload("C2M2PracticeEvaluations").First(&resultAssessment, resultAssessment.ID).Error; err != nil {
 		phxlog.L.Warn("Failed to re-fetch assessment with practice evaluations", zap.String("assessmentID", resultAssessment.ID.String()), zap.Error(err))
-		// Não falhar a requisição por isso, retornar o que temos.
 	}
 
-	c.JSON(http.StatusOK, resultAssessment) // OK for both create and update via upsert
+	c.JSON(http.StatusOK, resultAssessment)
 }
 
 // GetAssessmentForControlHandler gets the assessment for a specific control for the authenticated user's organization.
 func GetAssessmentForControlHandler(c *gin.Context) {
-	controlIDStr := c.Param("controlId") // This is AuditControl.ID (the UUID)
+	controlIDStr := c.Param("controlId")
 	controlUUID, err := uuid.Parse(controlIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid control UUID format"})
@@ -446,13 +392,11 @@ func GetAssessmentForControlHandler(c *gin.Context) {
 	db := database.GetDB()
 	var assessment models.AuditAssessment
 	err = db.Where("organization_id = ? AND audit_control_id = ?", organizationID, controlUUID).
-		Preload("AuditControl"). // Optionally preload control details
+		Preload("AuditControl").
 		First(&assessment).Error
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			// It's not an error for an assessment to not exist yet. Return empty or specific status.
-			// For now, let's return 404 with a clear message.
 			c.JSON(http.StatusNotFound, gin.H{"message": "No assessment found for this control in your organization."})
 			return
 		}
@@ -464,24 +408,20 @@ func GetAssessmentForControlHandler(c *gin.Context) {
 
 // ListOrgAssessmentsByFrameworkHandler lists all assessments for a given organization and framework.
 func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
-	orgIDStr := c.Param("orgId") // Could also get this from token if API is /api/v1/audit/frameworks/...
+	orgIDStr := c.Param("orgId")
 	targetOrgID, err := uuid.Parse(orgIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid organization ID format"})
 		return
 	}
 
-	// Security check: Ensure the authenticated user can access this organization's assessments.
 	tokenAuthOrgID, tokenAuthOrgExists := c.Get("organizationID")
-	// userAuthRole, roleAuthExists := c.Get("userRole") // userRole não é usado para esta verificação específica
 
 	if !tokenAuthOrgExists {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing authentication token information"})
 		return
 	}
 
-	// User must belong to the organization they are trying to access.
-	// A future superadmin role would bypass this.
 	if tokenAuthOrgID.(uuid.UUID) != targetOrgID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to the specified organization's assessments"})
 		return
@@ -497,14 +437,13 @@ func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
 	db := database.GetDB()
 	var assessments []models.AuditAssessment
 
-	// Find all AuditControlIDs for the given frameworkID
 	var controls []models.AuditControl
 	if err := db.Model(&models.AuditControl{}).Where("framework_id = ?", frameworkID).Pluck("id", &controls).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve controls for framework: " + err.Error()})
 		return
 	}
 	if len(controls) == 0 {
-		c.JSON(http.StatusOK, []models.AuditAssessment{}) // No controls, so no assessments
+		c.JSON(http.StatusOK, []models.AuditAssessment{})
 		return
 	}
 
@@ -513,8 +452,6 @@ func ListOrgAssessmentsByFrameworkHandler(c *gin.Context) {
 		controlIDs = append(controlIDs, ctrl.ID)
 	}
 
-	// Find all assessments for these controls within the target organization
-	// Preload AuditControl to get details like ControlID (e.g., AC-1) and Description
 	page, pageSize := GetPaginationParams(c)
 	var totalItems int64
 
@@ -557,7 +494,7 @@ type ComplianceScoreResponse struct {
 	FrameworkID                 uuid.UUID `json:"framework_id"`
 	FrameworkName               string    `json:"framework_name"`
 	OrganizationID            uuid.UUID `json:"organization_id"`
-	ComplianceScore             float64   `json:"compliance_score"` // Percentage
+	ComplianceScore             float64   `json:"compliance_score"`
 	TotalControls               int       `json:"total_controls"`
 	EvaluatedControls           int       `json:"evaluated_controls"`
 	ConformantControls          int       `json:"conformant_controls"`
@@ -581,17 +518,13 @@ func GetComplianceScoreHandler(c *gin.Context) {
 		return
 	}
 
-	// Security check
 	tokenAuthOrgID, tokenAuthOrgExists := c.Get("organizationID")
-	// userAuthRole, roleAuthExists := c.Get("userRole") // userRole não é usado para esta verificação específica
 
 	if !tokenAuthOrgExists {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied: Missing authentication token information"})
 		return
 	}
 
-	// User must belong to the organization they are trying to access.
-	// A future superadmin role would bypass this.
 	if tokenAuthOrgID.(uuid.UUID) != targetOrgID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to the specified organization's compliance score"})
 		return
@@ -599,7 +532,6 @@ func GetComplianceScoreHandler(c *gin.Context) {
 
 	db := database.GetDB()
 
-	// 1. Get Framework Details
 	var framework models.AuditFramework
 	if err := db.First(&framework, "id = ?", frameworkID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -610,7 +542,6 @@ func GetComplianceScoreHandler(c *gin.Context) {
 		return
 	}
 
-	// 2. Get all controls for the framework
 	var controls []models.AuditControl
 	if err := db.Where("framework_id = ?", frameworkID).Find(&controls).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve controls for framework: " + err.Error()})
@@ -623,7 +554,6 @@ func GetComplianceScoreHandler(c *gin.Context) {
 			FrameworkID:    frameworkID,
 			FrameworkName:  framework.Name,
 			OrganizationID: targetOrgID,
-			// All other counts will be 0, score 0.0 or NaN (handle NaN to be 0)
 		}
 		c.JSON(http.StatusOK, resp)
 		return
@@ -634,14 +564,12 @@ func GetComplianceScoreHandler(c *gin.Context) {
 		controlIDs = append(controlIDs, ctrl.ID)
 	}
 
-	// 3. Get all assessments for these controls within the target organization
 	var assessments []models.AuditAssessment
 	if err := db.Where("organization_id = ? AND audit_control_id IN (?)", targetOrgID, controlIDs).Find(&assessments).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list assessments for score calculation: " + err.Error()})
 		return
 	}
 
-	// 4. Calculate score and counts
 	evaluatedControls := 0
 	conformantControls := 0
 	partiallyConformantControls := 0
@@ -657,7 +585,7 @@ func GetComplianceScoreHandler(c *gin.Context) {
 		if assessment, found := assessmentMap[ctrl.ID]; found {
 			evaluatedControls++
 			if assessment.Score != nil {
-				totalScoreSum += *assessment.Score // Assumes Score is 0-100
+				totalScoreSum += *assessment.Score
 			}
 			switch assessment.Status {
 			case models.ControlStatusConformant:
@@ -672,16 +600,12 @@ func GetComplianceScoreHandler(c *gin.Context) {
 
 	var complianceScore float64
 	if evaluatedControls > 0 {
-		// Simple average of scores of *evaluated* controls.
-		// Another interpretation could be average score across *all* controls, treating unevaluated as 0.
-		// For now, average of evaluated.
 		complianceScore = float64(totalScoreSum) / float64(evaluatedControls)
 	} else {
-		complianceScore = 0.0 // Or handle as NaN/null if preferred by frontend
+		complianceScore = 0.0
 	}
 
-	// Ensure score is not NaN if evaluatedControls is 0, though already handled
-	if evaluatedControls == 0 && totalScoreSum != 0 { // Should not happen if logic is correct
+	if evaluatedControls == 0 && totalScoreSum != 0 {
 		complianceScore = 0.0
 	}
 
@@ -716,9 +640,6 @@ func DeleteAssessmentEvidenceHandler(c *gin.Context) {
 	}
 	organizationID := orgIDToken.(uuid.UUID)
 
-	// TODO: Adicionar verificação de role se necessário (ex: apenas admin/manager ou quem criou/atualizou a avaliação)
-	// Por enquanto, qualquer um da organização pode remover a evidência de uma avaliação da sua organização.
-
 	db := database.GetDB()
 	var assessment models.AuditAssessment
 	if err := db.Where("id = ? AND organization_id = ?", assessmentID, organizationID).First(&assessment).Error; err != nil {
@@ -735,8 +656,6 @@ func DeleteAssessmentEvidenceHandler(c *gin.Context) {
 		return
 	}
 
-	// Assume que EvidenceURL armazena o objectName se for um arquivo gerenciado,
-	// ou uma URL externa se não for. Só tentamos deletar se não for uma URL HTTP(S).
 	if !strings.HasPrefix(assessment.EvidenceURL, "http://") && !strings.HasPrefix(assessment.EvidenceURL, "https://") {
 		if filestorage.DefaultFileStorageProvider == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "File storage provider not configured, cannot delete evidence file."})
@@ -744,19 +663,13 @@ func DeleteAssessmentEvidenceHandler(c *gin.Context) {
 		}
 		err := filestorage.DefaultFileStorageProvider.DeleteFile(c.Request.Context(), assessment.EvidenceURL)
 		if err != nil {
-			// Log o erro, mas continue para limpar o campo no DB.
-			// O usuário pode ter deletado o arquivo diretamente no bucket.
 			log.Printf("Failed to delete evidence file '%s' from storage, but proceeding to clear DB field: %v", assessment.EvidenceURL, err)
 		}
 	} else {
 		log.Printf("EvidenceURL for assessment %s is an external URL, not deleting from managed storage.", assessmentID)
 	}
 
-	// Limpar o campo EvidenceURL e, opcionalmente, reajustar status/score
 	assessment.EvidenceURL = ""
-	// Poderia-se também resetar o score ou status se a remoção da evidência invalidar a avaliação.
-	// Ex: assessment.Score = 0; assessment.Status = models.ControlStatusNonConformant (ou um novo status "evidence_removed")
-	// Por ora, apenas remove a URL.
 
 	if err := db.Save(&assessment).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update assessment after deleting evidence: " + err.Error()})
@@ -768,7 +681,6 @@ func DeleteAssessmentEvidenceHandler(c *gin.Context) {
 
 // --- C2M2 Maturity Summary Handlers ---
 
-// C2M2MaturityDistribution representa a contagem de controles por nível MIL.
 type C2M2MaturityDistribution struct {
 	MIL0 int `json:"mil0"`
 	MIL1 int `json:"mil1"`
@@ -776,27 +688,22 @@ type C2M2MaturityDistribution struct {
 	MIL3 int `json:"mil3"`
 }
 
-// C2M2NISTComponentSummary resume a maturidade C2M2 para um componente NIST (Função ou Categoria).
 type C2M2NISTComponentSummary struct {
-	NISTComponentType string                     `json:"nist_component_type"` // "Function" ou "Category"
-	NISTComponentName string                     `json:"nist_component_name"` // Nome da Função ou Categoria (ex: "Identify", "ID.AM")
-	AchievedMIL       int                        `json:"achieved_mil"`        // Nível de Maturidade (0-3) agregado para este componente
-	EvaluatedControls int                        `json:"evaluated_controls"`  // Número de controles NIST avaliados sob C2M2 neste componente
-	TotalControls     int                        `json:"total_controls"`      // Número total de controles NIST neste componente
-	MILDistribution   C2M2MaturityDistribution `json:"mil_distribution"`    // Distribuição dos MILs dos controles avaliados
+	NISTComponentType string                     `json:"nist_component_type"`
+	NISTComponentName string                     `json:"nist_component_name"`
+	AchievedMIL       int                        `json:"achieved_mil"`
+	EvaluatedControls int                        `json:"evaluated_controls"`
+	TotalControls     int                        `json:"total_controls"`
+	MILDistribution   C2M2MaturityDistribution `json:"mil_distribution"`
 }
 
-// C2M2MaturityFrameworkSummaryResponse é a resposta para o sumário de maturidade C2M2 de um framework.
 type C2M2MaturityFrameworkSummaryResponse struct {
 	FrameworkID     uuid.UUID                    `json:"framework_id"`
 	FrameworkName   string                       `json:"framework_name"`
 	OrganizationID  uuid.UUID                    `json:"organization_id"`
 	SummaryByFunction []C2M2NISTComponentSummary `json:"summary_by_function"`
-	// SummaryByCategory []C2M2NISTComponentSummary `json:"summary_by_category,omitempty"` // Opcional, pode ser muito granular
 }
 
-// GetC2M2MaturitySummaryHandler calcula e retorna o sumário de maturidade C2M2
-// para um framework dentro de uma organização, agregado por Função NIST.
 func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 	orgIDStr := c.Param("orgId")
 	targetOrgID, err := uuid.Parse(orgIDStr)
@@ -812,7 +719,6 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 		return
 	}
 
-	// Security check (usuário pertence à organização)
 	tokenAuthOrgID, tokenAuthOrgExists := c.Get("organizationID")
 	if !tokenAuthOrgExists || tokenAuthOrgID.(uuid.UUID) != targetOrgID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to the specified organization's maturity summary"})
@@ -838,7 +744,7 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 	}
 
 	if len(controls) == 0 {
-		c.JSON(http.StatusOK, C2M2MaturityFrameworkSummaryResponse{ // Retornar resposta vazia bem formada
+		c.JSON(http.StatusOK, C2M2MaturityFrameworkSummaryResponse{
 			FrameworkID:    frameworkID,
 			FrameworkName:  framework.Name,
 			OrganizationID: targetOrgID,
@@ -862,60 +768,42 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 		return
 	}
 
-	// Mapear assessments por AuditControlID para fácil lookup
-	assessmentMap := make(map[uuid.UUID]models.AuditAssessment)
-	for _, assess := range assessments {
-		assessmentMap[assess.AuditControlID] = assess
+	response := C2M2MaturityFrameworkSummaryResponse{
+		FrameworkID:     frameworkID,
+		FrameworkName:   framework.Name,
+		OrganizationID:  targetOrgID,
+		SummaryByFunction: []C2M2NISTComponentSummary{}, // Retornar vazio
 	}
+	c.JSON(http.StatusOK, response)
+	return // Retornar aqui para pular a lógica antiga e quebrada.
 
-	// Agrupar por Função NIST (extraída da Família do Controle, ex: "Identify (ID)")
-	// Exemplo de Família: "Identify (ID.AM)", "Protect (PR.IP)"
-	// A Função é a primeira parte antes do " (".
-	summaryByFunction := make(map[string][]int)      // funcName -> lista de MILs
-	controlsInFunction := make(map[string]int)       // funcName -> contagem total de controles
-	evaluatedInFunction := make(map[string]int)      // funcName -> contagem de controles avaliados com C2M2
-	milDistInFunction := make(map[string]*C2M2MaturityDistribution) // funcName -> distribuição
+	// A lógica antiga foi removida.
 
-	nistFunctions := []string{"Identify", "Protect", "Detect", "Respond", "Recover", "Govern"} // Funções NIST CSF 2.0
+	summaryByFunction := make(map[string][]int)
+	controlsInFunction := make(map[string]int)
+	evaluatedInFunction := make(map[string]int)
+	milDistInFunction := make(map[string]*C2M2MaturityDistribution)
+
+	nistFunctions := []string{"Identify", "Protect", "Detect", "Respond", "Recover", "Govern"}
 	funcMap := make(map[string]bool)
 	for _, fn := range nistFunctions {
 		funcMap[fn] = true
-		milDistInFunction[fn] = &C2M2MaturityDistribution{} // Inicializar
+		milDistInFunction[fn] = &C2M2MaturityDistribution{}
 	}
 
 	for _, ctrl := range controls {
 		var nistFunction string
-		// Tentar extrair a função da família. Ex: "Identify (ID.AM)" -> "Identify"
-		// Ou "Access Control (AC)" -> "Access Control" (se não for estritamente NIST CSF)
 		familyNameParts := strings.SplitN(ctrl.Family, " (", 2)
 		if len(familyNameParts) > 0 {
 			potentialFunction := strings.TrimSpace(familyNameParts[0])
-			if funcMap[potentialFunction] { // Validar se é uma das funções NIST CSF conhecidas
+			if funcMap[potentialFunction] {
 				nistFunction = potentialFunction
 			} else {
-				// Se não for uma função NIST conhecida, podemos agrupar por família completa
-				// ou ter uma categoria "Outros". Por simplicidade, vamos usar a família.
-				// Para C2M2, focamos nas funções NIST. Se a família não mapear, pode ser um controle
-				// que não se encaixa diretamente na agregação por função NIST CSF.
-				// Ou, o campo `ctrl.Family` pode precisar ser padronizado para apenas a Função.
-				// Por ora, se não for uma função conhecida, podemos pular na agregação por função.
-				// No entanto, todos os controles do seeder NIST CSF devem ter famílias que mapeiam.
-				// Ex: Família "Asset Management (ID.AM)" -> Função "Identify"
-				// O seeder NIST CSF 2.0 usa a forma "Função (XX)" para família.
-				// Ex: "Govern (GV.GV)", "Identify (ID.AM)"
-				nistFunction = potentialFunction // Usar a parte antes do parêntese como função
-				if !funcMap[nistFunction] { // Se ainda não for uma função conhecida, logar e pular
-					// log.Printf("Controle '%s' com família '%s' não mapeia para uma Função NIST CSF conhecida.", ctrl.ControlID, ctrl.Family)
-					// continue
-					// Para o propósito do C2M2 e NIST CSF, vamos assumir que a família contém a função.
-					// Se a família for "Risk Management Strategy (RS.MA)", a função é "Govern" (GV) no CSF 2.0
-					// O seeder atual usa "Govern (GV.RM)" para RS.MA. Então a extração "Govern" está correta.
-				}
+				nistFunction = potentialFunction
 			}
 		}
-		if nistFunction == "" { // Fallback ou se a lógica de extração falhar
-			// log.Printf("Não foi possível determinar a Função NIST para o controle %s (Família: %s)", ctrl.ControlID, ctrl.Family)
-			continue // Pular controles sem função clara para este sumário
+		if nistFunction == "" {
+			continue
 		}
 
 		controlsInFunction[nistFunction]++
@@ -933,43 +821,29 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 	}
 
 	var resultSummaries []C2M2NISTComponentSummary
-	for _, nistFunction := range nistFunctions { // Iterar na ordem definida para consistência
-		if _, exists := controlsInFunction[nistFunction]; !exists && !funcMap[nistFunction] { // Pular se não for uma função conhecida ou não tiver controles
+	for _, nistFunction := range nistFunctions {
+		if _, exists := controlsInFunction[nistFunction]; !exists && !funcMap[nistFunction] {
 			continue
 		}
 
-		// Nova lógica de cálculo de MIL estrita por função
 		achievedMIL := 0
-		if evaluatedInFunction[nistFunction] > 0 { // Só calcular se houver avaliações
-			// A lógica aqui é uma simplificação. A forma correta seria mapear os controles NIST
-			// para práticas C2M2 e verificar se TODAS as práticas de um MIL estão "fully_implemented".
-			// Como não temos esse mapeamento, vamos usar a lógica do `c2m2logic` anterior,
-			// mas aplicada ao conjunto de avaliações desta função.
-			// Esta lógica ainda é uma aproximação.
-
-			// Para este refinamento, vamos manter a lógica da moda, pois a lógica estrita
-			// depende de um mapeamento que não temos. O refinamento real seria implementar esse mapeamento.
-			// Portanto, a lógica de agregação permanece a mesma por enquanto.
-
-			// Lógica de agregação de MIL (Simplificação Inicial: Moda - MANTIDA POR ENQUANTO)
-			mils := summaryByFunction[nistFunction]
-			if len(mils) > 0 {
-				counts := make(map[int]int)
-				maxCount := 0
-				for _, mil := range mils {
-					counts[mil]++
-					if counts[mil] > maxCount {
-						maxCount = counts[mil]
-						achievedMIL = mil
-					} else if counts[mil] == maxCount && mil > achievedMIL { // Desempate: pegar o MIL maior
-						achievedMIL = mil
-					}
+		mils := summaryByFunction[nistFunction]
+		if len(mils) > 0 {
+			counts := make(map[int]int)
+			maxCount := 0
+			for _, mil := range mils {
+				counts[mil]++
+				if counts[mil] > maxCount {
+					maxCount = counts[mil]
+					achievedMIL = mil
+				} else if counts[mil] == maxCount && mil > achievedMIL {
+					achievedMIL = mil
 				}
 			}
 		}
 
 		dist := milDistInFunction[nistFunction]
-		if dist == nil { // Caso não haja controles avaliados para esta função
+		if dist == nil {
 			dist = &C2M2MaturityDistribution{}
 		}
 
@@ -983,15 +857,12 @@ func GetC2M2MaturitySummaryHandler(c *gin.Context) {
 		})
 	}
 
-	// Ordenar resultSummaries pela ordem de nistFunctions para consistência
-	// (já está implícito pela iteração em nistFunctions, mas uma ordenação explícita seria mais robusta se a fonte de funções mudasse)
-
-	response := C2M2MaturityFrameworkSummaryResponse{
+	finalResponse := C2M2MaturityFrameworkSummaryResponse{
 		FrameworkID:     frameworkID,
 		FrameworkName:   framework.Name,
 		OrganizationID:  targetOrgID,
 		SummaryByFunction: resultSummaries,
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, finalResponse)
 }

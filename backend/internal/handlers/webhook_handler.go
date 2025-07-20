@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/models"
@@ -79,13 +76,6 @@ func sendWebhook(webhook models.WebhookConfiguration, payload []byte) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "PhoenixGRC-Webhook/1.0")
 
-	if webhook.SecretToken != "" {
-		mac := hmac.New(sha256.New, []byte(webhook.SecretToken))
-		mac.Write(payload)
-		signature := fmt.Sprintf("sha256=%x", mac.Sum(nil))
-		req.Header.Set("X-Phoenix-Signature-256", signature)
-	}
-
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -103,11 +93,10 @@ func sendWebhook(webhook models.WebhookConfiguration, payload []byte) {
 
 // WebhookPayload defines the structure for creating or updating a WebhookConfiguration.
 type WebhookPayload struct {
-	Name        string   `json:"name" binding:"required,min=3,max=100"`
-	URL         string   `json:"url" binding:"required,url,max=2048"`
-	EventTypes  []string `json:"event_types" binding:"required,dive,oneof=risk_created risk_status_changed"` // `dive` valida cada item do slice
-	IsActive    *bool    `json:"is_active"`    // Pointer to distinguish false from not provided
-	SecretToken *string  `json:"secret_token"` // Opcional
+	Name       string   `json:"name" binding:"required,min=3,max=100"`
+	URL        string   `json:"url" binding:"required,url,max=2048"`
+	EventTypes []string `json:"event_types" binding:"required,dive,oneof=risk_created risk_status_changed"` // `dive` valida cada item do slice
+	IsActive   *bool    `json:"is_active"`    // Pointer to distinguish false from not provided
 }
 
 // WebhookResponseItem é o DTO para respostas de webhook, incluindo EventTypes como slice.
@@ -173,9 +162,6 @@ func CreateWebhookHandler(c *gin.Context) {
 		URL:            payload.URL,
 		EventTypes:     eventTypesToString(payload.EventTypes),
 		IsActive:       isActive,
-	}
-	if payload.SecretToken != nil { // Adicionar SecretToken se fornecido
-		webhookConfig.SecretToken = *payload.SecretToken
 	}
 
 	db := database.GetDB()
@@ -329,10 +315,6 @@ func UpdateWebhookHandler(c *gin.Context) {
 	if payload.IsActive != nil {
 		webhook.IsActive = *payload.IsActive
 	}
-	if payload.SecretToken != nil { // Permitir atualização do SecretToken
-		webhook.SecretToken = *payload.SecretToken
-	}
-
 
 	if err := db.Save(&webhook).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update webhook configuration: " + err.Error()})

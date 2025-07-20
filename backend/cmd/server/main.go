@@ -11,7 +11,6 @@ import (
 	"phoenixgrc/backend/internal/oauth2auth"
 	"phoenixgrc/backend/internal/router"
 	"phoenixgrc/backend/internal/samlauth"
-	"phoenixgrc/backend/pkg/config"
 	phxlog "phoenixgrc/backend/pkg/log"
 
 	"crypto/rand"
@@ -128,9 +127,9 @@ func initializeServices() error {
 }
 
 func main() {
-	// Carrega a configuração de variáveis de ambiente de arquivos .env
-	// Omitir erro pois o arquivo pode não existir em produção (onde as vars são injetadas)
-	_ = config.LoadConfig(".")
+	// A configuração agora é carregada automaticamente pelo `init()` no pacote config.
+	// A chamada explícita não é mais necessária aqui.
+	// _ = config.LoadConfig()
 
 	// Inicializa todos os serviços. A aplicação encerra se um serviço crítico falhar.
 	if err := initializeServices(); err != nil {

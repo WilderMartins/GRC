@@ -344,7 +344,13 @@ func GithubCallbackHandler(c *gin.Context) {
 	}
 
 	// Generate Phoenix GRC JWT token
-	jwtToken, jwtErr := auth.GenerateToken(&user, userOrgID)
+	var orgIDForToken uuid.UUID
+	if userOrgID.Valid {
+		orgIDForToken = userOrgID.UUID
+	} else {
+		orgIDForToken = uuid.Nil // Explicitly pass uuid.Nil if not valid
+	}
+	jwtToken, jwtErr := auth.GenerateToken(&user, orgIDForToken)
 	if jwtErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate session token: " + jwtErr.Error()})
 		return

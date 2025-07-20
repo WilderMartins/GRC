@@ -40,7 +40,7 @@ func TestGenerateToken(t *testing.T) {
 		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 	}
 
-	tokenString, err := GenerateToken(user, user.OrganizationID)
+	tokenString, err := GenerateToken(user, user.OrganizationID.UUID)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, tokenString)
 
@@ -51,7 +51,7 @@ func TestGenerateToken(t *testing.T) {
 	assert.Equal(t, userID, claims.UserID)
 	assert.Equal(t, user.Email, claims.Email)
 	assert.Equal(t, user.Role, claims.Role)
-	assert.Equal(t, user.OrganizationID, claims.OrganizationID)
+	assert.Equal(t, user.OrganizationID.UUID, claims.OrganizationID)
 	assert.Equal(t, "phoenix-grc", claims.Issuer)
 	assert.WithinDuration(t, time.Now().Add(1*time.Hour), claims.ExpiresAt.Time, 5*time.Second) // Allow 5s clock skew
 }
@@ -60,12 +60,13 @@ func TestValidateToken_Valid(t *testing.T) {
 	userID := uuid.New()
 	orgID := uuid.New()
 	user := &models.User{
+
 		ID:             userID,
 		Email:          "valid@example.com",
 		Role:           models.RoleAdmin,
 		OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 	}
-	tokenString, _ := GenerateToken(user, user.OrganizationID)
+	tokenString, _ := GenerateToken(user, user.OrganizationID.UUID)
 
 	claims, err := ValidateToken(tokenString)
 	assert.NoError(t, err)
@@ -109,7 +110,7 @@ func TestValidateToken_Expired(t *testing.T) {
 	orgID := uuid.New()
 	user := &models.User{ID: userID, Email: "expired@example.com", Role: models.RoleUser, OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true}}
 
-	tokenString, err := GenerateToken(user, user.OrganizationID)
+	tokenString, err := GenerateToken(user, user.OrganizationID.UUID)
 	assert.NoError(t, err) // Token generation itself should be fine
 
 	// Wait a tiny moment to ensure it's definitely past the "expiry" if clock skew is an issue

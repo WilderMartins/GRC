@@ -81,7 +81,6 @@ func UpdateOrganizationBrandingHandler(c *gin.Context) {
 	}
 
 	// Lidar com upload de logo
-	var uploadedLogoURL string
 	file, header, errFile := c.Request.FormFile("logo_file")
 	if errFile == nil { // Arquivo de logo fornecido
 		defer file.Close()
