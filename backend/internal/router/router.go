@@ -8,6 +8,7 @@ import (
 	"phoenixgrc/backend/internal/database"
 	"phoenixgrc/backend/internal/handlers"
 	phxmiddleware "phoenixgrc/backend/internal/middleware"
+	"phoenixgrc/backend/internal/models"
 	"phoenixgrc/backend/internal/oauth2auth"
 	"phoenixgrc/backend/internal/samlauth"
 	phxlog "phoenixgrc/backend/pkg/log"
@@ -237,6 +238,7 @@ func setupV1Routes(r *gin.Engine) {
 
 		// System Admin Routes
 		adminRoutes := apiV1.Group("/admin")
+		adminRoutes.Use(auth.RoleAuthMiddleware(models.RoleSystemAdmin))
 		{
 			settingsRoutes := adminRoutes.Group("/settings")
 			{

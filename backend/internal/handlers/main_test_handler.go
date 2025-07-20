@@ -6,6 +6,7 @@ import (
 	"os"
 	"phoenixgrc/backend/internal/auth"
 	"phoenixgrc/backend/internal/database" // Import for database.DB
+	"phoenixgrc/backend/internal/models"
 	"regexp" // For sqlmock query matching
 	"testing"
 	"time"
