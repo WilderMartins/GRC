@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.4'
 
 networks:
   grc_network:
@@ -13,7 +13,8 @@ services:
       dockerfile: Dockerfile.backend
     container_name: phoenix_grc_backend
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "${SERVER_PORT:-8080}:8080" # Map host port to container port (default 8080)
     environment:
@@ -26,13 +27,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-phoenix_grc_dev}
       POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
       # For TimeZone=UTC in DSN
-    volumes:
-      # For development, you might want to mount your local code into the container
-      # to enable hot reloading if you use a tool like Air or realize.
-      # However, for a simple compiled Go binary, this is less critical unless
-      # you're rebuilding and restarting the container frequently.
-      # - "./backend:/app/backend" # Example for live reload tools
-      # - "./backend_artifacts:/app/artifacts" # Removed as it seems unused
+    volumes: []
     restart: unless-stopped
 
   db:
@@ -54,7 +49,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
     restart: unless-stopped
 
   nginx:
