@@ -13,8 +13,7 @@ services:
       dockerfile: Dockerfile.backend
     container_name: phoenix_grc_backend
     depends_on:
-      db:
-        condition: service_healthy
+      - db
     ports:
       - "${SERVER_PORT:-8080}:8080" # Map host port to container port (default 8080)
     environment:
