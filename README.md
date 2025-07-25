@@ -1,69 +1,57 @@
-# Phoenix GRC - Instalação Rápida
+# Phoenix GRC - Gestão de Governança, Risco e Conformidade
 
-Bem-vindo ao Phoenix GRC! Este guia mostra como instalar a plataforma em poucos minutos, de forma simples e visual.
+Bem-vindo ao Phoenix GRC! Uma plataforma de código aberto para ajudar equipes a gerenciar riscos de TI, responder a vulnerabilidades e alcançar a conformidade de forma eficiente.
 
-## O que é o Phoenix GRC?
+[![Backend CI](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/backend-ci.yml)
+[![Frontend CI](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/frontend-ci.yml/badge.svg)](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/frontend-ci.yml)
 
-O Phoenix GRC é uma plataforma de Gestão de Governança, Risco e Conformidade de TI. Ele ajuda equipes a gerenciar riscos, responder a vulnerabilidades e demonstrar conformidade de forma eficiente.
+## Instalação para Produção (Automatizada com Docker)
 
----
+Este processo foi desenhado para ser robusto e simples. Você não precisa instalar `Node.js` ou `Go`.
 
-## Instalação Super Simples
+### Pré-requisitos
 
-O processo de instalação foi desenhado para ser o mais fácil possível.
+1.  **Git:** Para baixar o código-fonte.
+2.  **Docker:** Para construir e rodar a aplicação. O Docker deve ter recursos suficientes (recomendado: 4+ CPUs, 8GB+ RAM, 20GB+ de espaço em disco).
 
-### Passo 1: Prepare o Ambiente (5 minutos)
+Se precisar de ajuda, siga nosso **[Guia de Preparação do Ambiente](./PREPARACAO_AMBIENTE.md)**.
 
-Antes de tudo, você precisa de duas ferramentas no seu computador: **Git** e **Docker**.
+### Passo a Passo
 
-Se você não os tiver, não se preocupe! Nosso guia abaixo ensina a instalar ambos com passo a passo e **imagens ilustrativas**.
-
-➡️ **[Guia de Preparação do Ambiente](./PREPARACAO_AMBIENTE.md)**
-
-### Passo 2: Baixe e Inicie o Projeto (2 minutos)
-
-Com o Git e o Docker prontos, abra seu terminal (ou Prompt de Comando/PowerShell) e siga os comandos.
-
-1.  **Baixe (clone) o projeto:**
+1.  **Clone o projeto:**
     ```bash
     git clone https://github.com/SEU_USUARIO/phoenix-grc.git
-    ```
-    *Lembre-se de usar a URL correta do seu repositório.*
-
-2.  **Entre na pasta do projeto:**
-    ```bash
     cd phoenix-grc
     ```
 
-3.  **Crie o arquivo de configuração (apenas copie, não precisa editar):**
+2.  **Configure as variáveis de ambiente:**
+    - Copie o arquivo de exemplo:
+      ```bash
+      cp .env.example .env
+      ```
+    - **IMPORTANTE PARA PRODUÇÃO:** Abra o arquivo `.env` e altere a senha padrão do banco de dados (`POSTGRES_PASSWORD`) para uma senha forte e segura.
+
+3.  **Inicie a Aplicação:**
+    > Certifique-se de que o Docker Desktop (ou Docker Engine) está em execução.
     ```bash
-    cp .env.example .env
+    docker compose up -d --build
     ```
+    Este comando irá construir, de forma otimizada, todas as partes da aplicação e iniciá-las. Pode demorar alguns minutos na primeira vez.
 
-4.  **Inicie a Aplicação:**
-    > **Importante:** Certifique-se de que o aplicativo **Docker Desktop** está aberto e em execução no seu computador antes de rodar o comando abaixo.
-    ```bash
-    docker-compose up -d
-    ```
-    Este comando irá construir e iniciar a plataforma. Pode demorar alguns minutos na primeira vez.
+4.  **Acesse o Wizard de Instalação:**
+    - Abra seu navegador e acesse: **http://localhost**
+    - Siga os passos para criar sua organização e a conta de administrador.
 
-### Passo 3: Acesse o Wizard de Instalação Visual
+### Verificando a Instalação
 
-Pronto! A plataforma já está rodando. Agora, abra seu navegador de internet e acesse:
-
-➡️ **http://localhost**
-
-Você será recebido pelo nosso **Wizard de Instalação**, que o guiará visualmente pelo resto do processo:
-
-1.  **Bem-vindo:** Uma tela de introdução.
-2.  **Verificação do Sistema:** O wizard confirmará que tudo está funcionando (como a conexão com o banco de dados que o Docker criou para você).
-3.  **Criação da Conta de Administrador:** Você definirá o nome da sua organização e criará o primeiro usuário administrador.
-4.  **Conclusão:** Tudo pronto! Você será direcionado para a tela de login.
-
-Após concluir o wizard, faça login com as credenciais que você acabou de criar e comece a usar o Phoenix GRC!
+Para garantir que o build ocorreu corretamente, você pode usar nosso script de verificação:
+```bash
+./build-verify.sh
+```
+Este script executa um build limpo (sem cache) e irá falhar se houver qualquer problema no processo. Para mais detalhes sobre solução de problemas, veja o **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)**.
 
 ---
 
 ## Para Desenvolvedores
 
-Se você é um desenvolvedor, toda a documentação técnica (detalhes da API, estrutura do projeto, etc.) está no nosso **[Guia do Desenvolvedor](./DEVELOPER_GUIDE.md)**.
+Se você deseja contribuir com o projeto, nosso **[Guia do Desenvolvedor](./DEVELOPER_GUIDE.md)** contém informações detalhadas sobre a arquitetura, como rodar o frontend em modo de desenvolvimento (hot-reload) e os padrões de código.

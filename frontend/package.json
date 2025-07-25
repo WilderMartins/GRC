@@ -26,7 +26,10 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
     "autoprefixer": "latest",
+    "eslint": "^8.57.0",
     "postcss": "latest",
     "typescript": "latest"
   }
