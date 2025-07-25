@@ -26,6 +26,11 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
       - POSTGRES_DB=${POSTGRES_DB:-phoenix_grc_prod}
       - POSTGRES_SSLMODE=${POSTGRES_SSLMODE:-disable}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   # Serviço do Banco de Dados (PostgreSQL)
@@ -41,8 +46,6 @@ services:
       - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data/pgdata
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-phoenix_grc_prod}"]
       interval: 10s

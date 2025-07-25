@@ -1,67 +1,56 @@
-# Phoenix GRC - Instalação Rápida
+# Phoenix GRC - Gestão de Governança, Risco e Conformidade
 
-Bem-vindo ao Phoenix GRC! Este guia mostra como instalar a plataforma de forma simples e rápida, usando Docker.
+Bem-vindo ao Phoenix GRC! Uma plataforma de código aberto para ajudar equipes a gerenciar riscos de TI, responder a vulnerabilidades e alcançar a conformidade de forma eficiente.
 
-## O que é o Phoenix GRC?
+[![Backend CI](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/backend-ci.yml)
+[![Frontend CI](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/frontend-ci.yml/badge.svg)](https://github.com/SEU_USUARIO/phoenix-grc/actions/workflows/frontend-ci.yml)
 
-O Phoenix GRC é uma plataforma de Gestão de Governança, Risco e Conformidade de TI. Ele ajuda equipes a gerenciar riscos, responder a vulnerabilidades e demonstrar conformidade de forma eficiente.
+## Instalação para Produção (Automatizada com Docker)
 
----
-
-## Processo de Instalação Automatizado
-
-O processo de instalação foi totalmente automatizado com Docker. Você não precisa instalar `Node.js` ou `Go` em sua máquina.
+Este processo foi desenhado para ser robusto e simples. Você não precisa instalar `Node.js` ou `Go`.
 
 ### Pré-requisitos
 
-Você só precisa de duas ferramentas instaladas e em execução:
-
 1.  **Git:** Para baixar o código-fonte.
-2.  **Docker:** Para construir e rodar a aplicação.
+2.  **Docker:** Para construir e rodar a aplicação. O Docker deve ter recursos suficientes (recomendado: 4+ CPUs, 8GB+ RAM, 20GB+ de espaço em disco).
 
-Se você não os tiver, siga nosso **[Guia de Preparação do Ambiente](./PREPARACAO_AMBIENTE.md)**.
+Se precisar de ajuda, siga nosso **[Guia de Preparação do Ambiente](./PREPARACAO_AMBIENTE.md)**.
 
-### Passo a Passo (2 minutos)
+### Passo a Passo
 
-Com o Git e o Docker prontos, abra seu terminal (ou Prompt de Comando/PowerShell) e siga os comandos abaixo.
-
-1.  **Baixe (clone) o projeto do repositório:**
+1.  **Clone o projeto:**
     ```bash
     git clone https://github.com/SEU_USUARIO/phoenix-grc.git
-    ```
-    *Lembre-se de usar a URL correta do seu repositório.*
-
-2.  **Entre na pasta do projeto:**
-    ```bash
     cd phoenix-grc
     ```
 
-3.  **Crie o arquivo de configuração (apenas copie, não precisa editar):**
+2.  **Configure as variáveis de ambiente:**
+    - Copie o arquivo de exemplo:
+      ```bash
+      cp .env.example .env
+      ```
+    - **IMPORTANTE PARA PRODUÇÃO:** Abra o arquivo `.env` e altere a senha padrão do banco de dados (`POSTGRES_PASSWORD`) para uma senha forte e segura.
+
+3.  **Inicie a Aplicação:**
+    > Certifique-se de que o Docker Desktop (ou Docker Engine) está em execução.
     ```bash
-    cp .env.example .env
+    docker compose up -d --build
     ```
+    Este comando irá construir, de forma otimizada, todas as partes da aplicação e iniciá-las. Pode demorar alguns minutos na primeira vez.
 
-4.  **Inicie a Aplicação com Docker Compose:**
-    > **Importante:** Certifique-se de que o aplicativo **Docker Desktop** está aberto e em execução antes de rodar o comando.
-    ```bash
-    docker-compose up -d --build
-    ```
-    Este único comando irá:
-    - Construir a imagem do backend (Go).
-    - Construir a imagem do frontend (Next.js), incluindo a instalação de dependências `npm` e o `build`.
-    - Iniciar todos os serviços (backend, frontend, banco de dados e Nginx).
-    - O processo pode demorar alguns minutos na primeira vez.
+4.  **Acesse o Wizard de Instalação:**
+    - Abra seu navegador e acesse: **http://localhost**
+    - Siga os passos para criar sua organização e a conta de administrador.
 
-### Acesse o Wizard de Instalação
+### Verificando a Instalação
 
-Após a conclusão do comando, a plataforma estará rodando. Abra seu navegador e acesse:
-
-➡️ **http://localhost**
-
-Você será recebido pelo nosso **Wizard de Instalação Visual**, que o guiará na configuração inicial da sua organização e da conta de administrador.
+Para garantir que o build ocorreu corretamente, você pode usar nosso script de verificação:
+```bash
+./build-verify.sh
+```
+Este script executa um build limpo (sem cache) e irá falhar se houver qualquer problema no processo. Para mais detalhes sobre solução de problemas, veja o **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)**.
 
 ---
 
 ## Para Desenvolvedores
-
-Se você é um desenvolvedor e deseja entender a arquitetura, as tecnologias utilizadas e como contribuir, consulte nosso **[Guia do Desenvolvedor](./DEVELOPER_GUIDE.md)**.
+Se você deseja contribuir com o projeto, nosso **[Guia do Desenvolvedor](./DEVELOPER_GUIDE.md)** contém informações detalhadas sobre a arquitetura, como rodar o frontend em modo de desenvolvimento (hot-reload) e os padrões de código.
