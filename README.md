@@ -1,6 +1,6 @@
 # Phoenix GRC - Instalação Rápida
 
-Bem-vindo ao Phoenix GRC! Este guia mostra como instalar a plataforma em poucos minutos, de forma simples e visual.
+Bem-vindo ao Phoenix GRC! Este guia mostra como instalar a plataforma de forma simples e rápida, usando Docker.
 
 ## O que é o Phoenix GRC?
 
@@ -8,23 +8,24 @@ O Phoenix GRC é uma plataforma de Gestão de Governança, Risco e Conformidade 
 
 ---
 
-## Instalação Super Simples
+## Processo de Instalação Automatizado
 
-O processo de instalação foi desenhado para ser o mais fácil possível.
+O processo de instalação foi totalmente automatizado com Docker. Você não precisa instalar `Node.js` ou `Go` em sua máquina.
 
-### Passo 1: Prepare o Ambiente (5 minutos)
+### Pré-requisitos
 
-Antes de tudo, você precisa de duas ferramentas no seu computador: **Git** e **Docker**.
+Você só precisa de duas ferramentas instaladas e em execução:
 
-Se você não os tiver, não se preocupe! Nosso guia abaixo ensina a instalar ambos com passo a passo e **imagens ilustrativas**.
+1.  **Git:** Para baixar o código-fonte.
+2.  **Docker:** Para construir e rodar a aplicação.
 
-➡️ **[Guia de Preparação do Ambiente](./PREPARACAO_AMBIENTE.md)**
+Se você não os tiver, siga nosso **[Guia de Preparação do Ambiente](./PREPARACAO_AMBIENTE.md)**.
 
-### Passo 2: Baixe e Inicie o Projeto (2 minutos)
+### Passo a Passo (2 minutos)
 
-Com o Git e o Docker prontos, abra seu terminal (ou Prompt de Comando/PowerShell) e siga os comandos.
+Com o Git e o Docker prontos, abra seu terminal (ou Prompt de Comando/PowerShell) e siga os comandos abaixo.
 
-1.  **Baixe (clone) o projeto:**
+1.  **Baixe (clone) o projeto do repositório:**
     ```bash
     git clone https://github.com/SEU_USUARIO/phoenix-grc.git
     ```
@@ -40,30 +41,27 @@ Com o Git e o Docker prontos, abra seu terminal (ou Prompt de Comando/PowerShell
     cp .env.example .env
     ```
 
-4.  **Inicie a Aplicação:**
-    > **Importante:** Certifique-se de que o aplicativo **Docker Desktop** está aberto e em execução no seu computador antes de rodar o comando abaixo.
+4.  **Inicie a Aplicação com Docker Compose:**
+    > **Importante:** Certifique-se de que o aplicativo **Docker Desktop** está aberto e em execução antes de rodar o comando.
     ```bash
-    docker-compose up -d
+    docker-compose up -d --build
     ```
-    Este comando irá construir e iniciar a plataforma. Pode demorar alguns minutos na primeira vez.
+    Este único comando irá:
+    - Construir a imagem do backend (Go).
+    - Construir a imagem do frontend (Next.js), incluindo a instalação de dependências `npm` e o `build`.
+    - Iniciar todos os serviços (backend, frontend, banco de dados e Nginx).
+    - O processo pode demorar alguns minutos na primeira vez.
 
-### Passo 3: Acesse o Wizard de Instalação Visual
+### Acesse o Wizard de Instalação
 
-Pronto! A plataforma já está rodando. Agora, abra seu navegador de internet e acesse:
+Após a conclusão do comando, a plataforma estará rodando. Abra seu navegador e acesse:
 
 ➡️ **http://localhost**
 
-Você será recebido pelo nosso **Wizard de Instalação**, que o guiará visualmente pelo resto do processo:
-
-1.  **Bem-vindo:** Uma tela de introdução.
-2.  **Verificação do Sistema:** O wizard confirmará que tudo está funcionando (como a conexão com o banco de dados que o Docker criou para você).
-3.  **Criação da Conta de Administrador:** Você definirá o nome da sua organização e criará o primeiro usuário administrador.
-4.  **Conclusão:** Tudo pronto! Você será direcionado para a tela de login.
-
-Após concluir o wizard, faça login com as credenciais que você acabou de criar e comece a usar o Phoenix GRC!
+Você será recebido pelo nosso **Wizard de Instalação Visual**, que o guiará na configuração inicial da sua organização e da conta de administrador.
 
 ---
 
 ## Para Desenvolvedores
 
-Se você é um desenvolvedor, toda a documentação técnica (detalhes da API, estrutura do projeto, etc.) está no nosso **[Guia do Desenvolvedor](./DEVELOPER_GUIDE.md)**.
+Se você é um desenvolvedor e deseja entender a arquitetura, as tecnologias utilizadas e como contribuir, consulte nosso **[Guia do Desenvolvedor](./DEVELOPER_GUIDE.md)**.

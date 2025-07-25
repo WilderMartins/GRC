@@ -1,51 +1,52 @@
-# Stage 1: Build a Go binary
+# Estágio 1: Builder - Compila a aplicação Go
 FROM golang:1.24-alpine AS builder
 
-# Set the Current Working Directory inside the container
-WORKDIR /app/backend
-
-# We want to populate the module cache based on the go.mod and go.sum files.
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download && go mod verify
-
-# Copy the source code
-COPY backend/ ./
-
-# Build the Go app
-# The -o /app/server will output the executable to /app/server inside the container
-# CGO_ENABLED=0 produces a statically linked binary (no external C dependencies)
-# -ldflags="-s -w" strips debugging information, reducing binary size
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o /app/server ./cmd/server
-
-# Stage 2: Create the final, small image
-FROM alpine:3.19
-
-# Add ca-certificates in case your app needs to make HTTPS requests
-# Add curl for healthcheck
-# Create a non-root user and group
-RUN apk --no-cache add ca-certificates curl && \
-    addgroup -S appgroup && \
-    adduser -S appuser -G appgroup
-
-# Set the Current Working Directory inside the container
 WORKDIR /app
 
-# Copy the Pre-built binary file from the previous stage
+# Instalar git, que é necessário para o 'go mod download' buscar dependências de repositórios
+RUN apk --no-cache add git
+
+# Copiar apenas os arquivos de gerenciamento de dependências primeiro
+# Isso aproveita o cache do Docker se os arquivos não mudarem
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+# Copiar o restante do código-fonte do backend
+COPY backend/ ./
+
+# Compilar a aplicação
+# -o /app/server: Define o nome e local do arquivo de saída
+# CGO_ENABLED=0: Cria um binário estaticamente linkado
+# -ldflags="-s -w": Remove informações de debug para reduzir o tamanho do binário
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o /app/server ./cmd/server
+
+# Estágio 2: Final - Cria a imagem final, leve e segura
+FROM alpine:3.19
+
+# Instalar ca-certificates para comunicação HTTPS e curl para o healthcheck
+RUN apk --no-cache add ca-certificates curl
+
+# Criar um usuário e grupo não-root para rodar a aplicação
+# Medida de segurança para evitar rodar como root
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+WORKDIR /app
+
+# Copiar o binário compilado do estágio 'builder'
 COPY --from=builder /app/server .
 
-# Chown the application directory and binary to the appuser
+# Definir o usuário não-root como proprietário dos arquivos da aplicação
 RUN chown -R appuser:appgroup /app
 
-# Switch to the non-root user
+# Mudar para o usuário não-root
 USER appuser
 
-# Expose port (default 8080, or set by SERVER_PORT) to the outside world
+# Expor a porta 8080, que é a porta padrão da nossa API
 EXPOSE 8080
 
-# Healthcheck to verify the application is running
-# Note: Adjust port if your application internally listens on a different port than exposed,
-# though for this setup, 8080 is consistently used.
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:8080/health || exit 1
+# Healthcheck para verificar se a aplicação está respondendo
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
 
-# Command to run the executable which is now the Gin HTTP server.
+# Comando para iniciar o servidor da aplicação
 CMD ["./server"]

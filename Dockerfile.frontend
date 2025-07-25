@@ -1,0 +1,33 @@
+# Estágio 1: Build - Compila o frontend Next.js
+FROM node:20-alpine AS builder
+
+# Define o diretório de trabalho dentro do contêiner
+WORKDIR /app
+
+# Copia os arquivos de definição de pacotes
+COPY frontend/package.json frontend/package-lock.json ./
+
+# Instala as dependências do projeto
+RUN npm install
+
+# Copia o restante do código-fonte do frontend
+COPY frontend/ ./
+
+# Gera o build de produção estático
+# O resultado será salvo no diretório /app/out
+RUN npm run build
+
+# Estágio 2: Final - Imagem leve que contém apenas os artefatos de build
+FROM alpine:3.19
+
+# Define o diretório de trabalho
+WORKDIR /app/out
+
+# Copia os arquivos estáticos gerados no estágio de build
+COPY --from=builder /app/out .
+
+# Expõe a porta 3000 (padrão do Next.js), embora não seja usada diretamente pelo Nginx
+EXPOSE 3000
+
+# O comando CMD não é necessário, pois esta imagem serve apenas para
+# fornecer os arquivos estáticos para o contêiner do Nginx.

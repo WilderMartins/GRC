@@ -1,71 +1,88 @@
-version: '3.4'
+version: '3.8'
 
 networks:
   grc_network:
     driver: bridge
 
 services:
+  # Serviço do Backend (Go API)
   backend:
-    networks:
-      - grc_network
     build:
-      context: . # Context is the root of the project
+      context: .
       dockerfile: Dockerfile.backend
     container_name: phoenix_grc_backend
-    depends_on:
-      - db
-    ports:
-      - "${SERVER_PORT:-8080}:8080" # Map host port to container port (default 8080)
-    environment:
-      GIN_MODE: ${GIN_MODE:-debug} # or "release"
-      SERVER_PORT: ${SERVER_PORT:-8080}
-      # Database connection details read by the Go application
-      POSTGRES_HOST: db # Service name of the postgres container
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}
-      POSTGRES_DB: ${POSTGRES_DB:-phoenix_grc_dev}
-      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
-      # For TimeZone=UTC in DSN
-    volumes: []
-    restart: unless-stopped
-
-  db:
     networks:
       - grc_network
-    image: postgres:16.2-alpine # Pinned to a specific patch version
-    container_name: phoenix_grc_db
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}
-      POSTGRES_DB: ${POSTGRES_DB:-phoenix_grc_dev}
-      PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
-      - "postgres_data:/var/lib/postgresql/data/pgdata"
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
-      - "${POSTGRES_PORT:-5432}:5432" # Expose DB port to host
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - SERVER_PORT=${SERVER_PORT:-8080}
+      - POSTGRES_HOST=db
+      - POSTGRES_USER=${POSTGRES_USER:-admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
+      - POSTGRES_DB=${POSTGRES_DB:-phoenix_grc_prod}
+      - POSTGRES_SSLMODE=${POSTGRES_SSLMODE:-disable}
+    restart: unless-stopped
+
+  # Serviço do Banco de Dados (PostgreSQL)
+  db:
+    image: postgres:16.2-alpine
+    container_name: phoenix_grc_db
+    networks:
+      - grc_network
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password123}
+      - POSTGRES_DB=${POSTGRES_DB:-phoenix_grc_prod}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-phoenix_grc_dev}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-phoenix_grc_prod}"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
+  # Serviço do Frontend (Builder)
+  # Este serviço constrói o frontend e seus artefatos (arquivos estáticos).
+  # Ele não é executado continuamente; apenas serve como uma fonte para o Nginx.
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: phoenix_grc_frontend_builder
+    volumes:
+      - frontend_static:/app/out
+    restart: "no" # Não precisa reiniciar, só existe para o build inicial
+
+  # Serviço do Nginx (Proxy Reverso e Servidor Web)
   nginx:
+    image: nginx:1.25-alpine
+    container_name: phoenix_grc_nginx
     networks:
       - grc_network
-    image: nginx:1.25-alpine # Pinned to a specific version
-    container_name: phoenix_grc_nginx
     ports:
-      - "${NGINX_PORT:-80}:80" # Porta HTTP
-      - "443:443" # Porta HTTPS
+      - "${NGINX_PORT:-80}:80"
+      - "443:443"
     volumes:
-      - "./nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
-      - "./nginx/ssl:/etc/nginx/ssl:ro" # Monta os certificados SSL
-      - "./frontend/out:/usr/share/nginx/html/frontend_out:ro"
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      # Monta o volume com os arquivos estáticos construídos pelo serviço 'frontend'
+      - frontend_static:/usr/share/nginx/html
     depends_on:
       - backend
+      - frontend
     restart: unless-stopped
 
 volumes:
   postgres_data:
+    driver: local
+  frontend_static:
     driver: local
