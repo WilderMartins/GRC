@@ -53,5 +53,4 @@ Este script executa um build limpo (sem cache) e irá falhar se houver qualquer 
 ---
 
 ## Para Desenvolvedores
-
 Se você deseja contribuir com o projeto, nosso **[Guia do Desenvolvedor](./DEVELOPER_GUIDE.md)** contém informações detalhadas sobre a arquitetura, como rodar o frontend em modo de desenvolvimento (hot-reload) e os padrões de código.
