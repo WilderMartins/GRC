@@ -14,7 +14,7 @@ import {
 // pois ele lida com os JSONs como strings para os textareas.
 interface IdentityProviderFormData {
   name: string;
-  provider_type: IdentityProviderType; // Usar o tipo importado
+  provider_type: any; // Usar o tipo importado
   is_active: boolean;
   config_json_string: string;
   attribute_mapping_json_string: string;
@@ -36,7 +36,7 @@ const IdentityProviderForm: React.FC<IdentityProviderFormProps> = ({
   const { user } = useAuth();
   const [formData, setFormData] = useState<IdentityProviderFormData>({
     name: '',
-    provider_type: '',
+    provider_type: '' as IdentityProviderType,
     is_active: true,
     config_json_string: '',
     attribute_mapping_json_string: '',
@@ -48,7 +48,7 @@ const IdentityProviderForm: React.FC<IdentityProviderFormProps> = ({
     if (initialData) {
       setFormData({
         name: initialData.name || '',
-        provider_type: initialData.provider_type || '',
+        provider_type: initialData.provider_type || ('' as IdentityProviderType),
         is_active: initialData.is_active === undefined ? true : initialData.is_active,
         config_json_string: initialData.config_json_parsed ? JSON.stringify(initialData.config_json_parsed, null, 2) : '',
         attribute_mapping_json_string: initialData.attribute_mapping_json_parsed ? JSON.stringify(initialData.attribute_mapping_json_parsed, null, 2) : '',
@@ -57,7 +57,7 @@ const IdentityProviderForm: React.FC<IdentityProviderFormProps> = ({
       // Reset para valores padrão para um novo formulário
       setFormData({
         name: '',
-        provider_type: '',
+        provider_type: '' as IdentityProviderType,
         is_active: true,
         config_json_string: '',
         attribute_mapping_json_string: '',
@@ -86,10 +86,16 @@ const IdentityProviderForm: React.FC<IdentityProviderFormProps> = ({
         return;
     }
 
+    if (formData.provider_type === "") {
+        setError("O campo Tipo de Provedor é obrigatório.");
+        setIsLoading(false);
+        return;
+    }
+
     let configJsonParsed, attributeMappingJsonParsed;
     try {
         configJsonParsed = JSON.parse(formData.config_json_string || '{}');
-    } catch (jsonErr) {
+    } catch (jsonErr: any) {
         setError("Configuração JSON inválida: " + jsonErr.message);
         setIsLoading(false);
         return;
@@ -97,7 +103,7 @@ const IdentityProviderForm: React.FC<IdentityProviderFormProps> = ({
     if (formData.attribute_mapping_json_string) {
         try {
             attributeMappingJsonParsed = JSON.parse(formData.attribute_mapping_json_string);
-        } catch (jsonErr) {
+        } catch (jsonErr: any) {
             setError("Mapeamento de Atributos JSON inválido: " + jsonErr.message);
             setIsLoading(false);
             return;

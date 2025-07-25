@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import apiClient from '@/lib/axios';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTranslation } from 'next-i18next';
 
 // Tipos (devem ser consistentes com os modelos do backend)
 const availableEventTypes = [
@@ -29,36 +30,17 @@ interface WebhookConfigForForm {
 }
 
 interface WebhookFormProps {
-  organizationId: string; // Necessário para construir a URL da API
   initialData?: WebhookConfigForForm;
   isEditing?: boolean;
   onSubmitSuccess: (webhookData: any) => void;
+  organizationId: string;
 }
 
 const WebhookForm: React.FC<WebhookFormProps> = ({
-  organizationId,
-  initialData,
-import { useTranslation } from 'next-i18next'; // Importar
-
-// ...
-
-const WebhookForm: React.FC<WebhookFormProps> = ({
-  organizationId,
   initialData,
   isEditing = false,
   onSubmitSuccess,
-}) => {
-  const { t } = useTranslation(['webhooks', 'common']); // Adicionar hook
-  const router = useRouter();
-import { useTranslation } from 'next-i18next';
-
-// ... (outras definições)
-
-const WebhookForm: React.FC<WebhookFormProps> = ({
   organizationId,
-  initialData,
-  isEditing = false,
-  onSubmitSuccess,
 }) => {
   const router = useRouter();
   const { t } = useTranslation(['webhooks', 'common']);

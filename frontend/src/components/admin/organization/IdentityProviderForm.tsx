@@ -287,8 +287,86 @@ const IdentityProviderForm: React.FC<IdentityProviderFormProps> = ({
       </div>
     </>
   );
+}
 
-  const renderAttributeMappingFields = () => (
+const renderSAMLFields = (formData: IdpFormData, handleChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void, t: (key: string) => string) => (
+    <>
+      <div>
+        <label htmlFor="idp_entity_id" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.saml_entity_id_label')}</label>
+        <input type="text" name="idp_entity_id" id="idp_entity_id" value={formData.idp_entity_id} onChange={handleChange} required
+               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+      </div>
+      <div>
+        <label htmlFor="idp_sso_url" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.saml_sso_url_label')}</label>
+        <input type="url" name="idp_sso_url" id="idp_sso_url" value={formData.idp_sso_url} onChange={handleChange} required
+               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+      </div>
+      <div>
+        <label htmlFor="idp_x509_cert" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.saml_x509_cert_label')}</label>
+        <textarea name="idp_x509_cert" id="idp_x509_cert" value={formData.idp_x509_cert} onChange={handleChange} required rows={6}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2 font-mono text-xs"/>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('form.saml_x509_cert_help')}</p>
+      </div>
+      <div className="flex items-start space-x-4">
+        <div className="flex items-center h-5">
+            <input id="sign_request" name="sign_request" type="checkbox" checked={formData.sign_request} onChange={handleChange}
+                    className="focus:ring-brand-primary h-4 w-4 text-brand-primary border-gray-300 rounded"/>
+        </div>
+        <div className="text-sm">
+            <label htmlFor="sign_request" className="font-medium text-gray-700 dark:text-gray-300">{t('form.saml_sign_request_label')}</label>
+            <p className="text-gray-500 dark:text-gray-400 text-xs">{t('form.saml_sign_request_help')}</p>
+        </div>
+      </div>
+       <div className="flex items-start space-x-4">
+        <div className="flex items-center h-5">
+            <input id="want_assertions_signed" name="want_assertions_signed" type="checkbox" checked={formData.want_assertions_signed} onChange={handleChange}
+                    className="focus:ring-brand-primary h-4 w-4 text-brand-primary border-gray-300 rounded"/>
+        </div>
+        <div className="text-sm">
+            <label htmlFor="want_assertions_signed" className="font-medium text-gray-700 dark:text-gray-300">{t('form.saml_want_assertions_signed_label')}</label>
+             <p className="text-gray-500 dark:text-gray-400 text-xs">{t('form.saml_want_assertions_signed_help')}</p>
+        </div>
+      </div>
+    </>
+  );
+
+const renderOAuth2Fields = (formData: IdpFormData, handleChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void, t: (key: string) => string, isEditing: boolean, initialData?: IdentityProvider) => {
+    const isClientSecretRequired = !isEditing || (isEditing && !initialData?.config_json) || (isEditing && initialData.config_json && !JSON.parse(initialData.config_json)?.client_secret);
+    return (
+        <>
+        <div>
+            <label htmlFor="client_id" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.oauth_client_id_label')}</label>
+            <input type="text" name="client_id" id="client_id" value={formData.client_id} onChange={handleChange} required
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+        </div>
+        <div>
+            <label htmlFor="client_secret" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {isEditing && initialData?.config_json && JSON.parse(initialData.config_json)?.client_secret
+                    ? t('form.oauth_client_secret_edit_label')
+                    : t('form.oauth_client_secret_label')}
+            </label>
+            <input type="password" name="client_secret" id="client_secret" value={formData.client_secret} onChange={handleChange}
+                    required={isClientSecretRequired}
+                    placeholder={isEditing && initialData?.config_json && JSON.parse(initialData.config_json)?.client_secret ? t('form.oauth_client_secret_edit_placeholder') : ""}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+            {isEditing && initialData?.config_json && JSON.parse(initialData.config_json)?.client_secret && (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('form.oauth_client_secret_edit_help')}</p>
+            )}
+        </div>
+      </>
+    );
+  };
+      <div>
+        <label htmlFor="scopes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('form.oauth_scopes_label')}</label>
+        <input type="text" name="scopes" id="scopes" value={formData.scopes} onChange={handleChange}
+               placeholder="email,profile"
+               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white p-2"/>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('form.oauth_scopes_help')}</p>
+      </div>
+    </>
+  );
+
+const renderAttributeMappingFields = (formData: IdpFormData, handleChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void, t: (key: string) => string) => (
     <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">{t('form.mapping_title')}</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{t('form.mapping_description')}</p>
